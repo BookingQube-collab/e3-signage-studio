@@ -1,0 +1,172 @@
+openapi: 3.1.0
+info:
+  title: E3 Digital Signage API
+  version: 0.2.0
+  description: |
+    Shared contracts for the Lovable admin CMS and Android TV players.
+    Admin calls use a Supabase session. Devices use a revocable device bearer token.
+    Playback is always from local files — download URLs in manifests are short-lived.
+servers:
+  - url: /api
+    description: TanStack Start API (same origin as admin)
+tags:
+  - name: Admin
+  - name: Devices
+paths:
+  /locations:
+    get:
+      tags: [Admin]
+      summary: List locations
+      responses:
+        "200":
+          description: Location list
+    post:
+      tags: [Admin]
+      summary: Create location
+      responses:
+        "201":
+          description: Created
+  /screens:
+    get:
+      tags: [Admin]
+      summary: List screens (status derived from heartbeats)
+  /screens/{id}/sync:
+    post:
+      tags: [Admin]
+      summary: Request immediate sync (sets sync_requested_at)
+  /media/upload-intent:
+    post:
+      tags: [Admin]
+      summary: Validate file and return a signed upload URL
+  /campaigns/{id}/publish:
+    post:
+      tags: [Admin]
+      summary: Resolve targets, generate per-screen manifests, bump versions
+  /devices/pair:
+    post:
+      tags: [Devices]
+      summary: TV requests a short-lived pairing code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DevicePairRequest"
+      responses:
+        "200":
+          description: Code to show on the pairing screen
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DevicePairResponse"
+  /devices/activate:
+    post:
+      tags: [Devices]
+      summary: TV polls until admin claims the code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceActivateRequest"
+      responses:
+        "200":
+          description: PENDING until claimed, then ACTIVATED with deviceToken
+  /devices/{id}/sync-status:
+    get:
+      tags: [Devices]
+      summary: Lightweight version check — do not fetch the manifest if unchanged
+      security:
+        - deviceToken: []
+      responses:
+        "200":
+          description: Versions only
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceSyncStatus"
+  /devices/{id}/manifest:
+    get:
+      tags: [Devices]
+      summary: Full versioned manifest with short-lived signed download URLs
+      security:
+        - deviceToken: []
+  /devices/{id}/heartbeat:
+    post:
+      tags: [Devices]
+      security:
+        - deviceToken: []
+  /devices/{id}/sync-confirmation:
+    post:
+      tags: [Devices]
+      security:
+        - deviceToken: []
+  /devices/{id}/playback-logs:
+    post:
+      tags: [Devices]
+      summary: Idempotent batch upload (batch_id)
+      security:
+        - deviceToken: []
+  /devices/{id}/error-logs:
+    post:
+      tags: [Devices]
+      security:
+        - deviceToken: []
+components:
+  securitySchemes:
+    adminSession:
+      type: apiKey
+      in: cookie
+      name: sb-access-token
+    deviceToken:
+      type: http
+      scheme: bearer
+  schemas:
+    DevicePairRequest:
+      type: object
+      required: [appVersion]
+      properties:
+        appVersion: { type: string }
+        deviceName: { type: string }
+    DevicePairResponse:
+      type: object
+      required: [code, expiresAt, pollAfterMs]
+      properties:
+        code: { type: string, minLength: 6, maxLength: 6 }
+        expiresAt: { type: string, format: date-time }
+        pollAfterMs: { type: integer }
+    DeviceActivateRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+    DeviceSyncStatus:
+      type: object
+      required: [manifestVersion, configVersion, syncRequested]
+      properties:
+        manifestVersion: { type: integer }
+        configVersion: { type: integer }
+        syncRequested: { type: boolean }
+    ContentManifest:
+      type: object
+      required: [screenId, manifestVersion, configVersion, generatedAt, assets]
+      properties:
+        screenId: { type: string, format: uuid }
+        manifestVersion: { type: integer }
+        configVersion: { type: integer }
+        generatedAt: { type: string, format: date-time }
+        playlist: { type: object, nullable: true }
+        layouts: { type: array, items: { type: object } }
+        schedules: { type: array, items: { type: object } }
+        assets:
+          type: array
+          items:
+            type: object
+            required: [id, version, checksum, fileSize, localFilename, downloadUrl]
+            properties:
+              id: { type: string, format: uuid }
+              version: { type: integer }
+              checksum: { type: string }
+              fileSize: { type: integer }
+              localFilename: { type: string }
+              downloadUrl: { type: string, format: uri }

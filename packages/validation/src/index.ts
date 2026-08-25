@@ -1,0 +1,48 @@
+import { z } from "zod";
+
+export const uuidSchema = z.string().uuid();
+
+export const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
+
+export const isoDateTimeSchema = z.string().datetime({ offset: true });
+
+export const timeOfDaySchema = z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, "Expected HH:MM");
+
+export const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/i, "Expected SHA-256 hex digest");
+
+export const pairingCodeSchema = z
+  .string()
+  .transform((s) => s.replace(/\D/g, ""))
+  .refine((s) => s.length === 6, "Pairing code must be 6 digits");
+
+export const timezoneSchema = z.string().min(1).max(64);
+
+export const paginationSchema = z.object({
+  cursor: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+
+export const nonEmptyNameSchema = z.string().trim().min(1).max(200);
+
+export const mimeTypeSchema = z.string().min(3).max(128);
+
+export const positiveIntSchema = z.number().int().positive();
+
+export const nonNegativeIntSchema = z.number().int().min(0);
+
+export const percentSchema = z.number().min(0).max(100);
+
+export const idempotencyKeySchema = z.string().uuid();
+
+export const storageKeySchema = z.string().min(1).max(1024);
+
+export const ALLOWED_IMAGE_MIME = ["image/jpeg", "image/png", "image/webp"] as const;
+export const ALLOWED_VIDEO_MIME = ["video/mp4"] as const;
+export const ALLOWED_MEDIA_MIME = [...ALLOWED_IMAGE_MIME, ...ALLOWED_VIDEO_MIME] as const;
+
+export const mediaMimeSchema = z.enum(["image/jpeg", "image/png", "image/webp", "video/mp4"]);
+
+export const checksumPayloadSchema = z.object({
+  algorithm: z.literal("SHA-256"),
+  value: sha256Schema,
+});
