@@ -15,10 +15,10 @@ gradlew.bat :app:bundleRelease
 
 | Artifact | Task | Typical path |
 |---|---|---|
-| Debug APK (sideload) | `:app:assembleDebug` | `app/build/outputs/apk/debug/app-debug.apk` |
+| Debug APK (sideload) | `:app:assembleDebug` | `dist/e3-signage-player-<versionName>-debug.apk` |
 | Release AAB (Play / internal app sharing) | `:app:bundleRelease` | `app/build/outputs/bundle/release/app-release.aab` |
 
-Copy the debug APK to `dist/e3-signage-player-debug.apk` for local distribution. `dist/` is gitignored.
+`assembleDebug` (and `assembleRelease`) also copy the APK into the repo `dist/` folder as `e3-signage-player-<versionName>-<buildType>.apk` (currently **0.15.0**). `dist/` is gitignored.
 
 `local.properties` (gitignored; see `local.properties.example`):
 
@@ -40,11 +40,11 @@ Current player version: **0.15.0** (`versionCode` 15).
 
    ```
    adb connect <tv-ip>
-   adb install -r dist/e3-signage-player-debug.apk
+   adb install -r dist/e3-signage-player-0.15.0-debug.apk
    ```
 
 3. Open **E3 Signage** from Apps. Enter the 6-digit pairing code in the CMS **Pair a screen** dialog.
-4. After a version bump, uninstall the previous player if Android refuses the upgrade, then sideload. Pairing tokens stay valid until the 7-day rotation window.
+4. After a version bump, uninstall the previous player if Android refuses the upgrade, then sideload. Pairing tokens stay valid until the 7-day rotation window. To pick up a new launcher icon, uninstall the old APK first — Android TV often keeps a cached generic icon across `-r` reinstalls.
 
 ### Android signage box
 

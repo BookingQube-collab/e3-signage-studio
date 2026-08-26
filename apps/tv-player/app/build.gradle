@@ -59,6 +59,43 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    applicationVariants.configureEach { variant ->
+        variant.outputs.configureEach { output ->
+            output.outputFileName = "e3-signage-player-${variant.versionName}-${variant.buildType.name}.apk"
+        }
+    }
+}
+
+def repoDistDir = new File(rootProject.projectDir, "../../dist").canonicalFile
+
+afterEvaluate {
+    android.applicationVariants.all { variant ->
+        def buildType = variant.buildType.name
+        def versionName = variant.versionName
+        def copyTask = tasks.register("copy${variant.name.capitalize()}ApkToDist") {
+            doLast {
+                def apkName = "e3-signage-player-${versionName}-${buildType}.apk"
+                def apkDir = layout.buildDirectory.dir("outputs/apk/${buildType}").get().asFile
+                def src = new File(apkDir, apkName)
+                if (!src.exists()) {
+                    src = new File(apkDir, "app-${buildType}.apk")
+                }
+                if (!src.exists()) {
+                    throw new GradleException("Player APK not found in ${apkDir}")
+                }
+                repoDistDir.mkdirs()
+                def dest = new File(repoDistDir, apkName)
+                java.nio.file.Files.copy(
+                        src.toPath(),
+                        dest.toPath(),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING
+                )
+                logger.lifecycle("Copied player APK to ${dest} (${dest.length()} bytes)")
+            }
+        }
+        variant.assembleProvider.configure { finalizedBy copyTask }
+    }
 }
 
 dependencies {
