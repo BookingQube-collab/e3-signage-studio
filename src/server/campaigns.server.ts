@@ -3,7 +3,6 @@ import {
   CAMPAIGN_TARGET_TYPES,
   DEVICE_SYNC_STATES,
   EVENT_LOCATION_TYPES,
-  MEDIA_TYPES,
   UI_LABELS,
   type CampaignStatus,
   type CampaignTargetType,
@@ -12,6 +11,7 @@ import {
 } from "@e3/shared-types";
 
 import { daysToNumbers, numbersToDays, uiTime } from "@/lib/schedule-days";
+import { toManifestAssets } from "@/lib/manifest-assets";
 import {
   campaignIdsTargetingScreen,
   resolveTargetScreenIds,
@@ -101,10 +101,6 @@ function isCampaignStatus(value: string): value is CampaignStatus {
 
 function isTargetType(value: string): value is CampaignTargetType {
   return (CAMPAIGN_TARGET_TYPES as readonly string[]).includes(value);
-}
-
-function isMediaType(value: string): value is MediaType {
-  return (MEDIA_TYPES as readonly string[]).includes(value);
 }
 
 function isSyncState(value: string): value is DeviceSyncState {
@@ -436,28 +432,23 @@ async function collectAssets(
         .in("id", versionIds)
     : { data: [] as Array<Record<string, unknown>>, error: null };
   throwIfError(versionError, "Could not load media versions.");
-  const versionById = new Map(
-    (versions ?? []).map((row) => [asString((row as { id: string }).id), row as Record<string, unknown>]),
+  return toManifestAssets(
+    (mediaRows ?? []).map((raw) => {
+      const row = raw as Record<string, unknown>;
+      return {
+        id: asString(row["id"]),
+        name: asString(row["name"], asString(row["id"])),
+        type: asString(row["type"], "IMAGE"),
+        currentVersionId: asNullableString(row["current_version_id"]),
+        status: asString(row["status"]),
+      };
+    }),
+    (versions ?? []).map((row) => ({
+      id: asString(row["id"]),
+      checksumSha256: asString(row["checksum_sha256"]),
+      sizeBytes: asNumber(row["size_bytes"]),
+    })),
   );
-  const assets: ManifestAsset[] = [];
-  for (const raw of mediaRows ?? []) {
-    const row = raw as Record<string, unknown>;
-    if (asString(row["status"]) !== "READY") continue;
-    const versionId = asNullableString(row["current_version_id"]);
-    if (!versionId) continue;
-    const version = versionById.get(versionId);
-    if (!version) continue;
-    const type = asString(row["type"], "IMAGE");
-    assets.push({
-      mediaId: asString(row["id"]),
-      mediaVersionId: versionId,
-      checksumSha256: asString(version["checksum_sha256"]),
-      fileSize: asNumber(version["size_bytes"]),
-      localFilename: asString(row["name"], asString(row["id"])),
-      assetType: isMediaType(type) ? type : "IMAGE",
-    });
-  }
-  return assets;
 }
 
 function visibleToProfile(

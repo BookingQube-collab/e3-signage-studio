@@ -2,6 +2,8 @@
 
 This project was built with [Lovable](https://lovable.dev).
 
+Hosted CMS: [https://e3-cms.vercel.app](https://e3-cms.vercel.app). Deploy, Android sideload, device support, and the physical test matrix: [`docs/`](docs/deployment.md).
+
 ## Build with Lovable
 
 Open your project in the [Lovable editor](https://lovable.dev) and keep building.

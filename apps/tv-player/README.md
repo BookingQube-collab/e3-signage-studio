@@ -1,8 +1,8 @@
-# E3 TV Player (Phase 12)
+# E3 TV Player (Phase 15)
 
 Android / Google TV player: pairing, encrypted device token, differential package download, and local `file://` playback.
 
-Heartbeat, queued logs, and proof of play are live (Phase 12). The CMS shows **ONLINE** when a heartbeat arrived in the last **5 minutes**. Play Store / device matrix docs are Phase 15.
+Heartbeat, queued logs, and proof of play are live. The CMS shows **ONLINE** when a heartbeat arrived in the last **5 minutes**. Deploy, sideload, device support, and the physical test matrix are in [`docs/`](../../docs/android-player.md).
 
 ## Requirements
 
@@ -73,3 +73,9 @@ gradlew.bat :core:test
 ```
 
 Fonts: Rajdhani and Space Grotesk (SIL Open Font License).
+
+## Deploy / device matrix (Phase 15)
+
+- [`docs/deployment.md`](../../docs/deployment.md) — env, migrations, storage, Vercel, rollback
+- [`docs/android-player.md`](../../docs/android-player.md) — APK/AAB, sideload, minimums, vendor kiosk limits
+- [`docs/device-test-matrix.md`](../../docs/device-test-matrix.md) — 12 physical-device cases

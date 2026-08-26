@@ -32,6 +32,22 @@ class DownloadPlanTest {
     }
 
     @Test
+    fun changedImageDoesNotRedownloadUnchanged500mbVideo() {
+        val assets = listOf(
+            asset("video", 1, "aaa", "loop_v1.mp4", 500L * 1024L * 1024L),
+            asset("image", 2, "bbb", "hero_v2.jpg", 2L * 1024L * 1024L),
+        )
+        val inventory = listOf(
+            LocalAssetRecord("video", 1, "aaa", filePresent = true),
+            LocalAssetRecord("image", 1, "old", filePresent = true),
+        )
+        val plan = planDownloads(assets, inventory)
+        assertEquals(listOf("video"), plan.toSkip.map { it.id })
+        assertEquals(listOf("image"), plan.toFetch.map { it.id })
+        assertEquals(2L * 1024L * 1024L, plan.neededBytes)
+    }
+
+    @Test
     fun progressUsesNeededBytesNotWholeLibrary() {
         assertEquals(0, progressPercent(0, 1_000))
         assertEquals(63, progressPercent(630, 1_000))

@@ -62,6 +62,20 @@ class LocalPackageStore(
     fun readManifestFile(file: File): ContentManifest? =
         runCatching { json.decodeFromString<ContentManifest>(file.readText()) }.getOrNull()
 
+    suspend fun keepAssets(): List<ManifestAsset> {
+        val keepStates = setOf(ContentPackageState.ACTIVE.name, ContentPackageState.READY.name)
+        val byKey = linkedMapOf<String, ManifestAsset>()
+        for (row in db.contentPackageDao().all()) {
+            if (row.state !in keepStates) continue
+            val file = row.manifestPath?.takeIf { it.isNotBlank() }?.let { File(it) } ?: continue
+            val manifest = readManifestFile(file) ?: continue
+            for (asset in manifest.assets) {
+                byKey["${asset.id}:${asset.version}"] = asset
+            }
+        }
+        return byKey.values.toList()
+    }
+
     suspend fun inventory(): List<LocalAssetRecord> {
         return db.mediaAssetDao().all().map { row ->
             LocalAssetRecord(

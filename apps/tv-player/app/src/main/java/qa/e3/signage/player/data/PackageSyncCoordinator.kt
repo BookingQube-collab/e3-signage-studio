@@ -20,6 +20,7 @@ import qa.e3.signage.player.core.firstInvalidAsset
 import qa.e3.signage.player.core.persistRotatedToken
 import qa.e3.signage.player.core.planDownloads
 import qa.e3.signage.player.core.progressPercent
+import qa.e3.signage.player.core.pruneUnusedStorage
 import qa.e3.signage.player.core.shouldFetchManifest
 import qa.e3.signage.player.core.versionedManifestFile
 import java.io.File
@@ -217,6 +218,10 @@ class PackageSyncCoordinator(
         }
         val outcome = packages.switchActive(manifest.manifestVersion, path)
         confirm(credentials, manifest.manifestVersion, ContentPackageState.ACTIVE)
+        val pruned = pruneUnusedStorage(filesDir, packages.keepAssets(), filesDir.usableSpace)
+        if (pruned.deleted.isNotEmpty()) {
+            Log.i(TAG, "pruned ${pruned.deleted.size} unused files; kept ${pruned.kept.size} active assets")
+        }
         Log.i(TAG, "ACTIVE v${outcome.activeVersion}; previous=${outcome.previousVersion ?: "none"}")
         onActivated()
         _activations.tryEmit(outcome.activeVersion)

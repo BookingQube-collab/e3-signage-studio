@@ -49,6 +49,23 @@ test("expands location, group, and org targets and skips disabled screens", () =
   assert.deepEqual(resolveTargetScreenIds([{ type: "SCREEN", targetId: "s2" }], screens, groups), []);
 });
 
+test("offline screens still receive the campaign independently of disabled ones", () => {
+  const mixed = [
+    ...screens,
+    {
+      id: "s4",
+      locationId: "loc-b",
+      organizationId: "org-1",
+      operationalStatus: "ERROR",
+      archivedAt: null,
+    },
+  ];
+  assert.deepEqual(
+    resolveTargetScreenIds([{ type: "ORGANIZATION", targetId: "org-1" }], mixed, groups).sort(),
+    ["s1", "s3", "s4"],
+  );
+});
+
 test("finds campaigns that include a screen via any target type", () => {
   const ids = campaignIdsTargetingScreen(
     screens[0]!,
