@@ -5,6 +5,7 @@ import {
   deleteMediaBulkFn,
   deleteMediaFolderFn,
   deleteMediaFn,
+  discardIncompleteMediaFn,
   getMediaFn,
   listMediaFoldersFn,
   listMediaFn,
@@ -15,6 +16,7 @@ import {
   archiveMediaFn,
 } from "@/lib/media-functions";
 import { assertUploadSize, inferMediaMime } from "@/lib/media-file";
+import { clientUploadDedupeKey } from "@/lib/media-upload-lifecycle";
 import { describeBrowserUploadFailure } from "@/lib/media-upload-error";
 import { probeMediaDimensions, sha256HexOfBlob } from "@/lib/media-hash";
 import { getBrowserAccessToken } from "@/lib/supabase";
@@ -77,42 +79,90 @@ function putWithProgress(
   });
 }
 
+const inFlightUploads = new Map<string, Promise<Media>>();
+
+async function discardIntent(intent: { mediaId: string; mediaVersionId: string }): Promise<void> {
+  try {
+    await discardIncompleteMediaFn({
+      data: {
+        accessToken: await accessToken(),
+        mediaId: intent.mediaId,
+        mediaVersionId: intent.mediaVersionId,
+      },
+    });
+  } catch {
+    // Row may already be gone; the library hides incomplete uploads either way.
+  }
+}
+
 async function uploadOne(
   file: File,
   mediaId: string | null,
   onProgress?: (percent: number) => void,
   folderId?: string | null,
 ): Promise<Media> {
-  const mime = inferMediaMime(file.name, file.type);
-  if (!mime) {
-    throw new Error(`Unsupported file type: ${file.name}. Use JPEG, PNG, WebP, or MP4.`);
+  const key = clientUploadDedupeKey({
+    mediaId,
+    folderId,
+    name: file.name,
+    size: file.size,
+    lastModified: file.lastModified,
+  });
+  const existing = inFlightUploads.get(key);
+  if (existing) return existing;
+
+  const run = (async () => {
+    const mime = inferMediaMime(file.name, file.type);
+    if (!mime) {
+      throw new Error(`Unsupported file type: ${file.name}. Use JPEG, PNG, WebP, or MP4.`);
+    }
+    assertUploadSize(mime, file.size);
+    onProgress?.(0);
+    const [checksumSha256, probe] = await Promise.all([sha256HexOfBlob(file), probeMediaDimensions(file)]);
+    let intent: {
+      mediaId: string;
+      mediaVersionId: string;
+      uploadUrl: string;
+      uploadMethod: "PUT" | "POST";
+      uploadHeaders: Record<string, string>;
+    } | null = null;
+    try {
+      intent = await createMediaUploadIntentFn({
+        data: {
+          accessToken: await accessToken(),
+          filename: file.name,
+          mimeType: mime,
+          sizeBytes: file.size,
+          checksumSha256,
+          width: probe.width,
+          height: probe.height,
+          durationMs: probe.durationMs,
+          mediaId,
+          folderId: mediaId ? null : (folderId ?? null),
+        },
+      });
+      await putWithProgress(intent.uploadUrl, intent.uploadMethod, file, intent.uploadHeaders, onProgress);
+    } catch (error) {
+      if (intent && !mediaId) await discardIntent(intent);
+      throw error;
+    }
+    if (!intent) throw new Error("Upload session not found.");
+    const row = await completeMediaUploadFn({
+      data: {
+        accessToken: await accessToken(),
+        mediaVersionId: intent.mediaVersionId,
+        checksumSha256,
+      },
+    });
+    return toUiMedia(row);
+  })();
+
+  inFlightUploads.set(key, run);
+  try {
+    return await run;
+  } finally {
+    inFlightUploads.delete(key);
   }
-  assertUploadSize(mime, file.size);
-  onProgress?.(0);
-  const [checksumSha256, probe] = await Promise.all([sha256HexOfBlob(file), probeMediaDimensions(file)]);
-  const intent = await createMediaUploadIntentFn({
-    data: {
-      accessToken: await accessToken(),
-      filename: file.name,
-      mimeType: mime,
-      sizeBytes: file.size,
-      checksumSha256,
-      width: probe.width,
-      height: probe.height,
-      durationMs: probe.durationMs,
-      mediaId,
-      folderId: mediaId ? null : (folderId ?? null),
-    },
-  });
-  await putWithProgress(intent.uploadUrl, intent.uploadMethod, file, intent.uploadHeaders, onProgress);
-  const row = await completeMediaUploadFn({
-    data: {
-      accessToken: await accessToken(),
-      mediaVersionId: intent.mediaVersionId,
-      checksumSha256,
-    },
-  });
-  return toUiMedia(row);
 }
 
 export const liveMediaService: MediaService = {

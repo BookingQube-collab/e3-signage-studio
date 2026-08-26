@@ -100,6 +100,7 @@ function MediaPage() {
       files: File[];
       onProgress: (fileName: string, percent: number) => void;
     }) => mediaService.upload(files, onProgress, resolveUploadFolderId(folderId)),
+    retry: 0,
     onSuccess: (added) => {
       toast.success(`${added.length} file${added.length > 1 ? "s" : ""} uploaded`);
     },
@@ -174,6 +175,7 @@ function MediaPage() {
 
   const replace = useMutation({
     mutationFn: ({ id, file }: { id: string; file: File }) => mediaService.replace(id, file),
+    retry: 0,
     onSuccess: (m) => {
       void qc.invalidateQueries({ queryKey: ["media"] });
       setSelected(m);

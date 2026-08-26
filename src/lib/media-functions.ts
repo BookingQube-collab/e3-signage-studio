@@ -59,6 +59,21 @@ export const completeMediaUploadFn = createServerFn({ method: "POST" })
     });
   });
 
+export const discardIncompleteMediaFn = createServerFn({ method: "POST" })
+  .validator(
+    accessTokenSchema.extend({
+      mediaId: z.string().uuid(),
+      mediaVersionId: z.string().uuid(),
+    }),
+  )
+  .handler(async ({ data }): Promise<boolean> => {
+    const { discardIncompleteUpload } = await import("@/server/media.server");
+    return discardIncompleteUpload(data.accessToken, {
+      mediaId: data.mediaId,
+      mediaVersionId: data.mediaVersionId,
+    });
+  });
+
 export const renameMediaFn = createServerFn({ method: "POST" })
   .validator(
     accessTokenSchema.extend({

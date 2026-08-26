@@ -1,4 +1,5 @@
 import {
+  hasPermission,
   MEDIA_STATUSES,
   MEDIA_TYPES,
   type MediaStatus,
@@ -27,6 +28,12 @@ import {
   assertFolderName,
   isDuplicateFolderName,
 } from "../lib/media-folders";
+import {
+  incompleteVersionReusable,
+  isVisibleLibraryStatus,
+  shouldDiscardIncompleteMedia,
+  shouldPurgeAbandonedUpload,
+} from "../lib/media-upload-lifecycle";
 import { requireCmsPermission } from "./auth.server";
 import type { MediaFolderRow, MediaRow, MediaVersionRow } from "./db/types";
 import { getServerEnv } from "./env.server";
@@ -357,7 +364,7 @@ async function visibleFileCount(
     .select("id", { count: "exact", head: true })
     .eq("folder_id", folderId)
     .is("archived_at", null)
-    .neq("status", "ARCHIVED");
+    .eq("status", "READY");
   throwIfError(error, "Could not count folder files.");
   return count ?? 0;
 }
@@ -377,12 +384,15 @@ async function toFolderRecord(
 export async function listMedia(accessToken: string): Promise<MediaRecord[]> {
   const auth = await requireCmsPermission(accessToken, "media.view");
   const client = getUserClient(accessToken);
+  if (hasPermission(auth.profile.role, "media.manage")) {
+    await purgeAbandonedUploads(client, auth.profile.organizationId);
+  }
   const { data, error } = await client
     .from("media")
     .select(MEDIA_SELECT)
     .eq("organization_id", auth.profile.organizationId)
     .is("archived_at", null)
-    .neq("status", "ARCHIVED")
+    .eq("status", "READY")
     .order("created_at", { ascending: false });
   throwIfError(error, "Could not load media.");
   const rows = (data ?? []).map((row) => mapMedia(row as Record<string, unknown>));
@@ -393,7 +403,7 @@ export async function getMedia(accessToken: string, id: string): Promise<MediaRe
   const auth = await requireCmsPermission(accessToken, "media.view");
   const client = getUserClient(accessToken);
   const row = await getMediaRow(client, id, auth.profile.organizationId);
-  if (!row || row.archived_at) return null;
+  if (!row || row.archived_at || !isVisibleLibraryStatus(row.status)) return null;
   const records = await toRecords(client, [row]);
   return records[0] ?? null;
 }
@@ -420,6 +430,125 @@ export type UploadIntentResult = {
   uploadHeaders: Record<string, string>;
   expiresInSeconds: number;
 };
+
+async function findReusableIncompleteUpload(
+  client: ReturnType<typeof getUserClient>,
+  organizationId: string,
+  checksum: string,
+  sizeBytes: number,
+  mimeType: string,
+): Promise<{ media: MediaRow; version: MediaVersionRow } | null> {
+  const { data: mediaRaw, error: mediaError } = await client
+    .from("media")
+    .select(MEDIA_SELECT)
+    .eq("organization_id", organizationId)
+    .in("status", ["PROCESSING", "FAILED"])
+    .is("archived_at", null)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  throwIfError(mediaError, "Could not look up pending uploads.");
+  const mediaRows = (mediaRaw ?? []).map((row) => mapMedia(row as Record<string, unknown>));
+  if (mediaRows.length === 0) return null;
+
+  const { data: versionRaw, error: versionError } = await client
+    .from("media_versions")
+    .select(VERSION_SELECT)
+    .in(
+      "media_id",
+      mediaRows.map((row) => row.id),
+    )
+    .eq("checksum_sha256", checksum)
+    .eq("size_bytes", sizeBytes)
+    .in("status", ["PROCESSING", "FAILED"])
+    .order("created_at", { ascending: false });
+  throwIfError(versionError, "Could not look up pending upload versions.");
+
+  const mediaById = new Map(mediaRows.map((row) => [row.id, row]));
+  for (const raw of versionRaw ?? []) {
+    const version = mapVersion(raw as Record<string, unknown>);
+    const media = mediaById.get(version.media_id);
+    if (!media) continue;
+    if (media.current_version_id && media.current_version_id !== version.id) continue;
+    if (
+      !incompleteVersionReusable({
+        checksum,
+        sizeBytes,
+        mimeType,
+        versionChecksum: version.checksum_sha256,
+        versionSizeBytes: version.size_bytes,
+        versionMimeType: version.mime_type,
+        versionStatus: version.status,
+      })
+    ) {
+      continue;
+    }
+    return { media, version };
+  }
+  return null;
+}
+
+async function failOrDiscardUpload(
+  client: ReturnType<typeof getUserClient>,
+  media: MediaRow,
+  version: MediaVersionRow,
+): Promise<void> {
+  if (
+    shouldDiscardIncompleteMedia({
+      mediaStatus: media.status,
+      currentVersionId: media.current_version_id,
+      failedVersionId: version.id,
+    })
+  ) {
+    await purgeMediaRow(client, media.id);
+    return;
+  }
+  await client.from("media_versions").update({ status: "FAILED" }).eq("id", version.id);
+  const restoreReady = Boolean(media.current_version_id && media.current_version_id !== version.id);
+  await client
+    .from("media")
+    .update({ status: restoreReady ? "READY" : "FAILED" })
+    .eq("id", media.id);
+}
+
+async function purgeAbandonedUploads(
+  client: ReturnType<typeof getUserClient>,
+  organizationId: string,
+): Promise<void> {
+  const { data, error } = await client
+    .from("media")
+    .select("id, status, created_at, current_version_id")
+    .eq("organization_id", organizationId)
+    .in("status", ["PROCESSING", "FAILED"])
+    .is("archived_at", null)
+    .limit(50);
+  if (error || !data) return;
+  const nowMs = Date.now();
+  const processingTtlMs = UPLOAD_URL_TTL_SECONDS * 1000;
+  for (const raw of data) {
+    const id = asString((raw as { id: string }).id);
+    const status = asString((raw as { status: string }).status);
+    const createdAt = asString((raw as { created_at: string }).created_at);
+    const currentVersionId = asNullableString(
+      (raw as { current_version_id: string | null }).current_version_id,
+    );
+    if (currentVersionId) continue;
+    if (
+      !shouldPurgeAbandonedUpload({
+        status,
+        createdAtIso: createdAt,
+        nowMs,
+        processingTtlMs,
+      })
+    ) {
+      continue;
+    }
+    try {
+      await purgeMediaRow(client, id);
+    } catch {
+      // Listing must still succeed if one abandoned row cannot be deleted.
+    }
+  }
+}
 
 export async function createUploadIntent(
   accessToken: string,
@@ -471,6 +600,55 @@ export async function createUploadIntent(
       .eq("id", mediaId);
     throwIfError(touchError, "Could not update media.");
   } else {
+    const reusable = await findReusableIncompleteUpload(
+      client,
+      orgId,
+      checksum,
+      input.sizeBytes,
+      input.mimeType,
+    );
+    if (reusable) {
+      const folderId = await requireFolderId(client, orgId, input.folderId);
+      const { error: reuseError } = await client
+        .from("media")
+        .update({
+          name: filename,
+          type,
+          mime_type: input.mimeType,
+          status: "PROCESSING",
+          folder_id: folderId,
+          uploaded_by: auth.userId,
+        })
+        .eq("id", reusable.media.id);
+      throwIfError(reuseError, "Could not resume media upload.");
+      const { error: versionReuseError } = await client
+        .from("media_versions")
+        .update({
+          status: "PROCESSING",
+          width: input.width,
+          height: input.height,
+          duration_ms: input.durationMs,
+          mime_type: input.mimeType,
+        })
+        .eq("id", reusable.version.id);
+      throwIfError(versionReuseError, "Could not resume media upload.");
+      const signed = await createObjectUploadUrl(
+        reusable.version.storage_key,
+        input.mimeType,
+        accessToken,
+      );
+      return {
+        mediaId: reusable.media.id,
+        mediaVersionId: reusable.version.id,
+        versionNumber: reusable.version.version_number,
+        storageKey: reusable.version.storage_key,
+        uploadUrl: signed.url,
+        uploadMethod: signed.method,
+        uploadHeaders: signed.headers,
+        expiresInSeconds: signed.expiresInSeconds || UPLOAD_URL_TTL_SECONDS,
+      };
+    }
+
     const folderId = await requireFolderId(client, orgId, input.folderId);
     const { data, error } = await client
       .from("media")
@@ -574,13 +752,11 @@ export async function completeUpload(
 
   const stat = await statWithRetry(version.storage_key);
   if (!stat) {
-    await client.from("media_versions").update({ status: "FAILED" }).eq("id", version.id);
-    await client.from("media").update({ status: "FAILED" }).eq("id", media.id);
+    await failOrDiscardUpload(client, media, version);
     throw new Error("Upload did not reach storage. Try again.");
   }
   if (stat.sizeBytes >= 0 && stat.sizeBytes !== version.size_bytes) {
-    await client.from("media_versions").update({ status: "FAILED" }).eq("id", version.id);
-    await client.from("media").update({ status: "FAILED" }).eq("id", media.id);
+    await failOrDiscardUpload(client, media, version);
     throw new Error("Uploaded file size does not match.");
   }
 
@@ -607,6 +783,30 @@ export async function completeUpload(
   const result = records[0];
   if (!result) throw new Error("Media not found.");
   return result;
+}
+
+export async function discardIncompleteUpload(
+  accessToken: string,
+  input: { mediaId: string; mediaVersionId: string },
+): Promise<boolean> {
+  const auth = await requireCmsPermission(accessToken, "media.manage");
+  const client = getUserClient(accessToken);
+  const media = await getMediaRow(client, input.mediaId, auth.profile.organizationId);
+  if (!media) return true;
+  const { data: versionRaw, error } = await client
+    .from("media_versions")
+    .select(VERSION_SELECT)
+    .eq("id", input.mediaVersionId)
+    .maybeSingle();
+  throwIfError(error, "Could not load media version.");
+  if (!versionRaw) return true;
+  const version = mapVersion(versionRaw as Record<string, unknown>);
+  if (version.media_id !== media.id) throw new Error("Upload session not found.");
+  if (version.status === "READY" && media.current_version_id === version.id) {
+    return true;
+  }
+  await failOrDiscardUpload(client, media, version);
+  return true;
 }
 
 export async function renameMedia(
@@ -791,7 +991,7 @@ export async function listFolders(accessToken: string): Promise<MediaFolderRecor
     .select("folder_id")
     .eq("organization_id", orgId)
     .is("archived_at", null)
-    .neq("status", "ARCHIVED")
+    .eq("status", "READY")
     .not("folder_id", "is", null);
   throwIfError(countError, "Could not count folder files.");
   const counts = new Map<string, number>();
