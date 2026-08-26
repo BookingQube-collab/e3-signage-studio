@@ -98,6 +98,15 @@ export type DeviceSyncStateRow = {
   updated_at: string;
 };
 
+export type MediaFolderRow = {
+  id: string;
+  organization_id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+};
+
 export type MediaRow = {
   id: string;
   organization_id: string;
@@ -107,6 +116,7 @@ export type MediaRow = {
   current_version_id: string | null;
   status: string;
   archived_at: string | null;
+  folder_id: string | null;
   created_at: string;
   updated_at: string;
   created_by: string | null;

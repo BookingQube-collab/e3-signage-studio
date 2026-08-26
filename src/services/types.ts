@@ -8,6 +8,7 @@ import type {
   Layout,
   Location,
   Media,
+  MediaFolder,
   Playlist,
   ProofOfPlayRow,
   Screen,
@@ -75,12 +76,20 @@ export type MediaUploadProgress = (fileName: string, percent: number) => void;
 export type MediaService = {
   list: () => Promise<Media[]>;
   get: (id: string) => Promise<Media | null>;
-  upload: (files: File[], onProgress?: MediaUploadProgress) => Promise<Media[]>;
+  upload: (
+    files: File[],
+    onProgress?: MediaUploadProgress,
+    folderId?: string | null,
+  ) => Promise<Media[]>;
   replace: (id: string, file: File, onProgress?: (percent: number) => void) => Promise<Media>;
   rename: (id: string, filename: string) => Promise<Media>;
   archive: (id: string) => Promise<Media>;
   remove: (id: string) => Promise<boolean>;
   downloadUrl: (id: string) => Promise<{ url: string; filename: string }>;
+  listFolders: () => Promise<MediaFolder[]>;
+  createFolder: (name: string) => Promise<MediaFolder>;
+  deleteFolder: (id: string) => Promise<boolean>;
+  moveToFolder: (id: string, folderId: string | null) => Promise<Media>;
 };
 
 export type PlaylistService = {

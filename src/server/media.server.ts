@@ -6,9 +6,15 @@ import {
 } from "@e3/shared-types";
 import type { AllowedMediaMime } from "@e3/validation";
 
-import type { MediaRecord } from "@/services/media-map";
+import type { MediaFolderRecord, MediaRecord } from "@/services/media-map";
+import {
+  FOLDER_DUPLICATE_MESSAGE,
+  assertFolderDeletable,
+  assertFolderName,
+  isDuplicateFolderName,
+} from "../lib/media-folders";
 import { requireCmsPermission } from "./auth.server";
-import type { MediaRow, MediaVersionRow } from "./db/types";
+import type { MediaFolderRow, MediaRow, MediaVersionRow } from "./db/types";
 import { buildStorageKey, hueFromChecksum, mediaTypeFromMime, normalizeChecksum, safeMediaFilename } from "../lib/media-file";
 import {
   createObjectDownloadUrl,
@@ -22,7 +28,8 @@ import {
 import { getUserClient } from "./supabase.server";
 
 const MEDIA_SELECT =
-  "id, organization_id, name, type, mime_type, current_version_id, status, archived_at, created_at, updated_at, created_by, uploaded_by";
+  "id, organization_id, name, type, mime_type, current_version_id, status, archived_at, folder_id, created_at, updated_at, created_by, uploaded_by";
+const FOLDER_SELECT = "id, organization_id, name, created_at, updated_at, created_by";
 const VERSION_SELECT =
   "id, media_id, version_number, storage_key, thumbnail_key, size_bytes, width, height, duration_ms, checksum_sha256, mime_type, status, created_at, created_by";
 
@@ -104,6 +111,18 @@ function mapMedia(row: Record<string, unknown>): MediaRow {
     updated_at: asString(row["updated_at"]),
     created_by: asNullableString(row["created_by"]),
     uploaded_by: asNullableString(row["uploaded_by"]),
+    folder_id: asNullableString(row["folder_id"]),
+  };
+}
+
+function mapFolder(row: Record<string, unknown>): MediaFolderRow {
+  return {
+    id: asString(row["id"]),
+    organization_id: asString(row["organization_id"]),
+    name: asString(row["name"]),
+    created_at: asString(row["created_at"]),
+    updated_at: asString(row["updated_at"]),
+    created_by: asNullableString(row["created_by"]),
   };
 }
 
@@ -180,13 +199,21 @@ async function toRecords(
     ...new Set(mediaRows.map((row) => row.uploaded_by).filter((id): id is string => Boolean(id))),
   ];
 
-  const [{ data: versionRows, error: versionError }, { data: users }, usedIn] = await Promise.all([
-    client.from("media_versions").select(VERSION_SELECT).in("media_id", ids),
-    uploaderIds.length > 0
-      ? client.from("users").select("id, name").in("id", uploaderIds)
-      : Promise.resolve({ data: [] as Array<{ id: string; name: string }> }),
-    loadUsedIn(client, ids),
-  ]);
+  const folderIds = [
+    ...new Set(mediaRows.map((row) => row.folder_id).filter((id): id is string => Boolean(id))),
+  ];
+
+  const [{ data: versionRows, error: versionError }, { data: users }, { data: folderRows }, usedIn] =
+    await Promise.all([
+      client.from("media_versions").select(VERSION_SELECT).in("media_id", ids),
+      uploaderIds.length > 0
+        ? client.from("users").select("id, name").in("id", uploaderIds)
+        : Promise.resolve({ data: [] as Array<{ id: string; name: string }> }),
+      folderIds.length > 0
+        ? client.from("media_folders").select("id, name").in("id", folderIds)
+        : Promise.resolve({ data: [] as Array<{ id: string; name: string }> }),
+      loadUsedIn(client, ids),
+    ]);
   throwIfError(versionError, "Could not load media versions.");
 
   const versionsByMedia = new Map<string, MediaVersionRow[]>();
@@ -200,6 +227,10 @@ async function toRecords(
   const names = new Map<string, string>();
   for (const row of users ?? []) {
     names.set(asString((row as { id: string }).id), asString((row as { name: string }).name));
+  }
+  const folderNames = new Map<string, string>();
+  for (const row of folderRows ?? []) {
+    folderNames.set(asString((row as { id: string }).id), asString((row as { name: string }).name));
   }
 
   const previewKeys: string[] = [];
@@ -239,6 +270,8 @@ async function toRecords(
       thumbnailHue: hueFromChecksum(checksum),
       thumbnailUrl: image ? (urls.get(image) ?? null) : null,
       previewUrl: previewKey ? (urls.get(previewKey) ?? null) : null,
+      folderId: row.folder_id,
+      folderName: row.folder_id ? (folderNames.get(row.folder_id) ?? null) : null,
       usedIn: usedIn.get(row.id) ?? { playlists: [], campaigns: [], screens: [] },
     };
   });
@@ -257,6 +290,58 @@ async function getMediaRow(
     .maybeSingle();
   throwIfError(error, "Could not load media.");
   return data ? mapMedia(data as Record<string, unknown>) : null;
+}
+
+async function getFolderRow(
+  client: ReturnType<typeof getUserClient>,
+  id: string,
+  organizationId: string,
+): Promise<MediaFolderRow | null> {
+  const { data, error } = await client
+    .from("media_folders")
+    .select(FOLDER_SELECT)
+    .eq("id", id)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  throwIfError(error, "Could not load folder.");
+  return data ? mapFolder(data as Record<string, unknown>) : null;
+}
+
+async function requireFolderId(
+  client: ReturnType<typeof getUserClient>,
+  organizationId: string,
+  folderId: string | null | undefined,
+): Promise<string | null> {
+  if (!folderId) return null;
+  const folder = await getFolderRow(client, folderId, organizationId);
+  if (!folder) throw new Error("Folder not found.");
+  return folder.id;
+}
+
+async function visibleFileCount(
+  client: ReturnType<typeof getUserClient>,
+  folderId: string,
+): Promise<number> {
+  const { count, error } = await client
+    .from("media")
+    .select("id", { count: "exact", head: true })
+    .eq("folder_id", folderId)
+    .is("archived_at", null)
+    .neq("status", "ARCHIVED");
+  throwIfError(error, "Could not count folder files.");
+  return count ?? 0;
+}
+
+async function toFolderRecord(
+  client: ReturnType<typeof getUserClient>,
+  row: MediaFolderRow,
+): Promise<MediaFolderRecord> {
+  return {
+    id: row.id,
+    name: row.name,
+    createdAt: dateLabel(row.created_at),
+    fileCount: await visibleFileCount(client, row.id),
+  };
 }
 
 export async function listMedia(accessToken: string): Promise<MediaRecord[]> {
@@ -292,6 +377,7 @@ export type UploadIntentInput = {
   height: number | null;
   durationMs: number | null;
   mediaId: string | null;
+  folderId: string | null;
 };
 
 export type UploadIntentResult = {
@@ -354,6 +440,7 @@ export async function createUploadIntent(
       .eq("id", mediaId);
     throwIfError(touchError, "Could not update media.");
   } else {
+    const folderId = await requireFolderId(client, orgId, input.folderId);
     const { data, error } = await client
       .from("media")
       .insert({
@@ -362,6 +449,7 @@ export async function createUploadIntent(
         type,
         mime_type: input.mimeType,
         status: "PROCESSING",
+        folder_id: folderId,
         created_by: auth.userId,
         uploaded_by: auth.userId,
       })
@@ -602,6 +690,100 @@ export async function mediaDownloadUrl(
   }
   const url = await createObjectDownloadUrl(storageKey, 300);
   return { url, filename: media.name };
+}
+
+export async function listFolders(accessToken: string): Promise<MediaFolderRecord[]> {
+  const auth = await requireCmsPermission(accessToken, "media.view");
+  const client = getUserClient(accessToken);
+  const orgId = auth.profile.organizationId;
+  const { data, error } = await client
+    .from("media_folders")
+    .select(FOLDER_SELECT)
+    .eq("organization_id", orgId)
+    .order("name", { ascending: true });
+  throwIfError(error, "Could not load folders.");
+  const folders = (data ?? []).map((row) => mapFolder(row as Record<string, unknown>));
+  if (folders.length === 0) return [];
+
+  const { data: mediaRows, error: countError } = await client
+    .from("media")
+    .select("folder_id")
+    .eq("organization_id", orgId)
+    .is("archived_at", null)
+    .neq("status", "ARCHIVED")
+    .not("folder_id", "is", null);
+  throwIfError(countError, "Could not count folder files.");
+  const counts = new Map<string, number>();
+  for (const row of mediaRows ?? []) {
+    const folderId = asNullableString((row as { folder_id: string | null }).folder_id);
+    if (!folderId) continue;
+    counts.set(folderId, (counts.get(folderId) ?? 0) + 1);
+  }
+  return folders.map((folder) => ({
+    id: folder.id,
+    name: folder.name,
+    createdAt: dateLabel(folder.created_at),
+    fileCount: counts.get(folder.id) ?? 0,
+  }));
+}
+
+export async function createFolder(accessToken: string, name: string): Promise<MediaFolderRecord> {
+  const auth = await requireCmsPermission(accessToken, "media.manage");
+  const client = getUserClient(accessToken);
+  const orgId = auth.profile.organizationId;
+  const normalized = assertFolderName(name);
+  const { data: existing, error: existingError } = await client
+    .from("media_folders")
+    .select("name")
+    .eq("organization_id", orgId);
+  throwIfError(existingError, "Could not load folders.");
+  const names = (existing ?? []).map((row) => asString((row as { name: string }).name));
+  if (isDuplicateFolderName(names, normalized)) {
+    throw new Error(FOLDER_DUPLICATE_MESSAGE);
+  }
+  const { data, error } = await client
+    .from("media_folders")
+    .insert({
+      organization_id: orgId,
+      name: normalized,
+      created_by: auth.userId,
+    })
+    .select(FOLDER_SELECT)
+    .single();
+  if (error?.code === "23505") throw new Error(FOLDER_DUPLICATE_MESSAGE);
+  throwIfError(error, "Could not create folder.");
+  return toFolderRecord(client, mapFolder(data as Record<string, unknown>));
+}
+
+export async function deleteFolder(accessToken: string, id: string): Promise<boolean> {
+  const auth = await requireCmsPermission(accessToken, "media.manage");
+  const client = getUserClient(accessToken);
+  const existing = await getFolderRow(client, id, auth.profile.organizationId);
+  if (!existing) throw new Error("Folder not found.");
+  assertFolderDeletable(await visibleFileCount(client, id));
+  const { error } = await client.from("media_folders").delete().eq("id", id);
+  throwIfError(error, "Could not delete folder.");
+  return true;
+}
+
+export async function moveMediaToFolder(
+  accessToken: string,
+  id: string,
+  folderId: string | null,
+): Promise<MediaRecord> {
+  const auth = await requireCmsPermission(accessToken, "media.manage");
+  const client = getUserClient(accessToken);
+  const existing = await getMediaRow(client, id, auth.profile.organizationId);
+  if (!existing) throw new Error("Media not found.");
+  const nextFolderId = await requireFolderId(client, auth.profile.organizationId, folderId);
+  const { error } = await client.from("media").update({ folder_id: nextFolderId }).eq("id", id);
+  throwIfError(error, "Could not move media.");
+  const updated = await getMediaRow(client, id, auth.profile.organizationId);
+  if (!updated) throw new Error("Media not found.");
+  const records = await toRecords(client, [updated]);
+  const result = records[0];
+  if (!result) throw new Error("Media not found.");
+  return result;
 }
 
 export function mediaStorageBackend(): "r2" | "supabase" {

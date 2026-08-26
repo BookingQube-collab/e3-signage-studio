@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { mediaMimeSchema, sha256Schema } from "@e3/validation";
 
-import type { MediaRecord } from "@/services/media-map";
+import type { MediaFolderRecord, MediaRecord } from "@/services/media-map";
 
 const accessTokenSchema = z.object({ accessToken: z.string() });
 
@@ -32,12 +32,16 @@ export const createMediaUploadIntentFn = createServerFn({ method: "POST" })
       height: z.number().int().positive().nullable(),
       durationMs: z.number().int().positive().nullable(),
       mediaId: z.string().uuid().nullable(),
+      folderId: z.string().uuid().nullable().optional(),
     }),
   )
   .handler(async ({ data }) => {
     const { createUploadIntent } = await import("@/server/media.server");
     const { accessToken, ...input } = data;
-    return createUploadIntent(accessToken, input);
+    return createUploadIntent(accessToken, {
+      ...input,
+      folderId: input.folderId ?? null,
+    });
   });
 
 export const completeMediaUploadFn = createServerFn({ method: "POST" })
@@ -86,4 +90,37 @@ export const mediaDownloadUrlFn = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<{ url: string; filename: string }> => {
     const { mediaDownloadUrl } = await import("@/server/media.server");
     return mediaDownloadUrl(data.accessToken, data.id);
+  });
+
+export const listMediaFoldersFn = createServerFn({ method: "POST" })
+  .validator(accessTokenSchema)
+  .handler(async ({ data }): Promise<MediaFolderRecord[]> => {
+    const { listFolders } = await import("@/server/media.server");
+    return listFolders(data.accessToken);
+  });
+
+export const createMediaFolderFn = createServerFn({ method: "POST" })
+  .validator(accessTokenSchema.extend({ name: z.string().min(1).max(80) }))
+  .handler(async ({ data }): Promise<MediaFolderRecord> => {
+    const { createFolder } = await import("@/server/media.server");
+    return createFolder(data.accessToken, data.name);
+  });
+
+export const deleteMediaFolderFn = createServerFn({ method: "POST" })
+  .validator(accessTokenSchema.extend({ id: z.string().uuid() }))
+  .handler(async ({ data }): Promise<boolean> => {
+    const { deleteFolder } = await import("@/server/media.server");
+    return deleteFolder(data.accessToken, data.id);
+  });
+
+export const moveMediaToFolderFn = createServerFn({ method: "POST" })
+  .validator(
+    accessTokenSchema.extend({
+      id: z.string().uuid(),
+      folderId: z.string().uuid().nullable(),
+    }),
+  )
+  .handler(async ({ data }): Promise<MediaRecord> => {
+    const { moveMediaToFolder } = await import("@/server/media.server");
+    return moveMediaToFolder(data.accessToken, data.id, data.folderId);
   });

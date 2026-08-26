@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Image as ImageIcon, LayoutGrid, List, Search } from "lucide-react";
+import { FolderPlus, Image as ImageIcon, LayoutGrid, List, Search } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -17,11 +17,26 @@ import {
 } from "@/components/e3";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { FolderCard } from "@/features/media/FolderCard";
 import { UploadDropzone } from "@/features/media/UploadDropzone";
 import { ACCEPT_MEDIA } from "@/lib/media-file";
+import {
+  folderCardLabel,
+  foldersInLibraryView,
+  libraryViewFor,
+  mediaInLibraryView,
+  resolveUploadFolderId,
+} from "@/lib/media-folders";
 import { cn } from "@/lib/utils";
 import { mediaService } from "@/services";
-import type { Media } from "@/types";
+import type { Media, MediaFolder } from "@/types";
 
 export const Route = createFileRoute("/_shell/media")({
   head: () => ({
@@ -42,6 +57,7 @@ export const Route = createFileRoute("/_shell/media")({
 });
 
 const FILTERS = ["All", "Videos", "Images", "QR", "Recently Added"] as const;
+const UNFILED_VALUE = "__unfiled";
 
 function MediaPage() {
   const qc = useQueryClient();
@@ -49,10 +65,21 @@ function MediaPage() {
   const [view, setView] = useState<"grid" | "list">("grid");
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("All");
   const [search, setSearch] = useState("");
+  const [folderId, setFolderId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Media | null>(null);
   const [renaming, setRenaming] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [moving, setMoving] = useState<Media | null>(null);
+  const [moveTarget, setMoveTarget] = useState(UNFILED_VALUE);
 
   const mediaQuery = useQuery({ queryKey: ["media"], queryFn: mediaService.list });
+  const foldersQuery = useQuery({ queryKey: ["media-folders"], queryFn: mediaService.listFolders });
+
+  const folders = foldersQuery.data ?? [];
+  const currentFolder = folders.find((folder) => folder.id === folderId) ?? null;
+  const libraryView = libraryViewFor(search, folderId);
+  const searching = libraryView.mode === "search";
 
   const upload = useMutation({
     mutationFn: ({
@@ -61,12 +88,55 @@ function MediaPage() {
     }: {
       files: File[];
       onProgress: (fileName: string, percent: number) => void;
-    }) => mediaService.upload(files, onProgress),
+    }) => mediaService.upload(files, onProgress, resolveUploadFolderId(folderId)),
     onSuccess: (added) => {
       toast.success(`${added.length} file${added.length > 1 ? "s" : ""} uploaded`);
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: ["media"] });
+      void qc.invalidateQueries({ queryKey: ["media-folders"] });
+    },
+  });
+
+  const createFolder = useMutation({
+    mutationFn: mediaService.createFolder,
+    onSuccess: (folder) => {
+      void qc.invalidateQueries({ queryKey: ["media-folders"] });
+      setCreateOpen(false);
+      setNewFolderName("");
+      setFolderId(folder.id);
+      toast.success(`${folder.name} created`);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Could not create folder.");
+    },
+  });
+
+  const deleteFolder = useMutation({
+    mutationFn: mediaService.deleteFolder,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["media"] });
+      void qc.invalidateQueries({ queryKey: ["media-folders"] });
+      setFolderId(null);
+      toast.success("Folder deleted");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Could not delete folder.");
+    },
+  });
+
+  const moveToFolder = useMutation({
+    mutationFn: ({ id, nextFolderId }: { id: string; nextFolderId: string | null }) =>
+      mediaService.moveToFolder(id, nextFolderId),
+    onSuccess: (m) => {
+      void qc.invalidateQueries({ queryKey: ["media"] });
+      void qc.invalidateQueries({ queryKey: ["media-folders"] });
+      setSelected((prev) => (prev?.id === m.id ? m : prev));
+      setMoving(null);
+      toast.success(m.folderName ? `Moved to ${m.folderName}` : "Moved to Unfiled");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Could not move media.");
     },
   });
 
@@ -96,6 +166,7 @@ function MediaPage() {
     mutationFn: mediaService.archive,
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["media"] });
+      void qc.invalidateQueries({ queryKey: ["media-folders"] });
       setSelected(null);
       toast.success("Archived");
     },
@@ -108,6 +179,7 @@ function MediaPage() {
     mutationFn: mediaService.remove,
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["media"] });
+      void qc.invalidateQueries({ queryKey: ["media-folders"] });
       setSelected(null);
       toast.success("Media deleted");
     },
@@ -133,10 +205,14 @@ function MediaPage() {
     },
   });
 
+  const visibleFolders = useMemo(
+    () => foldersInLibraryView(folders, libraryView),
+    [folders, libraryView],
+  );
+
   const items = useMemo(() => {
-    const all = mediaQuery.data ?? [];
-    return all
-      .filter((m) => (search ? m.filename.toLowerCase().includes(search.toLowerCase()) : true))
+    const scoped = mediaInLibraryView(mediaQuery.data ?? [], libraryView);
+    return scoped
       .filter((m) => {
         if (filter === "All" || filter === "Recently Added") return true;
         if (filter === "Videos") return m.type === "Video";
@@ -144,17 +220,62 @@ function MediaPage() {
         return m.type === "QR";
       })
       .slice(0, filter === "Recently Added" ? 8 : undefined);
-  }, [mediaQuery.data, filter, search]);
+  }, [mediaQuery.data, libraryView, filter]);
+
+  function openMove(item: Media) {
+    setMoving(item);
+    setMoveTarget(item.folderId ?? UNFILED_VALUE);
+  }
+
+  const loading = mediaQuery.isLoading || foldersQuery.isLoading;
+  const errored = mediaQuery.isError || foldersQuery.isError;
+  const empty = visibleFolders.length === 0 && items.length === 0;
 
   return (
     <div>
       <E3PageHeader
-        title="Media Library"
-        description="Everything available to playlists, layouts and campaigns."
+        title={currentFolder && !searching ? currentFolder.name : "Media Library"}
+        description={
+          currentFolder && !searching
+            ? "Files in this folder. Playlists can still pick them from anywhere."
+            : "Everything available to playlists, layouts and campaigns."
+        }
+        breadcrumb={
+          currentFolder && !searching ? (
+            <span>
+              <button type="button" className="hover:text-foreground" onClick={() => setFolderId(null)}>
+                Media
+              </button>
+              <span className="mx-1.5">/</span>
+              <span className="text-foreground">{currentFolder.name}</span>
+            </span>
+          ) : undefined
+        }
+        actions={
+          <>
+            {currentFolder && !searching ? (
+              <E3Button
+                variant="outline"
+                disabled={deleteFolder.isPending}
+                onClick={() => deleteFolder.mutate(currentFolder.id)}
+              >
+                Delete folder
+              </E3Button>
+            ) : null}
+            <E3Button variant="primary" onClick={() => setCreateOpen(true)}>
+              <FolderPlus /> Create folder
+            </E3Button>
+          </>
+        }
       />
 
       <div className="mb-6">
         <UploadDropzone
+          hint={
+            currentFolder && !searching
+              ? `Uploads go into ${currentFolder.name}`
+              : "Uploads stay in Unfiled until you move them"
+          }
           onUpload={async (files, onProgress) => {
             await upload.mutateAsync({ files, onProgress });
           }}
@@ -218,29 +339,48 @@ function MediaPage() {
       </E3Card>
 
       <E3QueryBoundary
-        isLoading={mediaQuery.isLoading}
-        isError={mediaQuery.isError}
-        refetch={() => void mediaQuery.refetch()}
+        isLoading={loading}
+        isError={errored}
+        refetch={() => {
+          void mediaQuery.refetch();
+          void foldersQuery.refetch();
+        }}
       >
-        {items.length === 0 ? (
+        {empty ? (
           <E3EmptyState
             icon={ImageIcon}
-            title="No media uploaded"
-            description="Drop a video or image above to build your first playlist."
+            title={searching ? "No matching media" : currentFolder ? "This folder is empty" : "No media uploaded"}
+            description={
+              searching
+                ? "Search looks across every folder."
+                : currentFolder
+                  ? "Drop a video or image above to add it here."
+                  : "Create a folder for a venue or campaign, or drop files into Unfiled."
+            }
+            action={
+              currentFolder ? undefined : (
+                <E3Button variant="primary" onClick={() => setCreateOpen(true)}>
+                  <FolderPlus /> Create folder
+                </E3Button>
+              )
+            }
           />
         ) : view === "grid" ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {items.map((m) => (
-              <E3MediaCard
-                key={m.id}
-                item={m}
-                onOpen={(x) => {
-                  setSelected(x);
-                  setRenaming(x.filename);
-                }}
-              />
-            ))}
-          </div>
+          <LibraryGrid
+            folders={visibleFolders}
+            items={items}
+            searching={searching}
+            showUnfiledHeading={!searching && !currentFolder && items.length > 0 && visibleFolders.length > 0}
+            onOpenFolder={(folder) => {
+              setFolderId(folder.id);
+              setSearch("");
+            }}
+            onOpenMedia={(item) => {
+              setSelected(item);
+              setRenaming(item.filename);
+            }}
+            onMove={openMove}
+          />
         ) : (
           <div className="space-y-2">
             {items.map((m) => (
@@ -248,6 +388,8 @@ function MediaPage() {
                 key={m.id}
                 item={m}
                 view="list"
+                folderLabel={folderCardLabel(m.folderName, searching || Boolean(m.folderName))}
+                onMove={openMove}
                 onOpen={(x) => {
                   setSelected(x);
                   setRenaming(x.filename);
@@ -259,6 +401,84 @@ function MediaPage() {
       </E3QueryBoundary>
 
       <E3Modal
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        title="Create folder"
+        description="One level — name it after a venue, campaign, or event."
+        footer={
+          <>
+            <E3Button variant="outline" onClick={() => setCreateOpen(false)}>
+              Cancel
+            </E3Button>
+            <E3Button
+              variant="primary"
+              disabled={createFolder.isPending || !newFolderName.trim()}
+              onClick={() => createFolder.mutate(newFolderName)}
+            >
+              Create folder
+            </E3Button>
+          </>
+        }
+      >
+        <div className="space-y-2">
+          <Label htmlFor="folder-name">Folder name</Label>
+          <Input
+            id="folder-name"
+            value={newFolderName}
+            onChange={(e) => setNewFolderName(e.target.value)}
+            placeholder="e.g. InflataPark, Rajan Office, Birthday - Poppy"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && newFolderName.trim()) createFolder.mutate(newFolderName);
+            }}
+          />
+        </div>
+      </E3Modal>
+
+      <E3Modal
+        open={Boolean(moving)}
+        onOpenChange={(o) => !o && setMoving(null)}
+        title="Move to folder"
+        description="Organization only — playlists keep using this file."
+        footer={
+          <>
+            <E3Button variant="outline" onClick={() => setMoving(null)}>
+              Cancel
+            </E3Button>
+            <E3Button
+              variant="primary"
+              disabled={!moving || moveToFolder.isPending}
+              onClick={() =>
+                moving &&
+                moveToFolder.mutate({
+                  id: moving.id,
+                  nextFolderId: moveTarget === UNFILED_VALUE ? null : moveTarget,
+                })
+              }
+            >
+              Move
+            </E3Button>
+          </>
+        }
+      >
+        <div className="space-y-2">
+          <Label>Folder</Label>
+          <Select value={moveTarget} onValueChange={setMoveTarget}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={UNFILED_VALUE}>Unfiled</SelectItem>
+              {folders.map((folder) => (
+                <SelectItem key={folder.id} value={folder.id}>
+                  {folder.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </E3Modal>
+
+      <E3Modal
         open={Boolean(selected)}
         onOpenChange={(o) => !o && setSelected(null)}
         title={selected?.filename ?? "Media"}
@@ -266,6 +486,9 @@ function MediaPage() {
         className="sm:max-w-2xl"
         footer={
           <>
+            <E3Button variant="outline" disabled={!selected} onClick={() => selected && openMove(selected)}>
+              Move to folder…
+            </E3Button>
             <E3Button
               variant="outline"
               disabled={!selected || replace.isPending}
@@ -333,6 +556,7 @@ function MediaPage() {
 
             <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
               {[
+                ["Folder", selected.folderName ?? "Unfiled"],
                 ["Type", selected.type],
                 ["Dimensions", selected.dimensions],
                 ["Duration", selected.durationSec ? `${selected.durationSec}s` : "—"],
@@ -369,6 +593,54 @@ function MediaPage() {
           </div>
         ) : null}
       </E3Modal>
+    </div>
+  );
+}
+
+function LibraryGrid({
+  folders,
+  items,
+  searching,
+  showUnfiledHeading,
+  onOpenFolder,
+  onOpenMedia,
+  onMove,
+}: {
+  folders: MediaFolder[];
+  items: Media[];
+  searching: boolean;
+  showUnfiledHeading: boolean;
+  onOpenFolder: (folder: MediaFolder) => void;
+  onOpenMedia: (item: Media) => void;
+  onMove: (item: Media) => void;
+}) {
+  return (
+    <div className="space-y-6">
+      {folders.length > 0 ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {folders.map((folder) => (
+            <FolderCard key={folder.id} folder={folder} onOpen={onOpenFolder} />
+          ))}
+        </div>
+      ) : null}
+      {showUnfiledHeading ? (
+        <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Unfiled
+        </h2>
+      ) : null}
+      {items.length > 0 ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {items.map((m) => (
+            <E3MediaCard
+              key={m.id}
+              item={m}
+              folderLabel={folderCardLabel(m.folderName, searching)}
+              onOpen={onOpenMedia}
+              onMove={onMove}
+            />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

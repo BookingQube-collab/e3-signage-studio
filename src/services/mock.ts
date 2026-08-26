@@ -5,6 +5,7 @@ import type {
   Layout,
   Location,
   Media,
+  MediaFolder,
   Playlist,
   Screen,
   ScreenGroup,
@@ -29,6 +30,7 @@ const store = {
   screens: [...db.screens],
   screenGroups: [...db.screenGroups],
   media: [...db.media],
+  folders: [] as MediaFolder[],
   playlists: [...db.playlists],
   layouts: [...db.layouts],
   campaigns: [...db.campaigns],
@@ -129,7 +131,8 @@ export const mockServices: AppServices = {
   mediaService: {
     list: () => delay(store.media),
     get: (id: string) => delay(store.media.find((m) => m.id === id) ?? null),
-    upload: (files: File[], onProgress) => {
+    upload: (files: File[], onProgress, folderId) => {
+      const folder = folderId ? store.folders.find((f) => f.id === folderId) : null;
       const added: Media[] = files.map((file, i) => {
         onProgress?.(file.name, 100);
         const isVideo = file.type.startsWith("video") || /\.mp4$/i.test(file.name);
@@ -145,10 +148,17 @@ export const mockServices: AppServices = {
           uploadedAt: new Date().toISOString().slice(0, 10),
           version: "v1",
           thumbnailHue: Math.floor(Math.random() * 360),
+          folderId: folder?.id ?? null,
+          folderName: folder?.name ?? null,
           usedIn: { playlists: [], campaigns: [], screens: [] },
         };
       });
       store.media = [...added, ...store.media];
+      if (folder) {
+        store.folders = store.folders.map((f) =>
+          f.id === folder.id ? { ...f, fileCount: f.fileCount + added.length } : f,
+        );
+      }
       return delay(added, 400);
     },
     replace: (id: string, file: File, onProgress) => {
@@ -187,6 +197,37 @@ export const mockServices: AppServices = {
     downloadUrl: (id: string) => {
       const existing = store.media.find((m) => m.id === id);
       return delay({ url: "#", filename: existing?.filename ?? "media" }, 100);
+    },
+    listFolders: () => delay(store.folders),
+    createFolder: (name: string) => {
+      const folder = {
+        id: `fld-${Date.now()}`,
+        name: name.trim(),
+        createdAt: new Date().toISOString().slice(0, 10),
+        fileCount: 0,
+      };
+      store.folders = [...store.folders, folder].sort((a, b) => a.name.localeCompare(b.name));
+      return delay(folder, 200);
+    },
+    deleteFolder: (id: string) => {
+      if (store.media.some((m) => m.folderId === id)) {
+        return Promise.reject(new Error("This folder still has files. Move them to another folder or Unfiled first."));
+      }
+      store.folders = store.folders.filter((f) => f.id !== id);
+      return delay(true, 200);
+    },
+    moveToFolder: (id: string, folderId: string | null) => {
+      const existing = store.media.find((m) => m.id === id);
+      if (!existing) return Promise.reject(new Error("Media not found."));
+      const folder = folderId ? store.folders.find((f) => f.id === folderId) : null;
+      if (folderId && !folder) return Promise.reject(new Error("Folder not found."));
+      const next = { ...existing, folderId, folderName: folder?.name ?? null };
+      store.media = store.media.map((m) => (m.id === id ? next : m));
+      store.folders = store.folders.map((f) => ({
+        ...f,
+        fileCount: store.media.filter((m) => m.folderId === f.id).length,
+      }));
+      return delay(next, 200);
     },
   },
 

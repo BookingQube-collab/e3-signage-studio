@@ -78,6 +78,13 @@ export interface ScreenGroup {
 
 export type MediaType = "Video" | "Image" | "QR" | "Logo";
 
+export interface MediaFolder {
+  id: string;
+  name: string;
+  createdAt: string;
+  fileCount: number;
+}
+
 export interface Media {
   id: string;
   filename: string;
@@ -92,6 +99,8 @@ export interface Media {
   thumbnailHue: number;
   thumbnailUrl?: string;
   previewUrl?: string;
+  folderId: string | null;
+  folderName: string | null;
   usedIn: { playlists: string[]; campaigns: string[]; screens: string[] };
 }
 

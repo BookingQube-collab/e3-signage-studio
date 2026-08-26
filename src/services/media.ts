@@ -1,10 +1,14 @@
 import {
   completeMediaUploadFn,
+  createMediaFolderFn,
   createMediaUploadIntentFn,
+  deleteMediaFolderFn,
   deleteMediaFn,
   getMediaFn,
+  listMediaFoldersFn,
   listMediaFn,
   mediaDownloadUrlFn,
+  moveMediaToFolderFn,
   renameMediaFn,
   archiveMediaFn,
 } from "@/lib/media-functions";
@@ -12,7 +16,7 @@ import { assertUploadSize, inferMediaMime } from "@/lib/media-file";
 import { probeMediaDimensions, sha256HexOfBlob } from "@/lib/media-hash";
 import { getBrowserAccessToken } from "@/lib/supabase";
 import type { Media } from "@/types";
-import { toUiMedia } from "./media-map";
+import { toUiFolder, toUiMedia } from "./media-map";
 import type { MediaService, MediaUploadProgress } from "./types";
 
 async function accessToken(): Promise<string> {
@@ -55,6 +59,7 @@ async function uploadOne(
   file: File,
   mediaId: string | null,
   onProgress?: (percent: number) => void,
+  folderId?: string | null,
 ): Promise<Media> {
   const mime = inferMediaMime(file.name, file.type);
   if (!mime) {
@@ -74,6 +79,7 @@ async function uploadOne(
       height: probe.height,
       durationMs: probe.durationMs,
       mediaId,
+      folderId: mediaId ? null : (folderId ?? null),
     },
   });
   await putWithProgress(intent.uploadUrl, intent.uploadMethod, file, intent.uploadHeaders, onProgress);
@@ -96,13 +102,13 @@ export const liveMediaService: MediaService = {
     const row = await getMediaFn({ data: { accessToken: await accessToken(), id } });
     return row ? toUiMedia(row) : null;
   },
-  upload: async (files, onProgress) => {
+  upload: async (files, onProgress, folderId) => {
     const added: Media[] = [];
     for (const file of files) {
       added.push(
         await uploadOne(file, null, (percent) => {
           onProgress?.(file.name, percent);
-        }),
+        }, folderId),
       );
     }
     return added;
@@ -120,6 +126,22 @@ export const liveMediaService: MediaService = {
   },
   remove: async (id) => deleteMediaFn({ data: { accessToken: await accessToken(), id } }),
   downloadUrl: async (id) => mediaDownloadUrlFn({ data: { accessToken: await accessToken(), id } }),
+  listFolders: async () => {
+    const rows = await listMediaFoldersFn({ data: { accessToken: await accessToken() } });
+    return rows.map(toUiFolder);
+  },
+  createFolder: async (name) => {
+    const row = await createMediaFolderFn({ data: { accessToken: await accessToken(), name } });
+    return toUiFolder(row);
+  },
+  deleteFolder: async (id) =>
+    deleteMediaFolderFn({ data: { accessToken: await accessToken(), id } }),
+  moveToFolder: async (id, folderId) => {
+    const row = await moveMediaToFolderFn({
+      data: { accessToken: await accessToken(), id, folderId },
+    });
+    return toUiMedia(row);
+  },
 };
 
 export type { MediaUploadProgress };

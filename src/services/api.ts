@@ -45,6 +45,10 @@ export const apiServices: AppServices = {
     archive: () => notConfigured(),
     remove: () => notConfigured(),
     downloadUrl: () => notConfigured(),
+    listFolders: () => notConfigured(),
+    createFolder: () => notConfigured(),
+    deleteFolder: () => notConfigured(),
+    moveToFolder: () => notConfigured(),
   },
   playlistService: {
     list: () => notConfigured(),

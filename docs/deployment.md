@@ -22,7 +22,7 @@ Device APKs never contain Supabase or R2 credentials. TVs call the CMS origin on
 
 SQL lives in `supabase/migrations/` (phase-numbered files, applied in filename order). Apply to the hosted project the same way later phases were applied: `psql` against `DATABASE_POOLER_URL` (or `DATABASE_URL`) with the project’s session pooler. Do not print the connection string.
 
-There is no Phase 15 schema change.
+Media library folders: `20260826190000_media_folders.sql` adds `media_folders` and nullable `media.folder_id`. Unfiled files keep `folder_id` null. This is additive and does not change playlist or package JSON.
 
 ## Storage setup
 

@@ -252,6 +252,8 @@ export const media: Media[] = mediaSeed.map(([filename, type, dimensions, durati
   uploadedAt: `2026-07-${String(28 - (i % 20)).padStart(2, "0")}`,
   version: `v${(i % 3) + 1}`,
   thumbnailHue: (i * 37) % 360,
+  folderId: null,
+  folderName: null,
   usedIn: {
     playlists: i % 2 === 0 ? ["KDS Main Playlist"] : ["Event Showreel"],
     campaigns: i % 3 === 0 ? ["Back To School 2026"] : [],

@@ -26,6 +26,7 @@ import {
 import { mediaService, playlistService } from "@/services";
 import type { Playlist, PlaylistItem, Transition } from "@/types";
 import { bindPreviewClips } from "@/lib/playlist-preview";
+import { MediaPicker } from "@/features/media/MediaPicker";
 import { PlaylistLoopPreview } from "./PlaylistLoopPreview";
 
 const TRANSITIONS: Transition[] = ["Cut", "Fade", "Slide"];
@@ -38,6 +39,7 @@ export function PlaylistBuilder({ initial }: { initial: Playlist }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
 
   const mediaQuery = useQuery({ queryKey: ["media"], queryFn: mediaService.list });
+  const foldersQuery = useQuery({ queryKey: ["media-folders"], queryFn: mediaService.listFolders });
 
   const save = useMutation({
     mutationFn: playlistService.save,
@@ -306,41 +308,36 @@ export function PlaylistBuilder({ initial }: { initial: Playlist }) {
         open={addOpen}
         onOpenChange={setAddOpen}
         title="Add media"
-        description="Select items from the library."
-        className="sm:max-w-xl"
+        description="Open a folder or pick a thumbnail. Search looks across every folder."
+        className="sm:max-w-3xl"
         footer={
           <E3Button variant="outline" onClick={() => setAddOpen(false)}>
             Done
           </E3Button>
         }
       >
-        <div className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
-          {(mediaQuery.data ?? []).map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() =>
-                setPlaylist((p) => ({
-                  ...p,
-                  items: [
-                    ...p.items,
-                    {
-                      id: `pli-${m.id}-${Date.now()}`,
-                      mediaId: m.id,
-                      filename: m.filename,
-                      type: m.type,
-                      durationSec: m.durationSec ?? 10,
-                      transition: "Fade",
-                    },
-                  ],
-                }))
-              }
-              className="flex w-full items-center justify-between gap-3 rounded-xl border border-border p-3 text-left hover:bg-accent/50"
-            >
-              <span className="min-w-0 truncate text-sm">{m.filename}</span>
-              <span className="shrink-0 text-xs text-muted-foreground">{m.type}</span>
-            </button>
-          ))}
+        <div className="max-h-[60vh] overflow-y-auto pr-1">
+          <MediaPicker
+            media={mediaQuery.data ?? []}
+            folders={foldersQuery.data ?? []}
+            selectedIds={new Set(playlist.items.map((item) => item.mediaId))}
+            onPick={(m) =>
+              setPlaylist((p) => ({
+                ...p,
+                items: [
+                  ...p.items,
+                  {
+                    id: `pli-${m.id}-${Date.now()}`,
+                    mediaId: m.id,
+                    filename: m.filename,
+                    type: m.type,
+                    durationSec: m.durationSec ?? 10,
+                    transition: "Fade",
+                  },
+                ],
+              }))
+            }
+          />
         </div>
       </E3Modal>
     </div>

@@ -13,11 +13,13 @@ interface PendingUpload {
 
 export function UploadDropzone({
   onUpload,
+  hint,
 }: {
   onUpload: (
     files: File[],
     onProgress: (fileName: string, percent: number) => void,
   ) => Promise<void>;
+  hint?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -63,7 +65,7 @@ export function UploadDropzone({
         <p className="font-display mt-4 text-lg font-semibold uppercase tracking-wide">
           Drop media here
         </p>
-        <p className="mt-1 text-sm text-muted-foreground">Video · Image · Promotional Media</p>
+        <p className="mt-1 text-sm text-muted-foreground">{hint ?? "Video · Image · Promotional Media"}</p>
         <E3Button
           className="mt-5"
           variant="primary"

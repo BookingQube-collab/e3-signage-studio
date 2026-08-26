@@ -1,9 +1,16 @@
 import { invert, UI_LABELS } from "@e3/shared-types";
 import type { MediaType as CanonicalMediaType, MediaStatus } from "@e3/shared-types";
 
-import type { Media } from "@/types";
+import type { Media, MediaFolder } from "@/types";
 
 export const MEDIA_TYPE_FROM_UI = invert(UI_LABELS.mediaType);
+
+export type MediaFolderRecord = {
+  id: string;
+  name: string;
+  createdAt: string;
+  fileCount: number;
+};
 
 export type MediaRecord = {
   id: string;
@@ -21,8 +28,19 @@ export type MediaRecord = {
   thumbnailHue: number;
   thumbnailUrl: string | null;
   previewUrl: string | null;
+  folderId: string | null;
+  folderName: string | null;
   usedIn: { playlists: string[]; campaigns: string[]; screens: string[] };
 };
+
+export function toUiFolder(row: MediaFolderRecord): MediaFolder {
+  return {
+    id: row.id,
+    name: row.name,
+    createdAt: row.createdAt,
+    fileCount: row.fileCount,
+  };
+}
 
 export function toUiMedia(row: MediaRecord): Media {
   const media: Media = {
@@ -37,6 +55,8 @@ export function toUiMedia(row: MediaRecord): Media {
     uploadedAt: row.uploadedAt,
     version: row.version,
     thumbnailHue: row.thumbnailHue,
+    folderId: row.folderId,
+    folderName: row.folderName,
     usedIn: row.usedIn,
   };
   if (row.thumbnailUrl) media.thumbnailUrl = row.thumbnailUrl;

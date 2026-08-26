@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { layoutService, mediaService } from "@/services";
+import { MediaPicker } from "@/features/media/MediaPicker";
 import type { FitMode, Layout, LayoutPreset, LayoutZone, Orientation, ZoneContentType } from "@/types";
 
 const PRESETS: LayoutPreset[] = [
@@ -123,6 +124,7 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
   const [selectedId, setSelectedId] = useState<string | null>(initial.zones[0]?.id ?? null);
 
   const mediaQuery = useQuery({ queryKey: ["media"], queryFn: mediaService.list });
+  const foldersQuery = useQuery({ queryKey: ["media-folders"], queryFn: mediaService.listFolders });
 
   const save = useMutation({
     mutationFn: layoutService.save,
@@ -270,17 +272,15 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
                 <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
                   Drag media into a zone
                 </p>
-                <div className="flex gap-2 overflow-x-auto pb-2">
-                  {(mediaQuery.data ?? []).slice(0, 12).map((m) => (
-                    <div
-                      key={m.id}
-                      draggable
-                      onDragStart={(e) => e.dataTransfer.setData("text/plain", m.filename)}
-                      className="shrink-0 cursor-grab rounded-lg border border-border bg-background px-3 py-2 text-xs"
-                    >
-                      {m.filename}
-                    </div>
-                  ))}
+                <div className="max-h-80 overflow-y-auto pr-1">
+                  <MediaPicker
+                    media={mediaQuery.data ?? []}
+                    folders={foldersQuery.data ?? []}
+                    draggable
+                    onPick={(m) => {
+                      if (selectedId) patchZone(selectedId, { contentRef: m.filename });
+                    }}
+                  />
                 </div>
               </div>
             </E3CardBody>
@@ -422,7 +422,7 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
                         <SelectItem value="none">No content</SelectItem>
                         {(mediaQuery.data ?? []).map((m) => (
                           <SelectItem key={m.id} value={m.filename}>
-                            {m.filename}
+                            {m.folderName ? `${m.folderName} / ${m.filename}` : m.filename}
                           </SelectItem>
                         ))}
                       </SelectContent>
