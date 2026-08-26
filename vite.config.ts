@@ -8,28 +8,29 @@ import { loadEnv } from "vite";
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
 /**
- * Vite only inlines VITE_* into the browser bundle. Vercel/Supabase syncs
- * unprefixed SUPABASE_URL and SUPABASE_ANON_KEY. Map those onto VITE_* at
- * config load so production builds work without duplicate env names.
+ * Best-effort: copy unprefixed SUPABASE_* onto VITE_* when they exist at
+ * config evaluation. This is NOT sufficient on Vercel — integration vars are
+ * often runtime-only, so a define here can bake empty values. Production login
+ * loads url+anon from the server at runtime (`getPublicSupabaseConfigFn`).
  * Do not copy SUPABASE_SERVICE_ROLE_KEY (must stay server-only).
  */
 function mapPublicSupabaseEnv() {
-  const mode = process.env.NODE_ENV === "production" ? "production" : "development";
+  const mode = process.env["NODE_ENV"] === "production" ? "production" : "development";
   const fileEnv = loadEnv(mode, process.cwd(), "");
   const url =
-    process.env.VITE_SUPABASE_URL ||
-    fileEnv.VITE_SUPABASE_URL ||
-    process.env.SUPABASE_URL ||
-    fileEnv.SUPABASE_URL ||
+    process.env["VITE_SUPABASE_URL"] ||
+    fileEnv["VITE_SUPABASE_URL"] ||
+    process.env["SUPABASE_URL"] ||
+    fileEnv["SUPABASE_URL"] ||
     "";
   const anonKey =
-    process.env.VITE_SUPABASE_ANON_KEY ||
-    fileEnv.VITE_SUPABASE_ANON_KEY ||
-    process.env.SUPABASE_ANON_KEY ||
-    fileEnv.SUPABASE_ANON_KEY ||
+    process.env["VITE_SUPABASE_ANON_KEY"] ||
+    fileEnv["VITE_SUPABASE_ANON_KEY"] ||
+    process.env["SUPABASE_ANON_KEY"] ||
+    fileEnv["SUPABASE_ANON_KEY"] ||
     "";
-  if (url) process.env.VITE_SUPABASE_URL = url;
-  if (anonKey) process.env.VITE_SUPABASE_ANON_KEY = anonKey;
+  if (url) process.env["VITE_SUPABASE_URL"] = url;
+  if (anonKey) process.env["VITE_SUPABASE_ANON_KEY"] = anonKey;
   return { url, anonKey };
 }
 
@@ -52,4 +53,3 @@ export default defineConfig({
     },
   },
 });
-

@@ -32,7 +32,7 @@ import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/s
 import { clearSessionFn } from "@/lib/auth-functions";
 import type { CmsProfile } from "@/lib/auth-types";
 import { hasPermission } from "@/lib/rbac";
-import { getSupabase } from "@/lib/supabase";
+import { ensurePublicSupabaseConfig, getSupabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { UI_ROLE, type AppPermission } from "@e3/shared-types";
 
@@ -154,6 +154,7 @@ export function AppShell({
     if (signingOut) return;
     setSigningOut(true);
     try {
+      await ensurePublicSupabaseConfig();
       await getSupabase().auth.signOut();
     } catch {
       // still clear server cookies

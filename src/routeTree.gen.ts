@@ -18,6 +18,7 @@ import { Route as ShellReportsRouteImport } from './routes/_shell.reports'
 import { Route as ShellScheduleRouteImport } from './routes/_shell.schedule'
 import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
 import { Route as ShellUsersRouteImport } from './routes/_shell.users'
+import { Route as ApiPublicConfigRouteImport } from './routes/api.public-config'
 import { Route as ShellCampaignsIndexRouteImport } from './routes/_shell.campaigns.index'
 import { Route as ShellCampaignsIdRouteImport } from './routes/_shell.campaigns.$id'
 import { Route as ShellCampaignsNewRouteImport } from './routes/_shell.campaigns.new'
@@ -83,6 +84,11 @@ const ShellUsersRoute = ShellUsersRouteImport.update({
   id: '/users',
   path: '/users',
   getParentRoute: () => ShellRoute,
+} as any)
+const ApiPublicConfigRoute = ApiPublicConfigRouteImport.update({
+  id: '/api/public-config',
+  path: '/api/public-config',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ShellCampaignsIndexRoute = ShellCampaignsIndexRouteImport.update({
   id: '/campaigns/',
@@ -205,6 +211,7 @@ export interface FileRoutesByFullPath {
   '/schedule': typeof ShellScheduleRoute
   '/settings': typeof ShellSettingsRoute
   '/users': typeof ShellUsersRoute
+  '/api/public-config': typeof ApiPublicConfigRoute
   '/campaigns/$id': typeof ShellCampaignsIdRoute
   '/campaigns/new': typeof ShellCampaignsNewRoute
   '/layouts/$id': typeof ShellLayoutsIdRoute
@@ -236,6 +243,7 @@ export interface FileRoutesByTo {
   '/schedule': typeof ShellScheduleRoute
   '/settings': typeof ShellSettingsRoute
   '/users': typeof ShellUsersRoute
+  '/api/public-config': typeof ApiPublicConfigRoute
   '/campaigns/$id': typeof ShellCampaignsIdRoute
   '/campaigns/new': typeof ShellCampaignsNewRoute
   '/layouts/$id': typeof ShellLayoutsIdRoute
@@ -269,6 +277,7 @@ export interface FileRoutesById {
   '/_shell/schedule': typeof ShellScheduleRoute
   '/_shell/settings': typeof ShellSettingsRoute
   '/_shell/users': typeof ShellUsersRoute
+  '/api/public-config': typeof ApiPublicConfigRoute
   '/_shell/campaigns/$id': typeof ShellCampaignsIdRoute
   '/_shell/campaigns/new': typeof ShellCampaignsNewRoute
   '/_shell/layouts/$id': typeof ShellLayoutsIdRoute
@@ -302,6 +311,7 @@ export interface FileRouteTypes {
     | '/schedule'
     | '/settings'
     | '/users'
+    | '/api/public-config'
     | '/campaigns/$id'
     | '/campaigns/new'
     | '/layouts/$id'
@@ -333,6 +343,7 @@ export interface FileRouteTypes {
     | '/schedule'
     | '/settings'
     | '/users'
+    | '/api/public-config'
     | '/campaigns/$id'
     | '/campaigns/new'
     | '/layouts/$id'
@@ -365,6 +376,7 @@ export interface FileRouteTypes {
     | '/_shell/schedule'
     | '/_shell/settings'
     | '/_shell/users'
+    | '/api/public-config'
     | '/_shell/campaigns/$id'
     | '/_shell/campaigns/new'
     | '/_shell/layouts/$id'
@@ -392,6 +404,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ShellRoute: typeof ShellRouteWithChildren
   LoginRoute: typeof LoginRoute
+  ApiPublicConfigRoute: typeof ApiPublicConfigRoute
   ApiDevicesActivateRoute: typeof ApiDevicesActivateRoute
   ApiDevicesPairRoute: typeof ApiDevicesPairRoute
   ApiDevicesDeviceIdErrorLogsRoute: typeof ApiDevicesDeviceIdErrorLogsRoute
@@ -466,6 +479,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/users'
       preLoaderRoute: typeof ShellUsersRouteImport
       parentRoute: typeof ShellRoute
+    }
+    '/api/public-config': {
+      id: '/api/public-config'
+      path: '/api/public-config'
+      fullPath: '/api/public-config'
+      preLoaderRoute: typeof ApiPublicConfigRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_shell/campaigns/': {
       id: '/_shell/campaigns/'
@@ -667,6 +687,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ShellRoute: ShellRouteWithChildren,
   LoginRoute: LoginRoute,
+  ApiPublicConfigRoute: ApiPublicConfigRoute,
   ApiDevicesActivateRoute: ApiDevicesActivateRoute,
   ApiDevicesPairRoute: ApiDevicesPairRoute,
   ApiDevicesDeviceIdErrorLogsRoute: ApiDevicesDeviceIdErrorLogsRoute,

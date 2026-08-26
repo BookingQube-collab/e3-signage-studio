@@ -8,7 +8,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getAuthSessionFn, persistSessionFn } from "@/lib/auth-functions";
 import { getPublicCmsUrl } from "@/lib/cms-settings";
-import { getBrowserAccessToken, getSupabase, isSupabaseBrowserConfigured } from "@/lib/supabase";
+import { getPublicSupabaseConfigFn } from "@/lib/public-config-functions";
+import {
+  ensurePublicSupabaseConfig,
+  getBrowserAccessToken,
+  getSupabase,
+  seedPublicSupabaseConfig,
+} from "@/lib/supabase";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -32,6 +38,15 @@ export const Route = createFileRoute("/login")({
       throw redirect({ to: "/dashboard" });
     }
   },
+  loader: async () => {
+    try {
+      const config = await getPublicSupabaseConfigFn();
+      seedPublicSupabaseConfig(config);
+      return { publicSupabase: config };
+    } catch {
+      return { publicSupabase: null };
+    }
+  },
   component: LoginPage,
 });
 
@@ -50,6 +65,8 @@ function mapLoginError(message: string): string {
 }
 
 function LoginPage() {
+  const { publicSupabase } = Route.useLoaderData();
+  seedPublicSupabaseConfig(publicSupabase);
   const navigate = useNavigate();
   const router = useRouter();
   const [email, setEmail] = useState("rajan@e3.qa");
@@ -63,8 +80,9 @@ function LoginPage() {
       setError("Enter your email and password to continue.");
       return;
     }
-    if (!isSupabaseBrowserConfigured()) {
-      setError("Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
+    const config = await ensurePublicSupabaseConfig();
+    if (!config) {
+      setError("Supabase is not configured on the server.");
       return;
     }
     setError(null);
@@ -103,8 +121,9 @@ function LoginPage() {
       setError("Enter your email to reset your password.");
       return;
     }
-    if (!isSupabaseBrowserConfigured()) {
-      setError("Supabase is not configured.");
+    const config = await ensurePublicSupabaseConfig();
+    if (!config) {
+      setError("Supabase is not configured on the server.");
       return;
     }
     setError(null);
