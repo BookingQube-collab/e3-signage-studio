@@ -28,6 +28,17 @@ export function getServerEnv(): ServerEnv {
   };
 }
 
+export function isR2Configured(): boolean {
+  const env = getServerEnv();
+  return Boolean(
+    env.r2AccountId &&
+      env.r2AccessKeyId &&
+      env.r2SecretAccessKey &&
+      env.r2Bucket &&
+      env.r2Endpoint,
+  );
+}
+
 export function assertSupabaseAdmin(): {
   supabaseUrl: string;
   supabaseServiceRoleKey: string;

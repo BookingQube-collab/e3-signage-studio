@@ -66,6 +66,9 @@ function ScreenDetailPage() {
       invalidate();
       toast.success("Sync requested");
     },
+    onError: (err: Error) => {
+      toast.error(err.message || "Could not request sync");
+    },
   });
 
   const changePlaylist = useMutation({
@@ -83,6 +86,9 @@ function ScreenDetailPage() {
       setPlaylistOpen(false);
       toast.success("Playlist changed");
     },
+    onError: (err: Error) => {
+      toast.error(err.message || "Could not change playlist");
+    },
   });
 
   const disable = useMutation({
@@ -94,14 +100,21 @@ function ScreenDetailPage() {
       invalidate();
       toast.success("Screen updated");
     },
+    onError: (err: Error) => {
+      toast.error(err.message || "Could not update screen");
+    },
   });
 
   const unpair = useMutation({
     mutationFn: () => screenService.unpair(id),
     onSuccess: () => {
       invalidate();
+      void qc.invalidateQueries({ queryKey: ["locations"] });
       toast.success("Screen unpaired");
       void navigate({ to: "/screens" });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || "Could not unpair screen");
     },
   });
 
@@ -196,7 +209,9 @@ function ScreenDetailPage() {
                         ["Orientation", screen.orientation],
                         [
                           "Storage used",
-                          `${screen.storageUsedGb.toFixed(1)} GB of ${screen.storageTotalGb} GB`,
+                          screen.storageTotalGb > 0
+                            ? `${screen.storageUsedGb.toFixed(1)} GB of ${screen.storageTotalGb.toFixed(1)} GB`
+                            : "Unknown until the player reports storage",
                         ],
                         ["Last sync", screen.lastSync],
                         ["Last heartbeat", screen.lastSeen],
@@ -213,10 +228,17 @@ function ScreenDetailPage() {
                     </dl>
                     <E3Progress
                       className="mt-6"
-                      value={(screen.storageUsedGb / screen.storageTotalGb) * 100}
+                      value={
+                        screen.storageTotalGb > 0
+                          ? (screen.storageUsedGb / screen.storageTotalGb) * 100
+                          : 0
+                      }
                       label="Local storage"
                       tone={
-                        screen.storageUsedGb / screen.storageTotalGb > 0.85 ? "warning" : "gradient"
+                        screen.storageTotalGb > 0 &&
+                        screen.storageUsedGb / screen.storageTotalGb > 0.85
+                          ? "warning"
+                          : "gradient"
                       }
                     />
                   </E3CardBody>
@@ -253,7 +275,8 @@ function ScreenDetailPage() {
                       className="w-full justify-start"
                       onClick={() => disable.mutate()}
                     >
-                      <PowerOff /> {screen.status === "disabled" ? "Enable Screen" : "Disable Screen"}
+                      <PowerOff />{" "}
+                      {screen.status === "disabled" ? "Enable Screen" : "Disable Screen"}
                     </E3Button>
                     <E3Button
                       variant="danger"
@@ -331,7 +354,7 @@ function ScreenDetailPage() {
               open={logsOpen}
               onOpenChange={setLogsOpen}
               title="Device logs"
-              description="Last 20 player events (mocked)."
+              description="Player events from this device. Heartbeats and playback logs appear after the player is online."
               footer={
                 <E3Button variant="outline" onClick={() => setLogsOpen(false)}>
                   Close
@@ -339,15 +362,7 @@ function ScreenDetailPage() {
               }
             >
               <pre className="max-h-72 overflow-auto rounded-xl bg-background p-4 text-xs leading-relaxed text-muted-foreground">
-                {[
-                  "10:32:11  heartbeat ok",
-                  "10:31:52  playback started Birthday Package.mp4",
-                  "10:31:50  playlist loaded (4 items)",
-                  "10:30:12  sync complete v43",
-                  "10:29:40  downloading manifest v43",
-                  "10:15:03  heartbeat ok",
-                  "09:58:22  playback loop restarted",
-                ].join("\n")}
+                No device logs yet.
               </pre>
             </E3Modal>
 

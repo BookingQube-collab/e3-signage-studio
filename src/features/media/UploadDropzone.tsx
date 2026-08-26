@@ -1,9 +1,10 @@
 import { UploadCloud } from "lucide-react";
 import { useRef, useState } from "react";
+import { toast } from "sonner";
 
 import { E3Button, E3Progress } from "@/components/e3";
+import { ACCEPT_MEDIA } from "@/lib/media-file";
 import { cn } from "@/lib/utils";
-import type { Media } from "@/types";
 
 interface PendingUpload {
   name: string;
@@ -11,36 +12,33 @@ interface PendingUpload {
 }
 
 export function UploadDropzone({
-  onComplete,
+  onUpload,
 }: {
-  onComplete: (files: Array<{ name: string; sizeMb: number; type: Media["type"] }>) => void;
+  onUpload: (
+    files: File[],
+    onProgress: (fileName: string, percent: number) => void,
+  ) => Promise<void>;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [pending, setPending] = useState<PendingUpload[]>([]);
+  const busy = pending.length > 0;
 
-  function startMockUpload(files: File[]) {
-    if (files.length === 0) return;
-    setPending(files.map((f) => ({ name: f.name, progress: 0 })));
-
-    let tick = 0;
-    const timer = setInterval(() => {
-      tick += 12;
-      setPending((prev) => prev.map((p) => ({ ...p, progress: Math.min(100, tick) })));
-      if (tick >= 100) {
-        clearInterval(timer);
-        setTimeout(() => {
-          setPending([]);
-          onComplete(
-            files.map((f) => ({
-              name: f.name,
-              sizeMb: Number((f.size / 1_000_000).toFixed(1)) || 1.2,
-              type: f.type.startsWith("video") ? "Video" : "Image",
-            })),
-          );
-        }, 350);
-      }
-    }, 180);
+  async function startUpload(files: File[]) {
+    if (files.length === 0 || busy) return;
+    setPending(files.map((file) => ({ name: file.name, progress: 0 })));
+    try {
+      await onUpload(files, (fileName, percent) => {
+        setPending((prev) =>
+          prev.map((item) => (item.name === fileName ? { ...item, progress: percent } : item)),
+        );
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Upload failed.");
+    } finally {
+      setPending([]);
+      if (inputRef.current) inputRef.current.value = "";
+    }
   }
 
   return (
@@ -48,13 +46,13 @@ export function UploadDropzone({
       <div
         onDragOver={(e) => {
           e.preventDefault();
-          setDragging(true);
+          if (!busy) setDragging(true);
         }}
         onDragLeave={() => setDragging(false)}
         onDrop={(e) => {
           e.preventDefault();
           setDragging(false);
-          startMockUpload(Array.from(e.dataTransfer.files));
+          void startUpload(Array.from(e.dataTransfer.files));
         }}
         className={cn(
           "rounded-2xl bg-card/60 px-6 py-12 text-center transition-colors",
@@ -66,24 +64,33 @@ export function UploadDropzone({
           Drop media here
         </p>
         <p className="mt-1 text-sm text-muted-foreground">Video · Image · Promotional Media</p>
-        <E3Button className="mt-5" variant="primary" onClick={() => inputRef.current?.click()}>
+        <E3Button
+          className="mt-5"
+          variant="primary"
+          disabled={busy}
+          onClick={() => inputRef.current?.click()}
+        >
           Browse Files
         </E3Button>
         <input
           ref={inputRef}
           type="file"
           multiple
-          accept="image/*,video/*"
+          accept={ACCEPT_MEDIA}
           className="sr-only"
           aria-label="Choose media files"
-          onChange={(e) => startMockUpload(Array.from(e.target.files ?? []))}
+          onChange={(e) => void startUpload(Array.from(e.target.files ?? []))}
         />
       </div>
 
       {pending.length > 0 ? (
         <div className="mt-4 space-y-3 rounded-2xl border border-border bg-card p-4">
           {pending.map((p) => (
-            <E3Progress key={p.name} value={p.progress} label={p.name} />
+            <E3Progress
+              key={p.name}
+              value={p.progress}
+              label={p.progress === 0 ? `Preparing ${p.name}` : p.name}
+            />
           ))}
         </div>
       ) : null}

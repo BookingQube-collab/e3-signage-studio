@@ -1,4 +1,4 @@
-import type { LocationStatus, LocationType, UserRole } from "./enums";
+import type { LayoutPreset, LocationStatus, LocationType, UserRole } from "./enums";
 
 export const UI_LOCATION_TYPE = {
   PERMANENT_FEC: "Permanent FEC",
@@ -24,9 +24,23 @@ export const UI_ROLE = {
   EVENT_MANAGER: "Event Manager",
 } as const satisfies Record<UserRole, string>;
 
+export const UI_LAYOUT_PRESET = {
+  FULL_SCREEN: "Full Screen",
+  SPLIT_50_50: "50/50",
+  SPLIT_70_30: "70/30",
+  SPLIT_30_70: "30/70",
+  VIDEO_SIDE_BANNER: "Video + Side Banner",
+  VIDEO_BOTTOM_BANNER: "Video + Bottom Banner",
+  ZONES_3: "3 Zones",
+  ZONES_4: "4 Zones",
+  PORTRAIT: "Portrait",
+  CUSTOM: "Custom",
+} as const satisfies Record<LayoutPreset, string>;
+
 export type UiLocationType = (typeof UI_LOCATION_TYPE)[LocationType];
 export type UiLocationStatus = (typeof UI_LOCATION_STATUS)[LocationStatus];
 export type UiUserRole = (typeof UI_ROLE)[UserRole];
+export type UiLayoutPreset = (typeof UI_LAYOUT_PRESET)[LayoutPreset];
 
 export const UI_LABELS = {
   locationType: UI_LOCATION_TYPE,
@@ -34,6 +48,7 @@ export const UI_LABELS = {
   role: UI_ROLE,
   orientation: { LANDSCAPE: "Landscape", PORTRAIT: "Portrait" },
   mediaType: { VIDEO: "Video", IMAGE: "Image", QR: "QR", LOGO: "Logo" },
+  layoutPreset: UI_LAYOUT_PRESET,
   playlistStatus: {
     DRAFT: "Draft",
     ACTIVE: "Active",

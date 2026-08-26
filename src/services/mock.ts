@@ -125,23 +125,43 @@ export const mockServices: AppServices = {
   mediaService: {
     list: () => delay(store.media),
     get: (id: string) => delay(store.media.find((m) => m.id === id) ?? null),
-    upload: (files: Array<{ name: string; sizeMb: number; type: Media["type"] }>) => {
-      const added: Media[] = files.map((f, i) => ({
-        id: `med-${Date.now()}-${i}`,
-        filename: f.name,
-        type: f.type,
-        dimensions: "1920 × 1080",
-        durationSec: f.type === "Video" ? 30 : null,
-        sizeMb: f.sizeMb,
-        modifiedAt: new Date().toISOString().slice(0, 10),
-        uploadedBy: "Rajan Pathak",
-        uploadedAt: new Date().toISOString().slice(0, 10),
-        version: "v1",
-        thumbnailHue: Math.floor(Math.random() * 360),
-        usedIn: { playlists: [], campaigns: [], screens: [] },
-      }));
+    upload: (files: File[], onProgress) => {
+      const added: Media[] = files.map((file, i) => {
+        onProgress?.(file.name, 100);
+        const isVideo = file.type.startsWith("video") || /\.mp4$/i.test(file.name);
+        return {
+          id: `med-${Date.now()}-${i}`,
+          filename: file.name,
+          type: isVideo ? "Video" : "Image",
+          dimensions: "1920 × 1080",
+          durationSec: isVideo ? 30 : null,
+          sizeMb: Number((file.size / 1_000_000).toFixed(1)) || 0.1,
+          modifiedAt: new Date().toISOString().slice(0, 10),
+          uploadedBy: "Rajan Pathak",
+          uploadedAt: new Date().toISOString().slice(0, 10),
+          version: "v1",
+          thumbnailHue: Math.floor(Math.random() * 360),
+          usedIn: { playlists: [], campaigns: [], screens: [] },
+        };
+      });
       store.media = [...added, ...store.media];
       return delay(added, 400);
+    },
+    replace: (id: string, file: File, onProgress) => {
+      const existing = store.media.find((m) => m.id === id);
+      if (!existing) return Promise.reject(new Error("Media not found."));
+      onProgress?.(100);
+      const isVideo = file.type.startsWith("video") || /\.mp4$/i.test(file.name);
+      const next: Media = {
+        ...existing,
+        filename: file.name,
+        type: isVideo ? "Video" : existing.type,
+        sizeMb: Number((file.size / 1_000_000).toFixed(1)) || existing.sizeMb,
+        modifiedAt: new Date().toISOString().slice(0, 10),
+        version: `v${Number(existing.version.replace(/\D/g, "") || "1") + 1}`,
+      };
+      store.media = store.media.map((m) => (m.id === id ? next : m));
+      return delay(next, 300);
     },
     rename: (id: string, filename: string) => {
       store.media = store.media.map((m) => (m.id === id ? { ...m, filename } : m));
@@ -150,9 +170,19 @@ export const mockServices: AppServices = {
         200,
       );
     },
+    archive: (id: string) => {
+      const existing = store.media.find((m) => m.id === id);
+      if (!existing) return Promise.reject(new Error("Media not found."));
+      store.media = store.media.filter((m) => m.id !== id);
+      return delay(existing, 200);
+    },
     remove: (id: string) => {
       store.media = store.media.filter((m) => m.id !== id);
       return delay(true, 200);
+    },
+    downloadUrl: (id: string) => {
+      const existing = store.media.find((m) => m.id === id);
+      return delay({ url: "#", filename: existing?.filename ?? "media" }, 100);
     },
   },
 
@@ -189,6 +219,14 @@ export const mockServices: AppServices = {
         ? store.campaigns.map((c) => (c.id === campaign.id ? campaign : c))
         : [campaign, ...store.campaigns];
       return delay(campaign, 400);
+    },
+    publish: (campaign: Campaign) => {
+      const published = { ...campaign, status: campaign.status === "Draft" ? "Active" : campaign.status };
+      const exists = store.campaigns.some((c) => c.id === published.id);
+      store.campaigns = exists
+        ? store.campaigns.map((c) => (c.id === published.id ? published : c))
+        : [published, ...store.campaigns];
+      return delay(published, 400);
     },
     syncStatus: (campaignId: string): Promise<SyncStatusItem[]> => {
       const campaign = store.campaigns.find((c) => c.id === campaignId);
@@ -231,6 +269,19 @@ export const mockServices: AppServices = {
     remove: (id: string) => {
       store.users = store.users.filter((u) => u.id !== id);
       return delay(true, 200);
+    },
+    invite: (input) => {
+      const user: User = {
+        id: `usr-${Date.now()}`,
+        name: input.name,
+        email: input.email,
+        role: input.role,
+        locationIds: input.locationIds,
+        status: "Invited",
+        lastActive: "Never",
+      };
+      store.users = [user, ...store.users];
+      return delay(user, 250);
     },
   },
 

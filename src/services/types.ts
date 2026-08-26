@@ -68,12 +68,17 @@ export type ScreenGroupService = {
   remove: (id: string) => Promise<boolean>;
 };
 
+export type MediaUploadProgress = (fileName: string, percent: number) => void;
+
 export type MediaService = {
   list: () => Promise<Media[]>;
   get: (id: string) => Promise<Media | null>;
-  upload: (files: Array<{ name: string; sizeMb: number; type: Media["type"] }>) => Promise<Media[]>;
+  upload: (files: File[], onProgress?: MediaUploadProgress) => Promise<Media[]>;
+  replace: (id: string, file: File, onProgress?: (percent: number) => void) => Promise<Media>;
   rename: (id: string, filename: string) => Promise<Media>;
+  archive: (id: string) => Promise<Media>;
   remove: (id: string) => Promise<boolean>;
+  downloadUrl: (id: string) => Promise<{ url: string; filename: string }>;
 };
 
 export type PlaylistService = {
@@ -92,6 +97,7 @@ export type CampaignService = {
   list: () => Promise<Campaign[]>;
   get: (id: string) => Promise<Campaign | null>;
   save: (campaign: Campaign) => Promise<Campaign>;
+  publish: (campaign: Campaign) => Promise<Campaign>;
   syncStatus: (campaignId: string) => Promise<SyncStatusItem[]>;
 };
 
@@ -103,6 +109,12 @@ export type UserService = {
   list: () => Promise<User[]>;
   save: (user: User) => Promise<User>;
   remove: (id: string) => Promise<boolean>;
+  invite: (input: {
+    name: string;
+    email: string;
+    role: User["role"];
+    locationIds: string[];
+  }) => Promise<User>;
 };
 
 export type DashboardService = {

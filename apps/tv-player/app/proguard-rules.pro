@@ -1,0 +1,5 @@
+-keepattributes *Annotation*, InnerClasses
+-dontnote kotlinx.serialization.AnnotationsKt
+-keepclassmembers class kotlinx.serialization.json.** { *** Companion; }
+-keepclasseswithmembers class **$$serializer { *; }
+-keep class qa.e3.signage.player.core.** { *; }

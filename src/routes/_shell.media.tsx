@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Image as ImageIcon, LayoutGrid, List, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { UploadDropzone } from "@/features/media/UploadDropzone";
+import { ACCEPT_MEDIA } from "@/lib/media-file";
 import { cn } from "@/lib/utils";
 import { mediaService } from "@/services";
 import type { Media } from "@/types";
@@ -44,6 +45,7 @@ const FILTERS = ["All", "Videos", "Images", "QR", "Recently Added"] as const;
 
 function MediaPage() {
   const qc = useQueryClient();
+  const replaceInputRef = useRef<HTMLInputElement>(null);
   const [view, setView] = useState<"grid" | "list">("grid");
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("All");
   const [search, setSearch] = useState("");
@@ -53,10 +55,18 @@ function MediaPage() {
   const mediaQuery = useQuery({ queryKey: ["media"], queryFn: mediaService.list });
 
   const upload = useMutation({
-    mutationFn: mediaService.upload,
+    mutationFn: ({
+      files,
+      onProgress,
+    }: {
+      files: File[];
+      onProgress: (fileName: string, percent: number) => void;
+    }) => mediaService.upload(files, onProgress),
     onSuccess: (added) => {
-      void qc.invalidateQueries({ queryKey: ["media"] });
       toast.success(`${added.length} file${added.length > 1 ? "s" : ""} uploaded`);
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ["media"] });
     },
   });
 
@@ -70,12 +80,56 @@ function MediaPage() {
     },
   });
 
+  const replace = useMutation({
+    mutationFn: ({ id, file }: { id: string; file: File }) => mediaService.replace(id, file),
+    onSuccess: (m) => {
+      void qc.invalidateQueries({ queryKey: ["media"] });
+      setSelected(m);
+      toast.success("New version uploaded");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Replace failed.");
+    },
+  });
+
+  const archive = useMutation({
+    mutationFn: mediaService.archive,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["media"] });
+      setSelected(null);
+      toast.success("Archived");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Could not archive.");
+    },
+  });
+
   const remove = useMutation({
     mutationFn: mediaService.remove,
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["media"] });
       setSelected(null);
       toast.success("Media deleted");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Could not delete.");
+    },
+  });
+
+  const download = useMutation({
+    mutationFn: mediaService.downloadUrl,
+    onSuccess: ({ url, filename }) => {
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.rel = "noopener";
+      link.target = "_blank";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Download failed.");
     },
   });
 
@@ -100,7 +154,11 @@ function MediaPage() {
       />
 
       <div className="mb-6">
-        <UploadDropzone onComplete={(files) => upload.mutate(files)} />
+        <UploadDropzone
+          onUpload={async (files, onProgress) => {
+            await upload.mutateAsync({ files, onProgress });
+          }}
+        />
       </div>
 
       <E3Card className="mb-6">
@@ -208,17 +266,30 @@ function MediaPage() {
         className="sm:max-w-2xl"
         footer={
           <>
-            <E3Button variant="outline" onClick={() => toast.info("Replace flow is UI-only")}>
-              Replace
+            <E3Button
+              variant="outline"
+              disabled={!selected || replace.isPending}
+              onClick={() => replaceInputRef.current?.click()}
+            >
+              {replace.isPending ? "Replacing…" : "Replace"}
             </E3Button>
-            <E3Button variant="outline" onClick={() => toast.info("Download queued")}>
+            <E3Button
+              variant="outline"
+              disabled={!selected || download.isPending}
+              onClick={() => selected && download.mutate(selected.id)}
+            >
               Download
             </E3Button>
-            <E3Button variant="outline" onClick={() => toast.info("Archived")}>
+            <E3Button
+              variant="outline"
+              disabled={!selected || archive.isPending}
+              onClick={() => selected && archive.mutate(selected.id)}
+            >
               Archive
             </E3Button>
             <E3Button
               variant="danger"
+              disabled={!selected || remove.isPending}
               onClick={() => selected && remove.mutate(selected.id)}
             >
               Delete
@@ -228,6 +299,18 @@ function MediaPage() {
       >
         {selected ? (
           <div className="max-h-[60vh] space-y-5 overflow-y-auto pr-1">
+            <input
+              ref={replaceInputRef}
+              type="file"
+              accept={ACCEPT_MEDIA}
+              className="sr-only"
+              aria-label="Replace media file"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file && selected) replace.mutate({ id: selected.id, file });
+              }}
+            />
             <MediaThumb item={selected} className="aspect-video w-full" />
 
             <div className="flex gap-2">

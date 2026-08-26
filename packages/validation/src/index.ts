@@ -39,8 +39,20 @@ export const storageKeySchema = z.string().min(1).max(1024);
 export const ALLOWED_IMAGE_MIME = ["image/jpeg", "image/png", "image/webp"] as const;
 export const ALLOWED_VIDEO_MIME = ["video/mp4"] as const;
 export const ALLOWED_MEDIA_MIME = [...ALLOWED_IMAGE_MIME, ...ALLOWED_VIDEO_MIME] as const;
+export type AllowedMediaMime = (typeof ALLOWED_MEDIA_MIME)[number];
+
+export const MAX_IMAGE_UPLOAD_BYTES = 50 * 1024 * 1024;
+export const MAX_VIDEO_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 
 export const mediaMimeSchema = z.enum(["image/jpeg", "image/png", "image/webp", "video/mp4"]);
+
+export function isAllowedMediaMime(value: string): value is AllowedMediaMime {
+  return (ALLOWED_MEDIA_MIME as readonly string[]).includes(value);
+}
+
+export function maxUploadBytesForMime(mime: AllowedMediaMime): number {
+  return mime.startsWith("video/") ? MAX_VIDEO_UPLOAD_BYTES : MAX_IMAGE_UPLOAD_BYTES;
+}
 
 export const checksumPayloadSchema = z.object({
   algorithm: z.literal("SHA-256"),

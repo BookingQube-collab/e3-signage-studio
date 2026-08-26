@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="e3_bg">#FF19161A</color>
+    <color name="e3_pink">#FFE95A9D</color>
+    <color name="e3_purple">#FF8D5CDD</color>
+    <color name="e3_purple_deep">#FF5F0BC0</color>
+    <color name="e3_blue">#FF5BA2ED</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>

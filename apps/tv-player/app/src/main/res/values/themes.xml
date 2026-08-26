@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.E3Player" parent="android:Theme.Black.NoTitleBar.Fullscreen">
+        <item name="android:windowBackground">@color/e3_bg</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:keepScreenOn">true</item>
+    </style>
+</resources>

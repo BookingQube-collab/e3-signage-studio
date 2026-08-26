@@ -10,6 +10,8 @@ import {
 import { useEffect, type ReactNode } from "react";
 
 import { Toaster } from "@/components/ui/sonner";
+import { AuthSessionSync } from "@/lib/auth-sync";
+import type { AuthSessionResult } from "@/lib/auth-types";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 
@@ -73,7 +75,10 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   );
 }
 
-export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
+export const Route = createRootRouteWithContext<{
+  queryClient: QueryClient;
+  auth?: AuthSessionResult;
+}>()({
   head: () => ({
     meta: [
       { charSet: "utf-8" },
@@ -128,9 +133,11 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-      <Outlet />
-      <Toaster position="top-right" richColors />
+      <AuthSessionSync>
+        {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+        <Outlet />
+        <Toaster position="top-right" richColors />
+      </AuthSessionSync>
     </QueryClientProvider>
   );
 }

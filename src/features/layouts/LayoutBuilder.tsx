@@ -128,8 +128,12 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
     mutationFn: layoutService.save,
     onSuccess: (l) => {
       void qc.invalidateQueries({ queryKey: ["layouts"] });
+      void qc.invalidateQueries({ queryKey: ["layout"] });
       toast.success(`${l.name || "Layout"} saved`);
       void navigate({ to: "/layouts" });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Could not save layout.");
     },
   });
 

@@ -73,6 +73,7 @@ export interface Media {
   uploadedAt: string;
   version: string;
   thumbnailHue: number;
+  thumbnailUrl?: string;
   usedIn: { playlists: string[]; campaigns: string[]; screens: string[] };
 }
 

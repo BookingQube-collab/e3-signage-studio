@@ -3,7 +3,7 @@ import type { AppServices } from "./types";
 export class ApiNotConfiguredError extends Error {
   constructor() {
     super(
-      "VITE_API_MODE=api is set, but the live backend is not wired yet. Leave VITE_API_MODE=mock until Supabase keys are configured (Phase 3).",
+      "VITE_API_MODE=api is set, but the live backend is not wired yet for this resource. Leave VITE_API_MODE=mock until Phase 4+ APIs are connected.",
     );
     this.name = "ApiNotConfiguredError";
   }
@@ -39,8 +39,11 @@ export const apiServices: AppServices = {
     list: () => notConfigured(),
     get: () => notConfigured(),
     upload: () => notConfigured(),
+    replace: () => notConfigured(),
     rename: () => notConfigured(),
+    archive: () => notConfigured(),
     remove: () => notConfigured(),
+    downloadUrl: () => notConfigured(),
   },
   playlistService: {
     list: () => notConfigured(),
@@ -56,6 +59,7 @@ export const apiServices: AppServices = {
     list: () => notConfigured(),
     get: () => notConfigured(),
     save: () => notConfigured(),
+    publish: () => notConfigured(),
     syncStatus: () => notConfigured(),
   },
   scheduleService: {
@@ -65,6 +69,7 @@ export const apiServices: AppServices = {
     list: () => notConfigured(),
     save: () => notConfigured(),
     remove: () => notConfigured(),
+    invite: () => notConfigured(),
   },
   dashboardService: {
     summary: () => notConfigured(),

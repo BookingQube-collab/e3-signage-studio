@@ -41,12 +41,22 @@ function CampaignDetailPage() {
   });
 
   const toggle = useMutation({
-    mutationFn: () =>
-      campaignService.save({ ...data!, status: data?.status === "Paused" ? "Active" : "Paused" }),
+    mutationFn: () => {
+      if (!data) throw new Error("Campaign not found.");
+      if (data.status === "Paused") {
+        return campaignService.publish({ ...data, status: "Active" });
+      }
+      return campaignService.save({ ...data, status: "Paused" });
+    },
     onSuccess: (c) => {
       void qc.invalidateQueries({ queryKey: ["campaign", id] });
       void qc.invalidateQueries({ queryKey: ["campaigns"] });
+      void qc.invalidateQueries({ queryKey: ["campaign-sync", id] });
+      void qc.invalidateQueries({ queryKey: ["schedule"] });
       toast.success(c.status === "Paused" ? "Campaign paused" : "Campaign resumed");
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Could not update campaign.");
     },
   });
 
@@ -75,10 +85,12 @@ function CampaignDetailPage() {
             actions={
               <>
                 <E3StatusBadge status={data.status} className="self-center" />
-                <E3Button variant="primary" onClick={() => toggle.mutate()}>
-                  {data.status === "Paused" ? <Play /> : <Pause />}
-                  {data.status === "Paused" ? "Resume" : "Pause"}
-                </E3Button>
+                {data.status === "Paused" || data.status === "Active" || data.status === "Scheduled" ? (
+                  <E3Button variant="primary" disabled={toggle.isPending} onClick={() => toggle.mutate()}>
+                    {data.status === "Paused" ? <Play /> : <Pause />}
+                    {data.status === "Paused" ? "Resume" : "Pause"}
+                  </E3Button>
+                ) : null}
               </>
             }
           />

@@ -24,6 +24,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { TargetSelector } from "@/features/campaigns/TargetSelector";
 import { cn } from "@/lib/utils";
+import { addDaysIso, localIsoDate } from "@/lib/schedule-days";
 import { campaignService, layoutService, locationService, playlistService, screenService } from "@/services";
 import type { Campaign } from "@/types";
 
@@ -71,8 +72,8 @@ function NewCampaignPage() {
     locationIds: [],
     screenIds: [],
     schedule: {
-      startDate: "2026-08-25",
-      endDate: "2026-09-10",
+      startDate: localIsoDate(),
+      endDate: addDaysIso(localIsoDate(), 16),
       startTime: "12:00",
       endTime: "22:00",
       days: [...DAYS],
@@ -92,8 +93,34 @@ function NewCampaignPage() {
   const save = useMutation({
     mutationFn: campaignService.save,
     onSuccess: (c) => {
+      toast.success("Draft saved");
       void qc.invalidateQueries({ queryKey: ["campaigns"] });
+      void qc.invalidateQueries({ queryKey: ["schedule"] });
       void navigate({ to: "/campaigns/$id", params: { id: c.id } });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Could not save draft.");
+    },
+  });
+
+  const publishMut = useMutation({
+    mutationFn: campaignService.publish,
+    onMutate: () => {
+      setPublishing(true);
+      setProgress(35);
+    },
+    onSuccess: (c) => {
+      setProgress(100);
+      toast.success("Campaign published");
+      void qc.invalidateQueries({ queryKey: ["campaigns"] });
+      void qc.invalidateQueries({ queryKey: ["schedule"] });
+      void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      void navigate({ to: "/campaigns/$id", params: { id: c.id } });
+    },
+    onError: (err) => {
+      setPublishing(false);
+      setProgress(0);
+      toast.error(err instanceof Error ? err.message : "Publish failed.");
     },
   });
 
@@ -114,24 +141,12 @@ function NewCampaignPage() {
     step === 4;
 
   function publish() {
-    setPublishing(true);
-    setProgress(0);
-    let p = 0;
-    const timer = setInterval(() => {
-      p += 14;
-      setProgress(Math.min(100, p));
-      if (p >= 100) {
-        clearInterval(timer);
-        toast.success("Campaign published");
-        save.mutate({
-          ...draft,
-          status: "Active",
-          locationIds: targetLocations.map((l) => l.id),
-          syncTotal: draft.screenIds.length,
-          syncReady: Math.max(0, draft.screenIds.length - 2),
-        });
-      }
-    }, 250);
+    publishMut.mutate({
+      ...draft,
+      locationIds: targetLocations.map((l) => l.id),
+      syncTotal: draft.screenIds.length,
+      syncReady: 0,
+    });
   }
 
   return (
@@ -413,10 +428,8 @@ function NewCampaignPage() {
         <div className="flex gap-2">
           <E3Button
             variant="ghost"
-            onClick={() => {
-              save.mutate(draft);
-              toast.success("Draft saved");
-            }}
+            disabled={save.isPending || publishMut.isPending}
+            onClick={() => save.mutate(draft)}
           >
             Save draft
           </E3Button>
@@ -429,7 +442,12 @@ function NewCampaignPage() {
               Continue
             </E3Button>
           ) : (
-            <E3Button variant="primary" size="lg" disabled={publishing} onClick={publish}>
+            <E3Button
+              variant="primary"
+              size="lg"
+              disabled={publishing || publishMut.isPending}
+              onClick={publish}
+            >
               PUBLISH CAMPAIGN
             </E3Button>
           )}

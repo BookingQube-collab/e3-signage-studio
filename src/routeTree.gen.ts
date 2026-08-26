@@ -31,6 +31,14 @@ import { Route as ShellPlaylistsIdRouteImport } from './routes/_shell.playlists.
 import { Route as ShellPlaylistsNewRouteImport } from './routes/_shell.playlists.new'
 import { Route as ShellScreensIndexRouteImport } from './routes/_shell.screens.index'
 import { Route as ShellScreensIdRouteImport } from './routes/_shell.screens.$id'
+import { Route as ApiDevicesActivateRouteImport } from './routes/api.devices.activate'
+import { Route as ApiDevicesPairRouteImport } from './routes/api.devices.pair'
+import { Route as ApiDevicesDeviceIdErrorLogsRouteImport } from './routes/api.devices.$deviceId.error-logs'
+import { Route as ApiDevicesDeviceIdHeartbeatRouteImport } from './routes/api.devices.$deviceId.heartbeat'
+import { Route as ApiDevicesDeviceIdManifestRouteImport } from './routes/api.devices.$deviceId.manifest'
+import { Route as ApiDevicesDeviceIdPlaybackLogsRouteImport } from './routes/api.devices.$deviceId.playback-logs'
+import { Route as ApiDevicesDeviceIdSyncConfirmationRouteImport } from './routes/api.devices.$deviceId.sync-confirmation'
+import { Route as ApiDevicesDeviceIdSyncStatusRouteImport } from './routes/api.devices.$deviceId.sync-status'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -141,6 +149,52 @@ const ShellScreensIdRoute = ShellScreensIdRouteImport.update({
   path: '/screens/$id',
   getParentRoute: () => ShellRoute,
 } as any)
+const ApiDevicesActivateRoute = ApiDevicesActivateRouteImport.update({
+  id: '/api/devices/activate',
+  path: '/api/devices/activate',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDevicesPairRoute = ApiDevicesPairRouteImport.update({
+  id: '/api/devices/pair',
+  path: '/api/devices/pair',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDevicesDeviceIdErrorLogsRoute =
+  ApiDevicesDeviceIdErrorLogsRouteImport.update({
+    id: '/api/devices/$deviceId/error-logs',
+    path: '/api/devices/$deviceId/error-logs',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiDevicesDeviceIdHeartbeatRoute =
+  ApiDevicesDeviceIdHeartbeatRouteImport.update({
+    id: '/api/devices/$deviceId/heartbeat',
+    path: '/api/devices/$deviceId/heartbeat',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiDevicesDeviceIdManifestRoute =
+  ApiDevicesDeviceIdManifestRouteImport.update({
+    id: '/api/devices/$deviceId/manifest',
+    path: '/api/devices/$deviceId/manifest',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiDevicesDeviceIdPlaybackLogsRoute =
+  ApiDevicesDeviceIdPlaybackLogsRouteImport.update({
+    id: '/api/devices/$deviceId/playback-logs',
+    path: '/api/devices/$deviceId/playback-logs',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiDevicesDeviceIdSyncConfirmationRoute =
+  ApiDevicesDeviceIdSyncConfirmationRouteImport.update({
+    id: '/api/devices/$deviceId/sync-confirmation',
+    path: '/api/devices/$deviceId/sync-confirmation',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiDevicesDeviceIdSyncStatusRoute =
+  ApiDevicesDeviceIdSyncStatusRouteImport.update({
+    id: '/api/devices/$deviceId/sync-status',
+    path: '/api/devices/$deviceId/sync-status',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -159,11 +213,19 @@ export interface FileRoutesByFullPath {
   '/playlists/$id': typeof ShellPlaylistsIdRoute
   '/playlists/new': typeof ShellPlaylistsNewRoute
   '/screens/$id': typeof ShellScreensIdRoute
+  '/api/devices/activate': typeof ApiDevicesActivateRoute
+  '/api/devices/pair': typeof ApiDevicesPairRoute
   '/campaigns/': typeof ShellCampaignsIndexRoute
   '/layouts/': typeof ShellLayoutsIndexRoute
   '/locations/': typeof ShellLocationsIndexRoute
   '/playlists/': typeof ShellPlaylistsIndexRoute
   '/screens/': typeof ShellScreensIndexRoute
+  '/api/devices/$deviceId/error-logs': typeof ApiDevicesDeviceIdErrorLogsRoute
+  '/api/devices/$deviceId/heartbeat': typeof ApiDevicesDeviceIdHeartbeatRoute
+  '/api/devices/$deviceId/manifest': typeof ApiDevicesDeviceIdManifestRoute
+  '/api/devices/$deviceId/playback-logs': typeof ApiDevicesDeviceIdPlaybackLogsRoute
+  '/api/devices/$deviceId/sync-confirmation': typeof ApiDevicesDeviceIdSyncConfirmationRoute
+  '/api/devices/$deviceId/sync-status': typeof ApiDevicesDeviceIdSyncStatusRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -182,11 +244,19 @@ export interface FileRoutesByTo {
   '/playlists/$id': typeof ShellPlaylistsIdRoute
   '/playlists/new': typeof ShellPlaylistsNewRoute
   '/screens/$id': typeof ShellScreensIdRoute
+  '/api/devices/activate': typeof ApiDevicesActivateRoute
+  '/api/devices/pair': typeof ApiDevicesPairRoute
   '/campaigns': typeof ShellCampaignsIndexRoute
   '/layouts': typeof ShellLayoutsIndexRoute
   '/locations': typeof ShellLocationsIndexRoute
   '/playlists': typeof ShellPlaylistsIndexRoute
   '/screens': typeof ShellScreensIndexRoute
+  '/api/devices/$deviceId/error-logs': typeof ApiDevicesDeviceIdErrorLogsRoute
+  '/api/devices/$deviceId/heartbeat': typeof ApiDevicesDeviceIdHeartbeatRoute
+  '/api/devices/$deviceId/manifest': typeof ApiDevicesDeviceIdManifestRoute
+  '/api/devices/$deviceId/playback-logs': typeof ApiDevicesDeviceIdPlaybackLogsRoute
+  '/api/devices/$deviceId/sync-confirmation': typeof ApiDevicesDeviceIdSyncConfirmationRoute
+  '/api/devices/$deviceId/sync-status': typeof ApiDevicesDeviceIdSyncStatusRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -207,11 +277,19 @@ export interface FileRoutesById {
   '/_shell/playlists/$id': typeof ShellPlaylistsIdRoute
   '/_shell/playlists/new': typeof ShellPlaylistsNewRoute
   '/_shell/screens/$id': typeof ShellScreensIdRoute
+  '/api/devices/activate': typeof ApiDevicesActivateRoute
+  '/api/devices/pair': typeof ApiDevicesPairRoute
   '/_shell/campaigns/': typeof ShellCampaignsIndexRoute
   '/_shell/layouts/': typeof ShellLayoutsIndexRoute
   '/_shell/locations/': typeof ShellLocationsIndexRoute
   '/_shell/playlists/': typeof ShellPlaylistsIndexRoute
   '/_shell/screens/': typeof ShellScreensIndexRoute
+  '/api/devices/$deviceId/error-logs': typeof ApiDevicesDeviceIdErrorLogsRoute
+  '/api/devices/$deviceId/heartbeat': typeof ApiDevicesDeviceIdHeartbeatRoute
+  '/api/devices/$deviceId/manifest': typeof ApiDevicesDeviceIdManifestRoute
+  '/api/devices/$deviceId/playback-logs': typeof ApiDevicesDeviceIdPlaybackLogsRoute
+  '/api/devices/$deviceId/sync-confirmation': typeof ApiDevicesDeviceIdSyncConfirmationRoute
+  '/api/devices/$deviceId/sync-status': typeof ApiDevicesDeviceIdSyncStatusRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -232,11 +310,19 @@ export interface FileRouteTypes {
     | '/playlists/$id'
     | '/playlists/new'
     | '/screens/$id'
+    | '/api/devices/activate'
+    | '/api/devices/pair'
     | '/campaigns/'
     | '/layouts/'
     | '/locations/'
     | '/playlists/'
     | '/screens/'
+    | '/api/devices/$deviceId/error-logs'
+    | '/api/devices/$deviceId/heartbeat'
+    | '/api/devices/$deviceId/manifest'
+    | '/api/devices/$deviceId/playback-logs'
+    | '/api/devices/$deviceId/sync-confirmation'
+    | '/api/devices/$deviceId/sync-status'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -255,11 +341,19 @@ export interface FileRouteTypes {
     | '/playlists/$id'
     | '/playlists/new'
     | '/screens/$id'
+    | '/api/devices/activate'
+    | '/api/devices/pair'
     | '/campaigns'
     | '/layouts'
     | '/locations'
     | '/playlists'
     | '/screens'
+    | '/api/devices/$deviceId/error-logs'
+    | '/api/devices/$deviceId/heartbeat'
+    | '/api/devices/$deviceId/manifest'
+    | '/api/devices/$deviceId/playback-logs'
+    | '/api/devices/$deviceId/sync-confirmation'
+    | '/api/devices/$deviceId/sync-status'
   id:
     | '__root__'
     | '/'
@@ -279,17 +373,33 @@ export interface FileRouteTypes {
     | '/_shell/playlists/$id'
     | '/_shell/playlists/new'
     | '/_shell/screens/$id'
+    | '/api/devices/activate'
+    | '/api/devices/pair'
     | '/_shell/campaigns/'
     | '/_shell/layouts/'
     | '/_shell/locations/'
     | '/_shell/playlists/'
     | '/_shell/screens/'
+    | '/api/devices/$deviceId/error-logs'
+    | '/api/devices/$deviceId/heartbeat'
+    | '/api/devices/$deviceId/manifest'
+    | '/api/devices/$deviceId/playback-logs'
+    | '/api/devices/$deviceId/sync-confirmation'
+    | '/api/devices/$deviceId/sync-status'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ShellRoute: typeof ShellRouteWithChildren
   LoginRoute: typeof LoginRoute
+  ApiDevicesActivateRoute: typeof ApiDevicesActivateRoute
+  ApiDevicesPairRoute: typeof ApiDevicesPairRoute
+  ApiDevicesDeviceIdErrorLogsRoute: typeof ApiDevicesDeviceIdErrorLogsRoute
+  ApiDevicesDeviceIdHeartbeatRoute: typeof ApiDevicesDeviceIdHeartbeatRoute
+  ApiDevicesDeviceIdManifestRoute: typeof ApiDevicesDeviceIdManifestRoute
+  ApiDevicesDeviceIdPlaybackLogsRoute: typeof ApiDevicesDeviceIdPlaybackLogsRoute
+  ApiDevicesDeviceIdSyncConfirmationRoute: typeof ApiDevicesDeviceIdSyncConfirmationRoute
+  ApiDevicesDeviceIdSyncStatusRoute: typeof ApiDevicesDeviceIdSyncStatusRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -448,6 +558,62 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellScreensIdRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/api/devices/activate': {
+      id: '/api/devices/activate'
+      path: '/api/devices/activate'
+      fullPath: '/api/devices/activate'
+      preLoaderRoute: typeof ApiDevicesActivateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/devices/pair': {
+      id: '/api/devices/pair'
+      path: '/api/devices/pair'
+      fullPath: '/api/devices/pair'
+      preLoaderRoute: typeof ApiDevicesPairRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/devices/$deviceId/error-logs': {
+      id: '/api/devices/$deviceId/error-logs'
+      path: '/api/devices/$deviceId/error-logs'
+      fullPath: '/api/devices/$deviceId/error-logs'
+      preLoaderRoute: typeof ApiDevicesDeviceIdErrorLogsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/devices/$deviceId/heartbeat': {
+      id: '/api/devices/$deviceId/heartbeat'
+      path: '/api/devices/$deviceId/heartbeat'
+      fullPath: '/api/devices/$deviceId/heartbeat'
+      preLoaderRoute: typeof ApiDevicesDeviceIdHeartbeatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/devices/$deviceId/manifest': {
+      id: '/api/devices/$deviceId/manifest'
+      path: '/api/devices/$deviceId/manifest'
+      fullPath: '/api/devices/$deviceId/manifest'
+      preLoaderRoute: typeof ApiDevicesDeviceIdManifestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/devices/$deviceId/playback-logs': {
+      id: '/api/devices/$deviceId/playback-logs'
+      path: '/api/devices/$deviceId/playback-logs'
+      fullPath: '/api/devices/$deviceId/playback-logs'
+      preLoaderRoute: typeof ApiDevicesDeviceIdPlaybackLogsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/devices/$deviceId/sync-confirmation': {
+      id: '/api/devices/$deviceId/sync-confirmation'
+      path: '/api/devices/$deviceId/sync-confirmation'
+      fullPath: '/api/devices/$deviceId/sync-confirmation'
+      preLoaderRoute: typeof ApiDevicesDeviceIdSyncConfirmationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/devices/$deviceId/sync-status': {
+      id: '/api/devices/$deviceId/sync-status'
+      path: '/api/devices/$deviceId/sync-status'
+      fullPath: '/api/devices/$deviceId/sync-status'
+      preLoaderRoute: typeof ApiDevicesDeviceIdSyncStatusRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -501,6 +667,15 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ShellRoute: ShellRouteWithChildren,
   LoginRoute: LoginRoute,
+  ApiDevicesActivateRoute: ApiDevicesActivateRoute,
+  ApiDevicesPairRoute: ApiDevicesPairRoute,
+  ApiDevicesDeviceIdErrorLogsRoute: ApiDevicesDeviceIdErrorLogsRoute,
+  ApiDevicesDeviceIdHeartbeatRoute: ApiDevicesDeviceIdHeartbeatRoute,
+  ApiDevicesDeviceIdManifestRoute: ApiDevicesDeviceIdManifestRoute,
+  ApiDevicesDeviceIdPlaybackLogsRoute: ApiDevicesDeviceIdPlaybackLogsRoute,
+  ApiDevicesDeviceIdSyncConfirmationRoute:
+    ApiDevicesDeviceIdSyncConfirmationRoute,
+  ApiDevicesDeviceIdSyncStatusRoute: ApiDevicesDeviceIdSyncStatusRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

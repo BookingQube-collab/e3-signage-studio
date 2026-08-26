@@ -28,6 +28,16 @@ supabase/.temp/
 .wrangler/
 .dev.vars
 
+# Android / Gradle (apps/tv-player)
+.gradle/
+**/build/
+local.properties
+*.iml
+.cxx/
+captures/
+.kotlin/
+.tools/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { getPublicCmsUrl } from "@/lib/cms-settings";
 import { locationService, screenGroupService, screenService } from "@/services";
 import type { Orientation } from "@/types";
 
@@ -41,10 +42,14 @@ export function PairScreenDialog({
     mutationFn: screenService.pair,
     onSuccess: (screen) => {
       void qc.invalidateQueries({ queryKey: ["screens"] });
+      void qc.invalidateQueries({ queryKey: ["locations"] });
       void qc.invalidateQueries({ queryKey: ["dashboard"] });
       toast.success(`${screen.name} paired`);
       reset();
       onOpenChange(false);
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || "Could not pair screen");
     },
   });
 
@@ -122,7 +127,8 @@ export function PairScreenDialog({
               className="h-12 text-center text-lg tracking-[0.3em]"
             />
             <p className="text-xs text-muted-foreground">
-              The code appears on the player device after installing the E3 player app.
+              Install the E3 player pointed at {getPublicCmsUrl()}, then enter the 6-digit code
+              shown on the TV.
             </p>
           </div>
         </div>

@@ -12,6 +12,19 @@ export type OrganizationRow = {
   updated_at: string;
 };
 
+export type UserRow = {
+  id: string;
+  organization_id: string;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+  last_active_at: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+};
+
 export type LocationRow = {
   id: string;
   organization_id: string;
@@ -55,8 +68,49 @@ export type ScreenRow = {
   current_playlist_id: string | null;
   currently_playing_media_id: string | null;
   last_error: string | null;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
+  created_by: string | null;
+};
+
+export type ScreenGroupRow = {
+  id: string;
+  organization_id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+};
+
+export type DeviceSyncStateRow = {
+  screen_id: string;
+  local_manifest_version: number | null;
+  cloud_manifest_version: number | null;
+  local_config_version: number | null;
+  cloud_config_version: number | null;
+  package_state: string;
+  sync_state: string;
+  sync_progress: number;
+  sync_requested_at: string | null;
+  last_error: string | null;
+  updated_at: string;
+};
+
+export type MediaRow = {
+  id: string;
+  organization_id: string;
+  name: string;
+  type: string;
+  mime_type: string;
+  current_version_id: string | null;
+  status: string;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  uploaded_by: string | null;
 };
 
 export type MediaVersionRow = {
@@ -73,4 +127,94 @@ export type MediaVersionRow = {
   mime_type: string;
   status: string;
   created_at: string;
+  created_by: string | null;
+};
+
+export type PlaylistRow = {
+  id: string;
+  organization_id: string;
+  name: string;
+  status: string;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+};
+
+export type PlaylistItemRow = {
+  id: string;
+  playlist_id: string;
+  media_id: string;
+  media_version_id: string;
+  position: number;
+  duration_seconds: number;
+  transition: string;
+  layout_id: string | null;
+  priority: number;
+};
+
+export type LayoutRow = {
+  id: string;
+  organization_id: string;
+  name: string;
+  preset: string;
+  orientation: string;
+  width_px: number;
+  height_px: number;
+  background: string;
+  device_json: unknown;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+};
+
+export type LayoutZoneRow = {
+  id: string;
+  layout_id: string;
+  name: string;
+  type: string;
+  x_percent: number;
+  y_percent: number;
+  width_percent: number;
+  height_percent: number;
+  content_ref: string | null;
+  fit: string;
+  background: string;
+  duration_seconds: number;
+  sort_order: number;
+};
+
+export type CampaignRow = {
+  id: string;
+  organization_id: string;
+  name: string;
+  description: string;
+  playlist_id: string | null;
+  layout_id: string | null;
+  status: string;
+  emergency: boolean;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+};
+
+export type CampaignTargetRow = {
+  id: string;
+  campaign_id: string;
+  type: string;
+  target_id: string | null;
+};
+
+export type ScheduleRow = {
+  id: string;
+  campaign_id: string;
+  start_date: string;
+  end_date: string;
+  start_time: string;
+  end_time: string;
+  days_of_week: number[];
+  timezone: string;
+  priority: number;
 };

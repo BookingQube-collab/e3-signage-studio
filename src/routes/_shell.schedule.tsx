@@ -33,9 +33,17 @@ export const Route = createFileRoute("/_shell/schedule")({
   component: SchedulePage,
 });
 
-const MONTH_DAYS = 31;
-const MONTH_LABEL = "August 2026";
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function monthMeta(date = new Date()) {
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const startWeekday = new Date(year, month, 1).getDay();
+  const label = date.toLocaleString("en-GB", { month: "long", year: "numeric" });
+  const isoPrefix = `${year}-${String(month + 1).padStart(2, "0")}`;
+  return { daysInMonth, startWeekday, label, isoPrefix };
+}
 
 function SchedulePage() {
   const [view, setView] = useState<"calendar" | "list">("calendar");
@@ -45,9 +53,10 @@ function SchedulePage() {
   });
 
   const campaigns = data ?? [];
+  const month = monthMeta();
 
   function campaignsOnDay(day: number) {
-    const date = `2026-08-${String(day).padStart(2, "0")}`;
+    const date = `${month.isoPrefix}-${String(day).padStart(2, "0")}`;
     return campaigns.filter((c) => c.schedule.startDate <= date && c.schedule.endDate >= date);
   }
 
@@ -82,7 +91,7 @@ function SchedulePage() {
           />
         ) : view === "calendar" ? (
           <E3Card>
-            <E3CardHeader title={MONTH_LABEL} description="Campaign coverage by day" />
+            <E3CardHeader title={month.label} description="Campaign coverage by day" />
             <E3CardBody>
               <div className="grid grid-cols-7 gap-2">
                 {WEEKDAYS.map((d) => (
@@ -93,7 +102,10 @@ function SchedulePage() {
                     {d}
                   </div>
                 ))}
-                {Array.from({ length: MONTH_DAYS }).map((_, i) => {
+                {Array.from({ length: month.startWeekday }).map((_, i) => (
+                  <div key={`pad-${i}`} className="min-h-20" />
+                ))}
+                {Array.from({ length: month.daysInMonth }).map((_, i) => {
                   const day = i + 1;
                   const items = campaignsOnDay(day);
                   return (

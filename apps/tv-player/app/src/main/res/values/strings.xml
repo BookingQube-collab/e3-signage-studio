@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">E3 Signage</string>
+    <string name="pairing_title">Digital Signage</string>
+    <string name="pairing_unpaired">Device not paired</string>
+    <string name="pairing_instruction">Enter this code\nin the E3 CMS</string>
+    <string name="connected">Connected</string>
+    <string name="offline">Offline</string>
+    <string name="waiting_for_content">Waiting for published content</string>
+</resources>

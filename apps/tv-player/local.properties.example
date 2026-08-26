@@ -1,0 +1,4 @@
+## Copy to local.properties (gitignored). sdk.dir is machine-specific.
+## api.base.url must be reachable from the TV — not localhost or 10.0.2.2 on a physical device.
+sdk.dir=C:\\Users\\YOU\\AppData\\Local\\Android\\Sdk
+api.base.url=https://e3-cms.vercel.app

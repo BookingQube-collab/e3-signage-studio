@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, redirect, useNavigate, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -6,6 +6,9 @@ import logo from "@/assets/e3-logo.png";
 import { E3Button } from "@/components/e3";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getAuthSessionFn, persistSessionFn } from "@/lib/auth-functions";
+import { getPublicCmsUrl } from "@/lib/cms-settings";
+import { getBrowserAccessToken, getSupabase, isSupabaseBrowserConfigured } from "@/lib/supabase";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -22,29 +25,101 @@ export const Route = createFileRoute("/login")({
       },
     ],
   }),
+  beforeLoad: async () => {
+    const accessToken = await getBrowserAccessToken();
+    const auth = await getAuthSessionFn({ data: { accessToken } });
+    if (auth.ok) {
+      throw redirect({ to: "/dashboard" });
+    }
+  },
   component: LoginPage,
 });
 
+function mapLoginError(message: string): string {
+  const lower = message.toLowerCase();
+  if (lower.includes("invalid login") || lower.includes("invalid credentials")) {
+    return "Invalid email or password.";
+  }
+  if (lower.includes("email not confirmed")) {
+    return "Confirm your email before signing in.";
+  }
+  if (lower.includes("failed to fetch") || lower.includes("network")) {
+    return "Network error. Check your connection.";
+  }
+  return message || "Could not sign in.";
+}
+
 function LoginPage() {
   const navigate = useNavigate();
+  const router = useRouter();
   const [email, setEmail] = useState("rajan@e3.qa");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!email || !password) {
       setError("Enter your email and password to continue.");
       return;
     }
+    if (!isSupabaseBrowserConfigured()) {
+      setError("Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
+      return;
+    }
     setError(null);
     setSubmitting(true);
-    setTimeout(() => {
-      setSubmitting(false);
+    try {
+      const { data, error: signError } = await getSupabase().auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (signError) {
+        setError(mapLoginError(signError.message));
+        return;
+      }
+      if (!data.session) {
+        setError("Confirm your email before signing in.");
+        return;
+      }
+      await persistSessionFn({
+        data: {
+          accessToken: data.session.access_token,
+          refreshToken: data.session.refresh_token,
+        },
+      });
       toast.success("Signed in");
-      navigate({ to: "/dashboard" });
-    }, 700);
+      await router.invalidate();
+      await navigate({ to: "/dashboard" });
+    } catch {
+      setError("Network error. Check your connection.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function onForgotPassword() {
+    if (!email) {
+      setError("Enter your email to reset your password.");
+      return;
+    }
+    if (!isSupabaseBrowserConfigured()) {
+      setError("Supabase is not configured.");
+      return;
+    }
+    setError(null);
+    try {
+      const { error: resetError } = await getSupabase().auth.resetPasswordForEmail(email, {
+        redirectTo: `${getPublicCmsUrl()}/login`,
+      });
+      if (resetError) {
+        setError(resetError.message);
+        return;
+      }
+      toast.success("Password reset link sent to your email");
+    } catch {
+      setError("Network error. Check your connection.");
+    }
   }
 
   return (
@@ -78,7 +153,7 @@ function LoginPage() {
         </div>
 
         <div className="e3-gradient-border rounded-2xl bg-card p-6 sm:p-8">
-          <form onSubmit={onSubmit} className="space-y-5" noValidate>
+          <form onSubmit={(e) => void onSubmit(e)} className="space-y-5" noValidate>
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -123,7 +198,7 @@ function LoginPage() {
             <div className="text-center">
               <button
                 type="button"
-                onClick={() => toast.info("Password reset link sent to your email")}
+                onClick={() => void onForgotPassword()}
                 className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
               >
                 Forgot password?

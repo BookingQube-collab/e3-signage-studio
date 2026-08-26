@@ -81,6 +81,9 @@ function LocationsPage() {
       setOpen(false);
       setForm({ name: "", city: "", type: "Permanent FEC", status: "Active" });
     },
+    onError: (err: Error) => {
+      toast.error(err.message || "Could not add location");
+    },
   });
 
   const filtered = (data ?? []).filter((l) => {

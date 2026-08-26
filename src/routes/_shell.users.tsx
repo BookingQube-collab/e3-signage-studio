@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { invert, EVENT_LOCATION_TYPES, UI_LOCATION_TYPE, UI_ROLE } from "@e3/shared-types";
 import { UserPlus } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -25,6 +26,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { listLocationOptionsFn, inviteUserFn } from "@/lib/auth-functions";
+import { getBrowserAccessToken } from "@/lib/supabase";
 import { userService } from "@/services";
 import type { User, UserRole } from "@/types";
 
@@ -48,7 +51,10 @@ export const Route = createFileRoute("/_shell/users")({
 
 const ROLES: { role: UserRole; permissions: string }[] = [
   { role: "Super Admin", permissions: "Full access to every location, device and setting" },
-  { role: "Marketing", permissions: "Upload media, build playlists and layouts, publish campaigns" },
+  {
+    role: "Marketing",
+    permissions: "Upload media, build playlists and layouts, publish campaigns",
+  },
   {
     role: "Site Supervisor",
     permissions: "Manage screens, playback and schedules for assigned locations",
@@ -56,32 +62,81 @@ const ROLES: { role: UserRole; permissions: string }[] = [
   { role: "Event Manager", permissions: "Create and schedule campaigns for event locations" },
 ];
 
+const ROLE_FROM_UI = invert(UI_ROLE);
+
 function UsersPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ name: "", email: "", role: "Event Manager" as UserRole });
+  const [editing, setEditing] = useState<User | null>(null);
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    role: "Event Manager" as UserRole,
+    locationIds: [] as string[],
+  });
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["users"],
     queryFn: userService.list,
   });
 
+  const locationsQuery = useQuery({
+    queryKey: ["users", "location-options"],
+    queryFn: async () => {
+      const accessToken = await getBrowserAccessToken();
+      return listLocationOptionsFn({ data: { accessToken } });
+    },
+  });
+  const locationOptions = locationsQuery.data ?? [];
+  const assignableLocations =
+    ROLE_FROM_UI[form.role] === "EVENT_MANAGER"
+      ? locationOptions.filter((loc) =>
+          (EVENT_LOCATION_TYPES as readonly string[]).includes(loc.type),
+        )
+      : locationOptions;
+
   const invite = useMutation({
-    mutationFn: (input: { name: string; email: string; role: UserRole }) =>
-      userService.save({
-        id: `usr-${Date.now()}`,
-        name: input.name,
-        email: input.email,
-        role: input.role,
-        locationIds: [],
-        status: "Invited",
-        lastActive: "Never",
-      }),
-    onSuccess: () => {
+    mutationFn: async (input: {
+      name: string;
+      email: string;
+      role: UserRole;
+      locationIds: string[];
+    }) => {
+      const accessToken = await getBrowserAccessToken();
+      return inviteUserFn({
+        data: {
+          accessToken,
+          name: input.name,
+          email: input.email,
+          role: ROLE_FROM_UI[input.role],
+          locationIds: input.locationIds,
+        },
+      });
+    },
+    onSuccess: (result) => {
       void qc.invalidateQueries({ queryKey: ["users"] });
       setOpen(false);
-      setForm({ name: "", email: "", role: "Event Manager" });
-      toast.success("Invitation sent");
+      setForm({ name: "", email: "", role: "Event Manager", locationIds: [] });
+      if (result.warning) {
+        toast.warning(result.warning);
+      } else {
+        toast.success("Invitation sent");
+      }
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || "Could not send invite");
+    },
+  });
+
+  const saveUser = useMutation({
+    mutationFn: (user: User) => userService.save(user),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["users"] });
+      setEditing(null);
+      toast.success("User updated");
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || "Could not update user");
     },
   });
 
@@ -105,15 +160,58 @@ function UsersPage() {
         </div>
       ),
     },
-    { key: "role", header: "Role", cell: (u) => u.role },
+    {
+      key: "role",
+      header: "Role",
+      cell: (u) => (
+        <Select
+          value={u.role}
+          onValueChange={(v) => saveUser.mutate({ ...u, role: v as UserRole })}
+        >
+          <SelectTrigger className="h-9 w-[170px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {ROLES.map((r) => (
+              <SelectItem key={r.role} value={r.role}>
+                {r.role}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ),
+    },
     {
       key: "locations",
       header: "Locations",
-      cell: (u) => (u.locationIds.length === 0 ? "All locations" : `${u.locationIds.length} assigned`),
+      cell: (u) => (
+        <button
+          type="button"
+          className="text-left text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+          onClick={() => {
+            setEditing(u);
+            setForm({
+              name: u.name,
+              email: u.email,
+              role: u.role,
+              locationIds: u.locationIds,
+            });
+          }}
+        >
+          {u.locationIds.length === 0 ? "All locations" : `${u.locationIds.length} assigned`}
+        </button>
+      ),
     },
     { key: "last", header: "Last active", cell: (u) => u.lastActive },
     { key: "status", header: "Status", cell: (u) => <E3StatusBadge status={u.status} /> },
   ];
+
+  function locationToggle(id: string, checked: boolean) {
+    setForm((prev) => ({
+      ...prev,
+      locationIds: checked ? [...prev.locationIds, id] : prev.locationIds.filter((x) => x !== id),
+    }));
+  }
 
   return (
     <div>
@@ -121,7 +219,13 @@ function UsersPage() {
         title="Users & roles"
         description="Who can access the E3 signage network and what they can change."
         actions={
-          <E3Button variant="primary" onClick={() => setOpen(true)}>
+          <E3Button
+            variant="primary"
+            onClick={() => {
+              setForm({ name: "", email: "", role: "Event Manager", locationIds: [] });
+              setOpen(true);
+            }}
+          >
             <UserPlus /> Invite user
           </E3Button>
         }
@@ -133,7 +237,10 @@ function UsersPage() {
         </E3QueryBoundary>
 
         <E3Card>
-          <E3CardHeader title="Role permissions" description="Reference matrix for the four E3 roles" />
+          <E3CardHeader
+            title="Role permissions"
+            description="Reference matrix for the four E3 roles"
+          />
           <E3CardBody className="space-y-3">
             {ROLES.map((r) => (
               <div
@@ -162,7 +269,12 @@ function UsersPage() {
               variant="primary"
               disabled={!form.name.trim() || !form.email.includes("@") || invite.isPending}
               onClick={() =>
-                invite.mutate({ name: form.name.trim(), email: form.email.trim(), role: form.role })
+                invite.mutate({
+                  name: form.name.trim(),
+                  email: form.email.trim(),
+                  role: form.role,
+                  locationIds: form.locationIds,
+                })
               }
             >
               Send invite
@@ -192,7 +304,10 @@ function UsersPage() {
           </div>
           <div className="space-y-2">
             <Label htmlFor="u-role">Role</Label>
-            <Select value={form.role} onValueChange={(v) => setForm({ ...form, role: v as UserRole })}>
+            <Select
+              value={form.role}
+              onValueChange={(v) => setForm({ ...form, role: v as UserRole })}
+            >
               <SelectTrigger id="u-role">
                 <SelectValue />
               </SelectTrigger>
@@ -205,6 +320,107 @@ function UsersPage() {
               </SelectContent>
             </Select>
           </div>
+          {locationOptions.length > 0 ? (
+            <div className="space-y-2">
+              <Label>Assigned locations</Label>
+              <div className="max-h-40 space-y-2 overflow-y-auto rounded-xl border border-border p-3">
+                {assignableLocations.map((loc) => (
+                  <label key={loc.id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={form.locationIds.includes(loc.id)}
+                      onChange={(e) => locationToggle(loc.id, e.target.checked)}
+                    />
+                    <span>
+                      {loc.name}
+                      {ROLE_FROM_UI[form.role] === "EVENT_MANAGER"
+                        ? ` · ${UI_LOCATION_TYPE[loc.type]}`
+                        : ""}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              No locations in the database yet. Location assignment will appear after locations are
+              created.
+            </p>
+          )}
+        </div>
+      </E3Modal>
+
+      <E3Modal
+        open={editing !== null}
+        onOpenChange={(next) => {
+          if (!next) setEditing(null);
+        }}
+        title="Assign locations"
+        description="Site Supervisors and Event Managers are limited to the locations you assign."
+        footer={
+          <>
+            <E3Button variant="ghost" onClick={() => setEditing(null)}>
+              Cancel
+            </E3Button>
+            <E3Button
+              variant="primary"
+              disabled={!editing || saveUser.isPending}
+              onClick={() => {
+                if (!editing) return;
+                saveUser.mutate({ ...editing, role: form.role, locationIds: form.locationIds });
+              }}
+            >
+              Save
+            </E3Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="e-role">Role</Label>
+            <Select
+              value={form.role}
+              onValueChange={(v) => setForm({ ...form, role: v as UserRole })}
+            >
+              <SelectTrigger id="e-role">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ROLES.map((r) => (
+                  <SelectItem key={r.role} value={r.role}>
+                    {r.role}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {locationOptions.length > 0 ? (
+            <div className="space-y-2">
+              <Label>Assigned locations</Label>
+              <div className="max-h-40 space-y-2 overflow-y-auto rounded-xl border border-border p-3">
+                {assignableLocations.map((loc) => (
+                  <label key={loc.id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={form.locationIds.includes(loc.id)}
+                      onChange={(e) => locationToggle(loc.id, e.target.checked)}
+                    />
+                    <span>
+                      {loc.name}
+                      {ROLE_FROM_UI[form.role] === "EVENT_MANAGER"
+                        ? ` · ${UI_LOCATION_TYPE[loc.type]}`
+                        : ""}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              No locations in the database yet. Super Admins and Marketing see all locations by
+              default.
+            </p>
+          )}
         </div>
       </E3Modal>
     </div>

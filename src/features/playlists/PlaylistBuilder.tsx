@@ -41,8 +41,12 @@ export function PlaylistBuilder({ initial }: { initial: Playlist }) {
     mutationFn: playlistService.save,
     onSuccess: (p) => {
       void qc.invalidateQueries({ queryKey: ["playlists"] });
+      void qc.invalidateQueries({ queryKey: ["playlist"] });
       toast.success(`${p.name} saved`);
       void navigate({ to: "/playlists" });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Could not save playlist.");
     },
   });
 
@@ -73,6 +77,7 @@ export function PlaylistBuilder({ initial }: { initial: Playlist }) {
           <>
             <E3Button
               variant="outline"
+              disabled={save.isPending}
               onClick={() => save.mutate({ ...playlist, status: "Draft" })}
             >
               Save Draft

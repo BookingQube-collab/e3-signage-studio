@@ -21,6 +21,7 @@ import {
 import {
   isoDateSchema,
   isoDateTimeSchema,
+  mediaMimeSchema,
   nonEmptyNameSchema,
   percentSchema,
   sha256Schema,
@@ -177,8 +178,29 @@ export const mediaDtoSchema = z.object({
 
 export const mediaUploadIntentSchema = z.object({
   filename: z.string().min(1).max(255),
-  mimeType: z.string().min(3).max(128),
+  mimeType: mediaMimeSchema,
   sizeBytes: z.number().int().positive().max(8_000_000_000),
+  checksumSha256: sha256Schema,
+  width: z.number().int().positive().nullable(),
+  height: z.number().int().positive().nullable(),
+  durationMs: z.number().int().positive().nullable(),
+  mediaId: uuidSchema.nullable(),
+});
+
+export const mediaUploadIntentResponseSchema = z.object({
+  mediaId: uuidSchema,
+  mediaVersionId: uuidSchema,
+  versionNumber: z.number().int().positive(),
+  storageKey: z.string().min(1),
+  uploadUrl: z.string().min(1),
+  uploadMethod: z.enum(["PUT", "POST"]),
+  uploadHeaders: z.record(z.string()),
+  expiresInSeconds: z.number().int().positive(),
+});
+
+export const mediaCompleteSchema = z.object({
+  mediaVersionId: uuidSchema,
+  checksumSha256: sha256Schema,
 });
 
 export const playlistItemDtoSchema = z.object({
@@ -337,6 +359,9 @@ export type ScreenDto = z.infer<typeof screenDtoSchema>;
 export type ScreenGroupDto = z.infer<typeof screenGroupDtoSchema>;
 export type MediaDto = z.infer<typeof mediaDtoSchema>;
 export type MediaVersionDto = z.infer<typeof mediaVersionDtoSchema>;
+export type MediaUploadIntent = z.infer<typeof mediaUploadIntentSchema>;
+export type MediaUploadIntentResponse = z.infer<typeof mediaUploadIntentResponseSchema>;
+export type MediaComplete = z.infer<typeof mediaCompleteSchema>;
 export type PlaylistDto = z.infer<typeof playlistDtoSchema>;
 export type LayoutDto = z.infer<typeof layoutDtoSchema>;
 export type CampaignDto = z.infer<typeof campaignDtoSchema>;

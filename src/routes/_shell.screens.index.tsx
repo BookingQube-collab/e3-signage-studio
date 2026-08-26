@@ -1,7 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { LayoutGrid, List, Monitor, Plus, Search } from "lucide-react";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 
 import {
   E3Button,
@@ -51,9 +52,11 @@ export const Route = createFileRoute("/_shell/screens/")({
 
 function ScreensPage() {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const [view, setView] = useState<"table" | "grid">("table");
   const [pairOpen, setPairOpen] = useState(false);
   const [groupsOpen, setGroupsOpen] = useState(false);
+  const [newGroup, setNewGroup] = useState("");
   const [search, setSearch] = useState("");
   const [locationId, setLocationId] = useState("all");
   const [status, setStatus] = useState("all");
@@ -63,6 +66,19 @@ function ScreensPage() {
   const screensQuery = useQuery({ queryKey: ["screens"], queryFn: screenService.list });
   const locations = useQuery({ queryKey: ["locations"], queryFn: locationService.list });
   const groups = useQuery({ queryKey: ["screen-groups"], queryFn: screenGroupService.list });
+
+  const createGroup = useMutation({
+    mutationFn: () =>
+      screenGroupService.create({ name: newGroup.trim(), description: "", screenIds: [] }),
+    onSuccess: (group) => {
+      void qc.invalidateQueries({ queryKey: ["screen-groups"] });
+      setNewGroup("");
+      toast.success(`${group.name} created`);
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || "Could not create group");
+    },
+  });
 
   const rows = useMemo(() => {
     return (screensQuery.data ?? []).filter((s) => {
@@ -90,8 +106,7 @@ function ScreensPage() {
     {
       key: "group",
       header: "Group",
-      cell: (s) =>
-        (groups.data ?? []).find((g) => s.groupIds.includes(g.id))?.name ?? "—",
+      cell: (s) => (groups.data ?? []).find((g) => s.groupIds.includes(g.id))?.name ?? "—",
     },
     { key: "status", header: "Status", cell: (s) => <E3StatusBadge status={s.status} /> },
     { key: "playlist", header: "Playlist", cell: (s) => s.playlistName ?? "—" },
@@ -273,8 +288,19 @@ function ScreensPage() {
           <div className="space-y-2">
             <Label htmlFor="new-group">Create group</Label>
             <div className="flex gap-2">
-              <Input id="new-group" placeholder="e.g. All Cafe Screens" />
-              <E3Button variant="primary">Create</E3Button>
+              <Input
+                id="new-group"
+                value={newGroup}
+                onChange={(e) => setNewGroup(e.target.value)}
+                placeholder="e.g. All Cafe Screens"
+              />
+              <E3Button
+                variant="primary"
+                disabled={!newGroup.trim() || createGroup.isPending}
+                onClick={() => createGroup.mutate()}
+              >
+                {createGroup.isPending ? "Saving…" : "Create"}
+              </E3Button>
             </div>
           </div>
           {(groups.data ?? []).map((g) => (

@@ -1,16 +1,40 @@
 import { apiServices } from "./api";
+import { liveCampaignService } from "./campaigns";
+import { liveDashboardService } from "./dashboard";
+import { liveLocationService } from "./locations";
+import { liveLayoutService } from "./layouts";
+import { liveMediaService } from "./media";
 import { mockServices } from "./mock";
+import { livePlaylistService } from "./playlists";
+import { liveScheduleService } from "./schedules";
+import { liveScreenGroupService } from "./screen-groups";
+import { liveScreenService } from "./screens";
 import type { AppServices } from "./types";
+import { liveUserService } from "./users";
 
 /**
  * Service layer. Pages import these names — never mocks or HTTP clients directly.
  *
- * VITE_API_MODE=mock (default) — in-memory store, current Lovable behaviour.
- * VITE_API_MODE=api — live backend (throws until Phase 3 wires Supabase).
+ * Locations, screens, screen groups, media, playlists, layouts, campaigns,
+ * schedules, users, and dashboard fleet counts are live. Reports stay mock.
+ * VITE_API_MODE=api — live backend for remaining resources (later phases).
  */
 
 function resolveServices(): AppServices {
-  return import.meta.env.VITE_API_MODE === "api" ? apiServices : mockServices;
+  const base = import.meta.env.VITE_API_MODE === "api" ? apiServices : mockServices;
+  return {
+    ...base,
+    locationService: liveLocationService,
+    screenService: liveScreenService,
+    screenGroupService: liveScreenGroupService,
+    mediaService: liveMediaService,
+    playlistService: livePlaylistService,
+    layoutService: liveLayoutService,
+    campaignService: liveCampaignService,
+    scheduleService: liveScheduleService,
+    userService: liveUserService,
+    dashboardService: liveDashboardService,
+  };
 }
 
 const services = resolveServices();

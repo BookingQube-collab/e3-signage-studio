@@ -22,7 +22,11 @@ export function MediaThumb({ item, className }: { item: Media; className?: strin
       }}
       aria-hidden
     >
-      <Icon className="size-7 text-foreground/70" />
+      {item.thumbnailUrl ? (
+        <img src={item.thumbnailUrl} alt="" className="size-full object-cover" />
+      ) : (
+        <Icon className="size-7 text-foreground/70" />
+      )}
     </div>
   );
 }

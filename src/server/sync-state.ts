@@ -18,7 +18,7 @@ export const PACKAGE_TRANSITIONS: Record<ContentPackageState, readonly ContentPa
 };
 
 export const SYNC_TRANSITIONS: Record<DeviceSyncState, readonly DeviceSyncState[]> = {
-  WAITING: ["NOTIFIED", "OFFLINE"],
+  WAITING: ["NOTIFIED", "DOWNLOADING", "OFFLINE"],
   NOTIFIED: ["DOWNLOADING", "OFFLINE", "FAILED"],
   DOWNLOADING: ["VERIFYING", "OFFLINE", "FAILED", "DOWNLOADING"],
   VERIFYING: ["READY", "FAILED"],

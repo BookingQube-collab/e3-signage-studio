@@ -1,4 +1,4 @@
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   BarChart3,
   CalendarClock,
@@ -29,21 +29,53 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { clearSessionFn } from "@/lib/auth-functions";
+import type { CmsProfile } from "@/lib/auth-types";
+import { hasPermission } from "@/lib/rbac";
+import { getSupabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import { UI_ROLE, type AppPermission } from "@e3/shared-types";
 
-const NAV = [
-  { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard },
-  { label: "Locations", to: "/locations", icon: MapPin },
-  { label: "Screens", to: "/screens", icon: Monitor },
-  { label: "Media", to: "/media", icon: Image },
-  { label: "Playlists", to: "/playlists", icon: ListVideo },
-  { label: "Layouts", to: "/layouts", icon: LayoutTemplate },
-  { label: "Campaigns", to: "/campaigns", icon: Megaphone },
-  { label: "Schedule", to: "/schedule", icon: CalendarClock },
-  { label: "Reports", to: "/reports", icon: BarChart3 },
-  { label: "Users", to: "/users", icon: Users },
-  { label: "Settings", to: "/settings", icon: Settings },
-] as const;
+const NAV: ReadonlyArray<{
+  label: string;
+  to:
+    | "/dashboard"
+    | "/locations"
+    | "/screens"
+    | "/media"
+    | "/playlists"
+    | "/layouts"
+    | "/campaigns"
+    | "/schedule"
+    | "/reports"
+    | "/users"
+    | "/settings";
+  icon: typeof LayoutDashboard;
+  permission: AppPermission;
+}> = [
+  { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard, permission: "dashboard.view" },
+  { label: "Locations", to: "/locations", icon: MapPin, permission: "locations.view" },
+  { label: "Screens", to: "/screens", icon: Monitor, permission: "screens.view" },
+  { label: "Media", to: "/media", icon: Image, permission: "media.view" },
+  { label: "Playlists", to: "/playlists", icon: ListVideo, permission: "playlists.view" },
+  { label: "Layouts", to: "/layouts", icon: LayoutTemplate, permission: "layouts.view" },
+  { label: "Campaigns", to: "/campaigns", icon: Megaphone, permission: "campaigns.view" },
+  { label: "Schedule", to: "/schedule", icon: CalendarClock, permission: "schedule.view" },
+  { label: "Reports", to: "/reports", icon: BarChart3, permission: "reports.view" },
+  { label: "Users", to: "/users", icon: Users, permission: "users.view" },
+  { label: "Settings", to: "/settings", icon: Settings, permission: "settings.view" },
+];
+
+function initialsFor(name: string): string {
+  return (
+    name
+      .split(" ")
+      .map((part) => part[0] ?? "")
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() || "?"
+  );
+}
 
 function Brand({ collapsed }: { collapsed?: boolean }) {
   return (
@@ -58,12 +90,23 @@ function Brand({ collapsed }: { collapsed?: boolean }) {
   );
 }
 
-function NavList({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
+function NavList({
+  collapsed,
+  onNavigate,
+  profile,
+}: {
+  collapsed?: boolean;
+  onNavigate?: () => void;
+  profile: CmsProfile | null;
+}) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const items = NAV.filter(
+    (item) => profile !== null && hasPermission(profile.role, item.permission),
+  );
 
   return (
     <nav aria-label="Main" className="flex flex-1 flex-col gap-1 overflow-y-auto p-3">
-      {NAV.map(({ label, to, icon: Icon }) => {
+      {items.map(({ label, to, icon: Icon }) => {
         const active = pathname === to || pathname.startsWith(`${to}/`);
         return (
           <Link
@@ -88,9 +131,40 @@ function NavList({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?: 
   );
 }
 
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({
+  children,
+  profile,
+  fallbackEmail,
+}: {
+  children: ReactNode;
+  profile: CmsProfile | null;
+  fallbackEmail: string | null;
+}) {
+  const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+
+  const name = profile?.name ?? fallbackEmail ?? "Signed in";
+  const roleLabel = profile ? UI_ROLE[profile.role] : "No profile";
+  const initials = initialsFor(profile?.name ?? fallbackEmail ?? "?");
+  const showSettings = profile !== null && hasPermission(profile.role, "settings.view");
+
+  async function signOut() {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await getSupabase().auth.signOut();
+    } catch {
+      // still clear server cookies
+    }
+    try {
+      await clearSessionFn();
+    } catch {
+      // ignore
+    }
+    await navigate({ to: "/login" });
+  }
 
   return (
     <div className="flex min-h-screen w-full bg-background">
@@ -104,7 +178,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="flex h-16 items-center border-b border-sidebar-border px-3">
           <Brand collapsed={collapsed} />
         </div>
-        <NavList collapsed={collapsed} />
+        <NavList collapsed={collapsed} profile={profile} />
         <div className="border-t border-sidebar-border p-3">
           <button
             type="button"
@@ -135,7 +209,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div className="flex h-16 items-center border-b border-sidebar-border px-3">
                 <Brand />
               </div>
-              <NavList onNavigate={() => setMobileOpen(false)} />
+              <NavList onNavigate={() => setMobileOpen(false)} profile={profile} />
             </SheetContent>
           </Sheet>
 
@@ -166,21 +240,25 @@ export function AppShell({ children }: { children: ReactNode }) {
                   className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <Avatar className="size-9 border border-border">
-                    <AvatarFallback className="bg-secondary text-xs font-semibold">RP</AvatarFallback>
+                    <AvatarFallback className="bg-secondary text-xs font-semibold">
+                      {initials}
+                    </AvatarFallback>
                   </Avatar>
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52">
                 <DropdownMenuLabel>
-                  <p className="text-sm font-medium">Rajan Pathak</p>
-                  <p className="text-xs text-muted-foreground">Super Admin</p>
+                  <p className="text-sm font-medium">{name}</p>
+                  <p className="text-xs text-muted-foreground">{roleLabel}</p>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem asChild>
-                  <Link to="/settings">Settings</Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to="/login">Sign out</Link>
+                {showSettings ? (
+                  <DropdownMenuItem asChild>
+                    <Link to="/settings">Settings</Link>
+                  </DropdownMenuItem>
+                ) : null}
+                <DropdownMenuItem onSelect={() => void signOut()} disabled={signingOut}>
+                  {signingOut ? "Signing out…" : "Sign out"}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
