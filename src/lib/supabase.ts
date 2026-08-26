@@ -7,10 +7,28 @@ export type PublicSupabaseConfig = { url: string; anonKey: string };
 const MISSING_SERVER_CONFIG =
   "Supabase is not configured on the server. Set SUPABASE_URL and SUPABASE_ANON_KEY (or VITE_ equivalents).";
 
+function vitePublicValue(parts: readonly string[]): string | undefined {
+  try {
+    const env = import.meta.env as unknown as Record<string, unknown>;
+    const raw = Reflect.get(env, parts.join("_"));
+    if (typeof raw !== "string") return undefined;
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed === "undefined" || trimmed === "null") return undefined;
+    return trimmed;
+  } catch {
+    return undefined;
+  }
+}
+
 function vitePublicConfig(): PublicSupabaseConfig | null {
-  const url = import.meta.env.VITE_SUPABASE_URL?.trim();
-  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
-  if (!url || !anonKey || url === "undefined" || anonKey === "undefined") return null;
+  const url =
+    vitePublicValue(["VITE", "SUPABASE", "URL"]) ??
+    vitePublicValue(["NEXT", "PUBLIC", "SUPABASE", "URL"]);
+  const anonKey =
+    vitePublicValue(["VITE", "SUPABASE", "ANON", "KEY"]) ??
+    vitePublicValue(["NEXT", "PUBLIC", "SUPABASE", "ANON", "KEY"]) ??
+    vitePublicValue(["NEXT", "PUBLIC", "SUPABASE", "PUBLISHABLE", "KEY"]);
+  if (!url || !anonKey) return null;
   return { url, anonKey };
 }
 

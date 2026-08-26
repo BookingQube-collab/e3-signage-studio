@@ -4,7 +4,10 @@ export const Route = createFileRoute("/api/public-config")({
   server: {
     handlers: {
       GET: async () => {
-        const { getPublicSupabaseConfig } = await import("@/server/env.server");
+        const { getPublicSupabaseConfig, primeNitroRuntimeConfig } = await import(
+          "@/server/env.server"
+        );
+        await primeNitroRuntimeConfig();
         const config = getPublicSupabaseConfig();
         if (!config) {
           return Response.json(
