@@ -24,6 +24,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { playlistService, screenService } from "@/services";
+import { ADMIN_MONITORING_REFETCH_MS } from "@/lib/monitoring";
+import { useLiveMonitoring } from "@/lib/use-live-monitoring";
 
 export const Route = createFileRoute("/_shell/screens/$id")({
   head: () => ({
@@ -52,8 +54,18 @@ function ScreenDetailPage() {
   const [unpairOpen, setUnpairOpen] = useState(false);
   const [nextPlaylist, setNextPlaylist] = useState("");
 
-  const screenQuery = useQuery({ queryKey: ["screen", id], queryFn: () => screenService.get(id) });
+  const screenQuery = useQuery({
+    queryKey: ["screen", id],
+    queryFn: () => screenService.get(id),
+    refetchInterval: ADMIN_MONITORING_REFETCH_MS,
+  });
   const playlists = useQuery({ queryKey: ["playlists"], queryFn: playlistService.list });
+  const logsQuery = useQuery({
+    queryKey: ["screen-logs", id],
+    queryFn: () => screenService.logs(id),
+    enabled: logsOpen,
+  });
+  useLiveMonitoring([["screen", id], ["screens"], ["screen-logs", id]]);
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["screen", id] });
@@ -217,6 +229,7 @@ function ScreenDetailPage() {
                         ["Last heartbeat", screen.lastSeen],
                         ["App version", screen.appVersion],
                         ["Sync state", screen.syncState],
+                        ["Last error", screen.lastError ?? "—"],
                       ].map(([label, value]) => (
                         <div key={label} className="min-w-0">
                           <dt className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -354,16 +367,35 @@ function ScreenDetailPage() {
               open={logsOpen}
               onOpenChange={setLogsOpen}
               title="Device logs"
-              description="Player events from this device. Heartbeats and playback logs appear after the player is online."
+              description="Heartbeats, sync acks, playback, and player errors from this screen."
               footer={
                 <E3Button variant="outline" onClick={() => setLogsOpen(false)}>
                   Close
                 </E3Button>
               }
             >
-              <pre className="max-h-72 overflow-auto rounded-xl bg-background p-4 text-xs leading-relaxed text-muted-foreground">
-                No device logs yet.
-              </pre>
+              {logsQuery.isLoading ? (
+                <p className="text-sm text-muted-foreground">Loading device logs…</p>
+              ) : logsQuery.isError ? (
+                <p className="text-sm text-destructive">Could not load device logs.</p>
+              ) : (logsQuery.data ?? []).length === 0 ? (
+                <pre className="max-h-72 overflow-auto rounded-xl bg-background p-4 text-xs leading-relaxed text-muted-foreground">
+                  No device logs yet. Heartbeats and playback logs appear after the player is online.
+                </pre>
+              ) : (
+                <ol className="max-h-72 space-y-3 overflow-auto rounded-xl bg-background p-4 text-xs leading-relaxed">
+                  {(logsQuery.data ?? []).map((line) => (
+                    <li key={line.id} className="min-w-0">
+                      <p className="font-medium text-foreground">
+                        <span className="uppercase tracking-wide text-muted-foreground">{line.source}</span>
+                        {" · "}
+                        {line.at}
+                      </p>
+                      <p className="mt-0.5 text-muted-foreground">{line.message}</p>
+                    </li>
+                  ))}
+                </ol>
+              )}
             </E3Modal>
 
             <E3Modal

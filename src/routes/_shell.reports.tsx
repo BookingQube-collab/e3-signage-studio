@@ -9,6 +9,7 @@ import {
   E3Card,
   E3CardBody,
   E3CardHeader,
+  E3EmptyState,
   E3PageHeader,
   E3Progress,
   E3QueryBoundary,
@@ -18,6 +19,7 @@ import {
 } from "@/components/e3";
 import { cn } from "@/lib/utils";
 import { reportService } from "@/services";
+import { ADMIN_MONITORING_REFETCH_MS, toCsv } from "@/lib/monitoring";
 import type { AvailabilityRow, CampaignPerformanceRow, ProofOfPlayRow } from "@/types";
 
 export const Route = createFileRoute("/_shell/reports")({
@@ -40,14 +42,33 @@ export const Route = createFileRoute("/_shell/reports")({
 
 const TABS = ["Proof of Play", "Screen Availability", "Campaign Performance"] as const;
 
+function downloadCsv(filename: string, headers: string[], rows: string[][]): void {
+  const blob = new Blob([toCsv(headers, rows)], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 function ReportsPage() {
   const [tab, setTab] = useState<(typeof TABS)[number]>("Proof of Play");
 
-  const pop = useQuery({ queryKey: ["report-pop"], queryFn: reportService.proofOfPlay });
-  const avail = useQuery({ queryKey: ["report-avail"], queryFn: reportService.availability });
+  const pop = useQuery({
+    queryKey: ["report-pop"],
+    queryFn: reportService.proofOfPlay,
+    refetchInterval: ADMIN_MONITORING_REFETCH_MS,
+  });
+  const avail = useQuery({
+    queryKey: ["report-avail"],
+    queryFn: reportService.availability,
+    refetchInterval: ADMIN_MONITORING_REFETCH_MS,
+  });
   const perf = useQuery({
     queryKey: ["report-perf"],
     queryFn: reportService.campaignPerformance,
+    refetchInterval: ADMIN_MONITORING_REFETCH_MS,
   });
 
   const popRows = pop.data ?? [];
@@ -117,7 +138,57 @@ function ReportsPage() {
         title="Reports"
         description="Operational reporting across content, devices and campaigns."
         actions={
-          <E3Button variant="outline" onClick={() => toast.success("Export queued (mock)")}>
+          <E3Button
+            variant="outline"
+            onClick={() => {
+              if (tab === "Proof of Play") {
+                downloadCsv(
+                  "e3-proof-of-play.csv",
+                  ["Date", "Media", "Playlist", "Campaign", "Screen", "Location", "Plays", "Duration min", "Success %"],
+                  popRows.map((r) => [
+                    r.date,
+                    r.media,
+                    r.playlist,
+                    r.campaign,
+                    r.screen,
+                    r.location,
+                    String(r.playCount),
+                    String(r.totalDurationMin),
+                    String(r.successRate),
+                  ]),
+                );
+                toast.success("Proof of play CSV downloaded");
+                return;
+              }
+              if (tab === "Screen Availability") {
+                downloadCsv(
+                  "e3-screen-availability.csv",
+                  ["Screen", "Location", "Online %", "Offline %", "Last seen"],
+                  availRows.map((r) => [
+                    r.screen,
+                    r.location,
+                    String(r.onlinePct),
+                    String(r.offlinePct),
+                    r.lastSeen,
+                  ]),
+                );
+                toast.success("Availability CSV downloaded");
+                return;
+              }
+              downloadCsv(
+                "e3-campaign-performance.csv",
+                ["Campaign", "Screens", "Plays", "Hours played", "Completion %"],
+                perfRows.map((r) => [
+                  r.campaign,
+                  String(r.screens),
+                  String(r.plays),
+                  String(r.hoursPlayed),
+                  String(r.completionRate),
+                ]),
+              );
+              toast.success("Campaign performance CSV downloaded");
+            }}
+          >
             <Download /> Export CSV
           </E3Button>
         }
@@ -152,21 +223,43 @@ function ReportsPage() {
           </div>
 
           <E3Card>
-            <E3CardHeader title={tab} description="Last 30 days · mock reporting data" />
+            <E3CardHeader
+              title={tab}
+              description="Last 30 days · proof of play from player log batches, availability from heartbeats"
+            />
             <E3CardBody>
               {tab === "Proof of Play" ? (
-                <E3Table
-                  columns={popColumns}
-                  rows={popRows}
-                  rowKey={(r) => r.id}
-                  caption="Proof of play"
-                />
+                popRows.length === 0 ? (
+                  <E3EmptyState
+                    title="No proof of play yet"
+                    description="Completed plays from the TV player will appear here after content is published and playing."
+                  />
+                ) : (
+                  <E3Table
+                    columns={popColumns}
+                    rows={popRows}
+                    rowKey={(r) => r.id}
+                    caption="Proof of play"
+                  />
+                )
               ) : tab === "Screen Availability" ? (
-                <E3Table
-                  columns={availColumns}
-                  rows={availRows}
-                  rowKey={(r) => r.screenId}
-                  caption="Screen availability"
+                availRows.length === 0 ? (
+                  <E3EmptyState
+                    title="No screens"
+                    description="Pair a screen to see heartbeat-based availability."
+                  />
+                ) : (
+                  <E3Table
+                    columns={availColumns}
+                    rows={availRows}
+                    rowKey={(r) => r.screenId}
+                    caption="Screen availability"
+                  />
+                )
+              ) : perfRows.length === 0 ? (
+                <E3EmptyState
+                  title="No campaign plays yet"
+                  description="Campaign metrics come from proof-of-play batches once published content is on air."
                 />
               ) : (
                 <E3Table

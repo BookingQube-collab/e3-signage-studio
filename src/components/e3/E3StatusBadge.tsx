@@ -23,6 +23,7 @@ const statusToneMap: Record<string, StatusTone> = {
   upcoming: "info",
   scheduled: "info",
   waiting: "warning",
+  notified: "info",
   pending: "warning",
   paused: "warning",
   draft: "neutral",

@@ -26,6 +26,8 @@ import {
 } from "@/components/e3";
 import { Skeleton } from "@/components/ui/skeleton";
 import { dashboardService } from "@/services";
+import { ADMIN_MONITORING_REFETCH_MS } from "@/lib/monitoring";
+import { useLiveMonitoring } from "@/lib/use-live-monitoring";
 
 export const Route = createFileRoute("/_shell/dashboard")({
   head: () => ({
@@ -49,7 +51,9 @@ function DashboardPage() {
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["dashboard"],
     queryFn: dashboardService.summary,
+    refetchInterval: ADMIN_MONITORING_REFETCH_MS,
   });
+  useLiveMonitoring([["dashboard"], ["screens"]]);
 
   return (
     <div>
@@ -194,23 +198,30 @@ function DashboardPage() {
             </E3Card>
 
             <E3Card>
-              <E3CardHeader title="Recent activity" description="Last 24 hours" />
+              <E3CardHeader title="Recent activity" description="Sync acks and heartbeats · last 24 hours" />
               <E3CardBody>
-                <ol className="space-y-4">
-                  {data.activity.map((a) => (
-                    <li key={a.id} className="flex gap-3">
-                      <div className="mt-1 grid size-7 shrink-0 place-items-center rounded-full bg-muted">
-                        <Activity className="size-3.5 text-muted-foreground" aria-hidden />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium">{a.message}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {a.detail} · {a.at}
-                        </p>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
+                {data.activity.length === 0 ? (
+                  <E3EmptyState
+                    title="No recent activity"
+                    description="Sync confirmations and status changes will appear here once players report in."
+                  />
+                ) : (
+                  <ol className="space-y-4">
+                    {data.activity.map((a) => (
+                      <li key={a.id} className="flex gap-3">
+                        <div className="mt-1 grid size-7 shrink-0 place-items-center rounded-full bg-muted">
+                          <Activity className="size-3.5 text-muted-foreground" aria-hidden />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium">{a.message}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {a.detail} · {a.at}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                )}
               </E3CardBody>
             </E3Card>
           </div>

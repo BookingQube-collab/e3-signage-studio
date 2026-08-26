@@ -78,11 +78,11 @@ export const UI_LABELS = {
   },
   syncState: {
     WAITING: "Waiting",
-    NOTIFIED: "Waiting",
+    NOTIFIED: "Notified",
     DOWNLOADING: "Downloading",
     VERIFYING: "Verifying",
     READY: "Ready",
-    ACTIVE: "Ready",
+    ACTIVE: "Active",
     FAILED: "Failed",
     OFFLINE: "Offline",
   },

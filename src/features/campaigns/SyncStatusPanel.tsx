@@ -10,15 +10,19 @@ import {
   E3StatusBadge,
 } from "@/components/e3";
 import { campaignService } from "@/services";
+import { ADMIN_MONITORING_REFETCH_MS } from "@/lib/monitoring";
+import { useLiveMonitoring } from "@/lib/use-live-monitoring";
 
 export function SyncStatusPanel({ campaignId }: { campaignId: string }) {
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["campaign-sync", campaignId],
     queryFn: () => campaignService.syncStatus(campaignId),
+    refetchInterval: ADMIN_MONITORING_REFETCH_MS,
   });
+  useLiveMonitoring([["campaign-sync", campaignId]]);
 
   const items = data ?? [];
-  const ready = items.filter((i) => i.state === "Ready").length;
+  const ready = items.filter((i) => i.state === "Ready" || i.state === "Active").length;
 
   return (
     <E3Card>

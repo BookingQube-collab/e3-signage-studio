@@ -28,6 +28,7 @@ export const apiServices: AppServices = {
     update: () => notConfigured(),
     syncNow: () => notConfigured(),
     unpair: () => notConfigured(),
+    logs: () => notConfigured(),
   },
   screenGroupService: {
     list: () => notConfigured(),

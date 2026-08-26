@@ -179,8 +179,12 @@ type ScreenDb = {
   available_storage: number | null;
   current_playlist_id: string | null;
   currently_playing_media_id: string | null;
+  last_error: string | null;
   archived_at: string | null;
 };
+
+const SCREEN_COLUMNS =
+  "id, organization_id, location_id, name, screen_type, orientation, width, height, operational_status, app_version, local_manifest_version, cloud_manifest_version, last_heartbeat_at, last_sync_at, total_storage, available_storage, current_playlist_id, currently_playing_media_id, last_error, archived_at";
 
 async function loadScreenRecords(
   client: ReturnType<typeof getUserClient>,
@@ -311,6 +315,7 @@ async function loadScreenRecords(
       totalStorageBytes: asNullableNumber(row.total_storage),
       availableStorageBytes: asNullableNumber(row.available_storage),
       appVersion: row.app_version,
+      lastError: asNullableString(row.last_error),
     });
   }
   return out;
@@ -448,9 +453,7 @@ async function listScreenRows(accessToken: string, locationId?: string): Promise
   const client = getUserClient(accessToken);
   let query = client
     .from("screens")
-    .select(
-      "id, organization_id, location_id, name, screen_type, orientation, width, height, operational_status, app_version, local_manifest_version, cloud_manifest_version, last_heartbeat_at, last_sync_at, total_storage, available_storage, current_playlist_id, currently_playing_media_id, archived_at",
-    )
+    .select(SCREEN_COLUMNS)
     .eq("organization_id", auth.profile.organizationId)
     .is("archived_at", null)
     .order("created_at", { ascending: true });
@@ -476,9 +479,7 @@ export async function getScreen(accessToken: string, id: string): Promise<Screen
   const client = getUserClient(accessToken);
   const { data, error } = await client
     .from("screens")
-    .select(
-      "id, organization_id, location_id, name, screen_type, orientation, width, height, operational_status, app_version, local_manifest_version, cloud_manifest_version, last_heartbeat_at, last_sync_at, total_storage, available_storage, current_playlist_id, currently_playing_media_id, archived_at",
-    )
+    .select(SCREEN_COLUMNS)
     .eq("id", id)
     .is("archived_at", null)
     .maybeSingle();
@@ -535,9 +536,7 @@ export async function pairScreen(
       last_heartbeat_at: null,
       created_by: auth.userId,
     })
-    .select(
-      "id, organization_id, location_id, name, screen_type, orientation, width, height, operational_status, app_version, local_manifest_version, cloud_manifest_version, last_heartbeat_at, last_sync_at, total_storage, available_storage, current_playlist_id, currently_playing_media_id, archived_at",
-    )
+    .select(SCREEN_COLUMNS)
     .single();
   throwIfError(insertError, "Could not create the screen.");
   if (!inserted) throw new Error("Could not create the screen.");

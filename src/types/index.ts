@@ -26,7 +26,15 @@ export interface Location {
 
 export type ScreenStatus = "online" | "offline" | "syncing" | "disabled";
 export type Orientation = "Landscape" | "Portrait";
-export type SyncState = "Waiting" | "Downloading" | "Verifying" | "Ready" | "Failed" | "Offline";
+export type SyncState =
+  | "Waiting"
+  | "Notified"
+  | "Downloading"
+  | "Verifying"
+  | "Ready"
+  | "Active"
+  | "Failed"
+  | "Offline";
 
 export interface Screen {
   id: string;
@@ -50,6 +58,14 @@ export interface Screen {
   storageUsedGb: number;
   storageTotalGb: number;
   appVersion: string;
+  lastError: string | null;
+}
+
+export interface DeviceLogLine {
+  id: string;
+  at: string;
+  source: "heartbeat" | "sync" | "playback" | "error";
+  message: string;
 }
 
 export interface ScreenGroup {

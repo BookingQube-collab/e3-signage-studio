@@ -4,6 +4,7 @@ import type {
   AvailabilityRow,
   Campaign,
   CampaignPerformanceRow,
+  DeviceLogLine,
   Layout,
   Location,
   Media,
@@ -59,6 +60,7 @@ export type ScreenService = {
   update: (id: string, patch: Partial<Screen>) => Promise<Screen>;
   syncNow: (id: string) => Promise<Screen>;
   unpair: (id: string) => Promise<boolean>;
+  logs: (id: string) => Promise<DeviceLogLine[]>;
 };
 
 export type ScreenGroupService = {

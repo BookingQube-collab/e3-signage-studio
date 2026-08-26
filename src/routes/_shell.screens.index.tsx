@@ -30,6 +30,8 @@ import {
 import { PairScreenDialog } from "@/features/screens/PairScreenDialog";
 import { cn } from "@/lib/utils";
 import { locationService, screenGroupService, screenService } from "@/services";
+import { ADMIN_MONITORING_REFETCH_MS } from "@/lib/monitoring";
+import { useLiveMonitoring } from "@/lib/use-live-monitoring";
 import type { Screen } from "@/types";
 
 export const Route = createFileRoute("/_shell/screens/")({
@@ -63,7 +65,12 @@ function ScreensPage() {
   const [groupId, setGroupId] = useState("all");
   const [orientation, setOrientation] = useState("all");
 
-  const screensQuery = useQuery({ queryKey: ["screens"], queryFn: screenService.list });
+  const screensQuery = useQuery({
+    queryKey: ["screens"],
+    queryFn: screenService.list,
+    refetchInterval: ADMIN_MONITORING_REFETCH_MS,
+  });
+  useLiveMonitoring([["screens"], ["dashboard"]]);
   const locations = useQuery({ queryKey: ["locations"], queryFn: locationService.list });
   const groups = useQuery({ queryKey: ["screen-groups"], queryFn: screenGroupService.list });
 

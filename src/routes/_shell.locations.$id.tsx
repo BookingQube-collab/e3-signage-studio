@@ -217,7 +217,7 @@ function LocationDetailPage() {
                       {screens.slice(0, 5).map((s) => (
                         <li key={s.id} className="flex justify-between gap-3">
                           <span className="min-w-0 truncate">
-                            {s.name} — {s.syncState === "Ready" ? "synchronized" : s.syncState}
+                            {s.name} — {s.syncState === "Ready" || s.syncState === "Active" ? "synchronized" : s.syncState}
                           </span>
                           <span className="shrink-0 text-xs text-muted-foreground">{s.lastSync}</span>
                         </li>

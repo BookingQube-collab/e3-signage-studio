@@ -1,6 +1,7 @@
 import * as db from "@/mocks/data";
 import type {
   Campaign,
+  DeviceLogLine,
   Layout,
   Location,
   Media,
@@ -78,6 +79,7 @@ export const mockServices: AppServices = {
         storageUsedGb: 0,
         storageTotalGb: 64,
         appVersion: "E3 Player 1.4.2",
+        lastError: null,
       };
       store.screens = [screen, ...store.screens];
       return delay(screen, 600);
@@ -100,6 +102,7 @@ export const mockServices: AppServices = {
       store.screens = store.screens.filter((s) => s.id !== id);
       return delay(true, 250);
     },
+    logs: () => delay<DeviceLogLine[]>([]),
   },
 
   screenGroupService: {

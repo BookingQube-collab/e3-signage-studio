@@ -176,6 +176,7 @@ export const screens: Screen[] = Object.entries(screenSeeds).flatMap(([locationI
       storageUsedGb: 12 + i * 3.4,
       storageTotalGb: 64,
       appVersion: "E3 Player 1.4.2",
+      lastError: null,
     } satisfies Screen;
   });
 });

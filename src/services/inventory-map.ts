@@ -60,6 +60,7 @@ export type ScreenRecord = {
   totalStorageBytes: number | null;
   availableStorageBytes: number | null;
   appVersion: string | null;
+  lastError: string | null;
 };
 
 export type ScreenGroupRecord = {
@@ -141,6 +142,7 @@ export function toUiScreen(row: ScreenRecord): Screen {
     storageUsedGb: bytesToGb(usedBytes),
     storageTotalGb: bytesToGb(row.totalStorageBytes),
     appVersion: row.appVersion ?? "—",
+    lastError: row.lastError,
   };
 }
 

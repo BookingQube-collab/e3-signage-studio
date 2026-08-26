@@ -6,6 +6,7 @@ import { liveLayoutService } from "./layouts";
 import { liveMediaService } from "./media";
 import { mockServices } from "./mock";
 import { livePlaylistService } from "./playlists";
+import { liveReportService } from "./reports";
 import { liveScheduleService } from "./schedules";
 import { liveScreenGroupService } from "./screen-groups";
 import { liveScreenService } from "./screens";
@@ -16,8 +17,9 @@ import { liveUserService } from "./users";
  * Service layer. Pages import these names — never mocks or HTTP clients directly.
  *
  * Locations, screens, screen groups, media, playlists, layouts, campaigns,
- * schedules, users, and dashboard fleet counts are live. Reports stay mock.
- * VITE_API_MODE=api — live backend for remaining resources (later phases).
+ * schedules, users, dashboard, and reports are live. Heartbeats and sync acks
+ * drive ONLINE status, alerts, activity, and proof-of-play.
+ * VITE_API_MODE=api — unused leftover adapter (all modules are live).
  */
 
 function resolveServices(): AppServices {
@@ -34,6 +36,7 @@ function resolveServices(): AppServices {
     scheduleService: liveScheduleService,
     userService: liveUserService,
     dashboardService: liveDashboardService,
+    reportService: liveReportService,
   };
 }
 

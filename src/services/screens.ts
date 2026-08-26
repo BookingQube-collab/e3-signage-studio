@@ -7,6 +7,7 @@ import {
   unpairScreenFn,
   updateScreenFn,
 } from "@/lib/inventory-functions";
+import { deviceLogsFn } from "@/lib/monitoring-functions";
 import { getBrowserAccessToken } from "@/lib/supabase";
 import type { Screen } from "@/types";
 import { isUuid, ORIENTATION_FROM_UI, toUiScreen } from "./inventory-map";
@@ -110,4 +111,5 @@ export const liveScreenService: ScreenService = {
     return toUiScreen(row);
   },
   unpair: async (id) => unpairScreenFn({ data: { accessToken: await accessToken(), id } }),
+  logs: async (id) => deviceLogsFn({ data: { accessToken: await accessToken(), screenId: id } }),
 };
