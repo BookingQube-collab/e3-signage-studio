@@ -14,6 +14,24 @@ interface DeviceApi {
         bearerToken: String,
         body: SyncConfirmationRequest,
     ): OkResponse
+
+    suspend fun heartbeat(
+        deviceId: String,
+        bearerToken: String,
+        body: DeviceHeartbeatRequest,
+    ): OkResponse
+
+    suspend fun playbackLogs(
+        deviceId: String,
+        bearerToken: String,
+        body: PlaybackLogBatch,
+    ): BatchAcceptedResponse
+
+    suspend fun errorLogs(
+        deviceId: String,
+        bearerToken: String,
+        body: ErrorLogBatch,
+    ): BatchAcceptedResponse
 }
 
 interface DeviceCredentialStore {

@@ -12,6 +12,7 @@ import {
   type ScreenOperationalStatus,
 } from "@e3/shared-types";
 
+import { connectivityFromHeartbeat, DEFAULT_OFFLINE_AFTER_SECONDS } from "@/lib/connectivity";
 import { hashPairingCode } from "@/lib/device-crypto";
 
 import type { CmsProfile } from "@/lib/auth-types";
@@ -20,7 +21,6 @@ import { requireCmsPermission, resolveAuthFromRequest } from "./auth.server";
 import { ensureSeedLocations } from "./location-seed.server";
 import { getServiceRoleClient, getUserClient } from "./supabase.server";
 
-const DEFAULT_OFFLINE_AFTER_SECONDS = 300;
 const PENDING_PAIR_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 
 type AuthOk = Extract<Awaited<ReturnType<typeof resolveAuthFromRequest>>, { ok: true }>;
@@ -105,12 +105,7 @@ function connectivityOf(
   lastHeartbeatAt: string | null,
   offlineAfterSeconds: number,
 ): ScreenRecord["connectivity"] {
-  if (operationalStatus === "DISABLED") return "DISABLED";
-  if (!lastHeartbeatAt) return "OFFLINE";
-  const at = new Date(lastHeartbeatAt).getTime();
-  if (Number.isNaN(at)) return "OFFLINE";
-  if (Date.now() - at > offlineAfterSeconds * 1000) return "OFFLINE";
-  return "ONLINE";
+  return connectivityFromHeartbeat(operationalStatus, lastHeartbeatAt, offlineAfterSeconds);
 }
 
 function assertAssignedLocation(

@@ -13,6 +13,7 @@ import qa.e3.signage.player.BuildConfig
 import qa.e3.signage.player.E3PlayerApplication
 import qa.e3.signage.player.core.PairingEvent
 import qa.e3.signage.player.data.DeviceConfigEntity
+import qa.e3.signage.player.data.HeartbeatWorker
 import qa.e3.signage.player.data.SyncStatusWorker
 
 data class PairingUiState(
@@ -81,6 +82,7 @@ class PairingViewModel(application: Application) : AndroidViewModel(application)
                         ),
                     )
                     SyncStatusWorker.enqueue(app)
+                    HeartbeatWorker.enqueue(app)
                     _ui.update { it.copy(paired = true, error = null, message = "Paired") }
                 }
             }

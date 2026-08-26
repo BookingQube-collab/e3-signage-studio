@@ -7,13 +7,17 @@ import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import qa.e3.signage.player.core.ActivateRequest
 import qa.e3.signage.player.core.ActivateResponse
+import qa.e3.signage.player.core.BatchAcceptedResponse
 import qa.e3.signage.player.core.ContentManifest
 import qa.e3.signage.player.core.DeviceApi
 import qa.e3.signage.player.core.DeviceErrorBody
+import qa.e3.signage.player.core.DeviceHeartbeatRequest
 import qa.e3.signage.player.core.DeviceHttpException
+import qa.e3.signage.player.core.ErrorLogBatch
 import qa.e3.signage.player.core.OkResponse
 import qa.e3.signage.player.core.PairRequest
 import qa.e3.signage.player.core.PairResponse
+import qa.e3.signage.player.core.PlaybackLogBatch
 import qa.e3.signage.player.core.SyncConfirmationRequest
 import qa.e3.signage.player.core.SyncStatusResponse
 import qa.e3.signage.player.core.redactHttp
@@ -52,6 +56,27 @@ interface DeviceRetrofitService {
         @Header("Authorization") authorization: String,
         @Body body: SyncConfirmationRequest,
     ): OkResponse
+
+    @POST("api/devices/{id}/heartbeat")
+    suspend fun heartbeat(
+        @Path("id") id: String,
+        @Header("Authorization") authorization: String,
+        @Body body: DeviceHeartbeatRequest,
+    ): OkResponse
+
+    @POST("api/devices/{id}/playback-logs")
+    suspend fun playbackLogs(
+        @Path("id") id: String,
+        @Header("Authorization") authorization: String,
+        @Body body: PlaybackLogBatch,
+    ): BatchAcceptedResponse
+
+    @POST("api/devices/{id}/error-logs")
+    suspend fun errorLogs(
+        @Path("id") id: String,
+        @Header("Authorization") authorization: String,
+        @Body body: ErrorLogBatch,
+    ): BatchAcceptedResponse
 }
 
 class RetrofitDeviceApi(
@@ -86,6 +111,24 @@ class RetrofitDeviceApi(
         bearerToken: String,
         body: SyncConfirmationRequest,
     ): OkResponse = unwrap { service.confirmSync(deviceId, "Bearer $bearerToken", body) }
+
+    override suspend fun heartbeat(
+        deviceId: String,
+        bearerToken: String,
+        body: DeviceHeartbeatRequest,
+    ): OkResponse = unwrap { service.heartbeat(deviceId, "Bearer $bearerToken", body) }
+
+    override suspend fun playbackLogs(
+        deviceId: String,
+        bearerToken: String,
+        body: PlaybackLogBatch,
+    ): BatchAcceptedResponse = unwrap { service.playbackLogs(deviceId, "Bearer $bearerToken", body) }
+
+    override suspend fun errorLogs(
+        deviceId: String,
+        bearerToken: String,
+        body: ErrorLogBatch,
+    ): BatchAcceptedResponse = unwrap { service.errorLogs(deviceId, "Bearer $bearerToken", body) }
 
     private suspend fun <T> unwrap(block: suspend () -> T): T {
         return try {

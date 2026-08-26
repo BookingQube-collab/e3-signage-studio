@@ -10,20 +10,25 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import qa.e3.signage.player.E3PlayerApplication
 import qa.e3.signage.player.core.FitMode
+import qa.e3.signage.player.core.HEARTBEAT_INTERVAL_MS
+import qa.e3.signage.player.core.OpenPlayback
+import qa.e3.signage.player.core.PlaybackResult
 import qa.e3.signage.player.core.PlaylistItemKind
 import qa.e3.signage.player.core.PlaylistSequencer
 import qa.e3.signage.player.core.ResolvedPlaylistItem
 import qa.e3.signage.player.core.ScheduleEngine
 import qa.e3.signage.player.core.ZonePlan
 import qa.e3.signage.player.core.ZoneSource
+import qa.e3.signage.player.core.completePlayback
 import qa.e3.signage.player.core.planZones
 import qa.e3.signage.player.core.resolvePlaylistItems
+import qa.e3.signage.player.core.startPlayback
 
 data class PlaybackUiState(
     val playing: Boolean = false,
@@ -31,7 +36,7 @@ data class PlaybackUiState(
     val layoutWidth: Int = 1920,
     val layoutHeight: Int = 1080,
     val zones: List<ZoneUiState> = emptyList(),
-    val waitingMessage: String? = "Waiting for published content",
+    val waitingKind: WaitingKind? = WaitingKind.FIRST_PUBLISH,
     val timezone: String = "Asia/Qatar",
     val playingMediaId: String? = null,
 )
@@ -62,6 +67,7 @@ sealed class ZonePresentation {
 class PlaybackViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as E3PlayerApplication
     private val packages = app.container.packages
+    private val telemetry = app.container.telemetry
     private val _ui = MutableStateFlow(PlaybackUiState())
     val ui: StateFlow<PlaybackUiState> = _ui
 
@@ -69,38 +75,51 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     var videoFinished: CompletableDeferred<Unit> = CompletableDeferred()
         private set
 
+    @Volatile
+    private var videoFailed = false
+
+    @Volatile
+    private var openPlay: OpenPlayback? = null
+
     init {
         viewModelScope.launch { playLoop() }
         viewModelScope.launch { pollLoop() }
+        viewModelScope.launch { heartbeatLoop() }
         viewModelScope.launch { resumeWhenOnline() }
     }
 
     @Volatile
     private var videoGeneration = 0
 
-    fun onVideoFinished(generation: Int) {
-        if (generation == videoGeneration) videoFinished.complete(Unit)
+    fun onVideoFinished(generation: Int, failed: Boolean = false) {
+        if (generation == videoGeneration) {
+            videoFailed = failed
+            videoFinished.complete(Unit)
+        }
     }
 
     private suspend fun playLoop() {
         while (viewModelScope.isActive) {
             val loaded = packages.loadActive()
             if (loaded == null) {
-                _ui.value = PlaybackUiState(waitingMessage = "Waiting for published content")
+                closeOpenPlay(PlaybackResult.INTERRUPTED)
+                _ui.value = PlaybackUiState(waitingKind = WaitingKind.FIRST_PUBLISH)
                 withTimeoutOrNull(15_000) { app.container.sync.activations.first() }
                 continue
             }
             val (manifest, root) = loaded
             val metrics = app.resources.displayMetrics
             val plan = planZones(manifest, root, metrics.widthPixels, metrics.heightPixels)
-            val tz = ScheduleEngine.selectActive(manifest.schedules)?.timezone
+            val activeSchedule = ScheduleEngine.selectActive(manifest.schedules)
+            val tz = activeSchedule?.timezone
                 ?: manifest.schedules.firstOrNull()?.timezone
                 ?: "Asia/Qatar"
             if (!ScheduleEngine.shouldPlay(manifest.schedules)) {
+                closeOpenPlay(PlaybackResult.INTERRUPTED)
                 _ui.value = PlaybackUiState(
                     playing = false,
                     background = plan.background,
-                    waitingMessage = null,
+                    waitingKind = WaitingKind.OFF_HOURS,
                     timezone = tz,
                 )
                 delay(15_000)
@@ -109,25 +128,49 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             val items = resolvePlaylistItems(manifest.playlist, manifest.assets, root)
             val sequencer = PlaylistSequencer(items, manifest.playlist?.loop ?: true)
             if (sequencer.isEmpty()) {
-                _ui.value = buildUi(plan, null, tz, videoGeneration)
+                closeOpenPlay(PlaybackResult.INTERRUPTED)
+                _ui.value = PlaybackUiState(
+                    playing = false,
+                    background = plan.background,
+                    waitingKind = WaitingKind.EMPTY_PLAYLIST,
+                    timezone = tz,
+                )
                 delay(15_000)
                 continue
             }
             while (viewModelScope.isActive && ScheduleEngine.shouldPlay(manifest.schedules)) {
-                if (packages.activeVersion() != manifest.manifestVersion) break
+                if (packages.activeVersion() != manifest.manifestVersion) {
+                    closeOpenPlay(PlaybackResult.INTERRUPTED)
+                    break
+                }
                 val item = sequencer.current() ?: break
                 if (item.kind == PlaylistItemKind.VIDEO) {
                     videoGeneration += 1
+                    videoFailed = false
                     videoFinished = CompletableDeferred()
                 }
+                openPlay = startPlayback(
+                    item,
+                    campaignId = ScheduleEngine.selectActive(manifest.schedules)?.campaignId,
+                    playlistId = manifest.playlist?.id,
+                )
                 _ui.value = buildUi(plan, item, tz, videoGeneration)
-                when (item.kind) {
-                    PlaylistItemKind.IMAGE -> delay((item.durationSeconds * 1000).toLong().coerceAtLeast(100L))
+                val result = when (item.kind) {
+                    PlaylistItemKind.IMAGE -> {
+                        delay((item.durationSeconds * 1000).toLong().coerceAtLeast(100L))
+                        PlaybackResult.COMPLETED
+                    }
                     PlaylistItemKind.VIDEO -> {
                         val cap = (item.durationSeconds * 1000).toLong().coerceAtLeast(250L)
-                        withTimeoutOrNull(cap) { videoFinished.await() }
+                        val ended = withTimeoutOrNull(cap) { videoFinished.await() }
+                        when {
+                            videoFailed -> PlaybackResult.ERROR
+                            ended == null -> PlaybackResult.INTERRUPTED
+                            else -> PlaybackResult.COMPLETED
+                        }
                     }
                 }
+                closeOpenPlay(result)
                 if (sequencer.advance() == null) {
                     while (viewModelScope.isActive && ScheduleEngine.shouldPlay(manifest.schedules)) {
                         delay(15_000)
@@ -135,6 +178,16 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     break
                 }
             }
+        }
+    }
+
+    private suspend fun closeOpenPlay(result: PlaybackResult) {
+        val open = openPlay ?: return
+        openPlay = null
+        try {
+            telemetry.recordPlayback(completePlayback(open, result))
+        } catch (error: Exception) {
+            Log.w(TAG, "proof-of-play: ${error.message}")
         }
     }
 
@@ -171,7 +224,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             layoutWidth = plan.layoutWidth,
             layoutHeight = plan.layoutHeight,
             zones = zones,
-            waitingMessage = null,
+            waitingKind = null,
             timezone = timezone,
             playingMediaId = item?.mediaId,
         )
@@ -193,9 +246,35 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    private suspend fun heartbeatLoop() {
+        pingHeartbeat()
+        while (viewModelScope.isActive) {
+            delay(HEARTBEAT_INTERVAL_MS)
+            pingHeartbeat()
+        }
+    }
+
     private suspend fun resumeWhenOnline() {
         connectivityFlow(getApplication()).distinctUntilChanged().drop(1).collect { online ->
-            if (online) pollSyncStatus()
+            if (online) {
+                pollSyncStatus()
+                pingHeartbeat()
+            }
+        }
+    }
+
+    private suspend fun pingHeartbeat() {
+        try {
+            val loaded = packages.loadActive()
+            telemetry.sendHeartbeat(
+                playingMediaId = _ui.value.playingMediaId,
+                playlistId = loaded?.first?.playlist?.id,
+                manifestVersion = loaded?.first?.manifestVersion,
+                packageState = packages.currentPackageState(),
+                lastError = packages.lastError(),
+            )
+        } catch (error: Exception) {
+            Log.w(TAG, "heartbeat: ${error.message}")
         }
     }
 
@@ -204,6 +283,10 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             app.container.sync.syncIfNeeded()
         } catch (error: Exception) {
             Log.w(TAG, "sync: ${error.message}")
+            try {
+                telemetry.recordError("SYNC", error.message ?: "Sync failed")
+            } catch (_: Exception) {
+            }
         }
     }
 

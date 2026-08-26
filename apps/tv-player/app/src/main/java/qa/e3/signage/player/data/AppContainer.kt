@@ -24,12 +24,22 @@ class AppContainer(context: Context) {
     val pairing: PairingCoordinator = PairingCoordinator(api, store)
     val packages = LocalPackageStore(db, PlayerFiles.root(context), json)
     val downloader = AssetDownloader(RetrofitDeviceApi.downloadClient())
+    val telemetry = DeviceTelemetry(
+        context = context,
+        api = api,
+        store = store,
+        db = db,
+        json = json,
+        filesDir = PlayerFiles.root(context),
+        appVersion = BuildConfig.VERSION_NAME,
+    )
     val sync = PackageSyncCoordinator(
         api = api,
         store = store,
         packages = packages,
         downloader = downloader,
         filesDir = PlayerFiles.root(context),
+        onActivated = { telemetry.noteSuccessfulSync() },
     )
 
     val apiConfigured: Boolean = apiBaseUrl.isNotBlank()

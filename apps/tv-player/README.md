@@ -1,8 +1,8 @@
-# E3 TV Player (Phase 11)
+# E3 TV Player (Phase 12)
 
 Android / Google TV player: pairing, encrypted device token, differential package download, and local `file://` playback.
 
-Heartbeat, queued logs, and proof of play are Phase 12. Play Store / device matrix docs are Phase 15.
+Heartbeat, queued logs, and proof of play are live (Phase 12). The CMS shows **ONLINE** when a heartbeat arrived in the last **5 minutes**. Play Store / device matrix docs are Phase 15.
 
 ## Requirements
 
@@ -41,6 +41,13 @@ Open **`apps/tv-player`** (not the repo root) in Android Studio, or point Cursor
 - Each state change is acked with `POST /api/devices/:id/sync-confirmation`. A disabled screen (manifest 403) does not activate new content.
 - Corrupt `.tmp` files are deleted and retried. A mid-download network drop (e.g. 63%) leaves the current playlist running and resumes later.
 
+## Heartbeat / proof of play (Phase 12)
+
+- POST `/api/devices/:id/heartbeat` every **2 minutes** (plus a 15-minute WorkManager backup) with the pairing device token.
+- Heartbeats are queued locally when the TV is offline, then flushed on reconnect. Only the latest queued heartbeat is sent.
+- CMS **Last seen** is `screens.last_heartbeat_at`. Status is **ONLINE** while that timestamp is within **5 minutes** (`organization_settings.offline_after_seconds`, default 300).
+- Completed / skipped / error / interrupted plays are batched to `POST /api/devices/:id/playback-logs` with a stable `batchId` for retries. Uploaded rows are kept locally for 7 days.
+
 ## Playback
 
 - Media3 / ExoPlayer for video, BitmapFactory for JPG / PNG / WebP
@@ -49,7 +56,7 @@ Open **`apps/tv-player`** (not the repo root) in Android Studio, or point Cursor
 - Layout zones scale to the physical display (FIT / FILL / COVER / CONTAIN / STRETCH)
 - Local schedule windows use the campaign timezone (default Asia/Qatar)
 - No admin chrome, titles, or player controls
-- Until an ACTIVE package exists, the screen stays black (or shows a dim waiting line)
+- Until an ACTIVE package exists, the player shows a branded E3 waiting screen (not a blank black frame)
 
 ## Build / sideload
 

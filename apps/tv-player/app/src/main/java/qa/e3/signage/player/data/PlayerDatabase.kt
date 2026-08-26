@@ -28,6 +28,9 @@ abstract class PlayerDatabase : RoomDatabase() {
     abstract fun syncStateDao(): SyncStateDao
     abstract fun contentPackageDao(): ContentPackageDao
     abstract fun mediaAssetDao(): MediaAssetDao
+    abstract fun pendingUploadDao(): PendingUploadDao
+    abstract fun playbackLogDao(): PlaybackLogDao
+    abstract fun errorLogDao(): ErrorLogDao
 
     companion object {
         fun create(context: Context): PlayerDatabase {

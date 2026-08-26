@@ -58,6 +58,30 @@ class FakeDeviceApi : DeviceApi {
     ): OkResponse {
         error("not used in pairing tests")
     }
+
+    override suspend fun heartbeat(
+        deviceId: String,
+        bearerToken: String,
+        body: DeviceHeartbeatRequest,
+    ): OkResponse {
+        error("not used in pairing tests")
+    }
+
+    override suspend fun playbackLogs(
+        deviceId: String,
+        bearerToken: String,
+        body: PlaybackLogBatch,
+    ): BatchAcceptedResponse {
+        error("not used in pairing tests")
+    }
+
+    override suspend fun errorLogs(
+        deviceId: String,
+        bearerToken: String,
+        body: ErrorLogBatch,
+    ): BatchAcceptedResponse {
+        error("not used in pairing tests")
+    }
 }
 
 class PairingCoordinatorTest {

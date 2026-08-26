@@ -60,6 +60,117 @@ data class OkResponse(
 )
 
 @Serializable
+data class BatchAcceptedResponse(
+    val accepted: Int,
+)
+
+@Serializable
+enum class DeviceSyncState {
+    WAITING,
+    NOTIFIED,
+    DOWNLOADING,
+    VERIFYING,
+    READY,
+    ACTIVE,
+    FAILED,
+    OFFLINE,
+}
+
+@Serializable
+enum class ScreenOperationalStatus {
+    READY,
+    SYNCING,
+    DOWNLOADING,
+    VERIFYING,
+    UPDATING,
+    ERROR,
+    DISABLED,
+}
+
+@Serializable
+enum class PlaybackResult {
+    COMPLETED,
+    SKIPPED,
+    ERROR,
+    INTERRUPTED,
+}
+
+@Serializable
+data class DeviceHeartbeatRequest(
+    val screenId: String,
+    val appVersion: String,
+    val uptimeSeconds: Int,
+    val activeManifestVersion: Int? = null,
+    val activePlaylistId: String? = null,
+    val currentlyPlayingMediaId: String? = null,
+    val totalStorageBytes: Long,
+    val availableStorageBytes: Long,
+    val networkOnline: Boolean,
+    val lastSuccessfulSyncAt: String? = null,
+    val lastError: String? = null,
+    val operationalStatus: ScreenOperationalStatus,
+    val syncState: DeviceSyncState,
+    val syncProgress: Int,
+)
+
+@Serializable
+data class PlaybackLogEvent(
+    val clientEventId: String,
+    val campaignId: String? = null,
+    val playlistId: String? = null,
+    val mediaId: String,
+    val mediaVersionId: String? = null,
+    val startedAt: String,
+    val endedAt: String? = null,
+    val durationMs: Int,
+    val result: PlaybackResult,
+)
+
+@Serializable
+data class PlaybackLogBatch(
+    val batchId: String,
+    val screenId: String,
+    val events: List<PlaybackLogEvent>,
+)
+
+@Serializable
+data class ErrorLogEvent(
+    val clientEventId: String,
+    val at: String,
+    val code: String,
+    val message: String,
+    val mediaId: String? = null,
+    val manifestVersion: Int? = null,
+)
+
+@Serializable
+data class ErrorLogBatch(
+    val batchId: String,
+    val screenId: String,
+    val events: List<ErrorLogEvent>,
+)
+
+@Serializable
+data class StoredPlaybackEvent(
+    val event: PlaybackLogEvent,
+    val batchId: String? = null,
+    val uploadedAtMs: Long? = null,
+)
+
+data class QueuedUpload(
+    val id: String,
+    val kind: String,
+    val payloadJson: String,
+    val createdAt: Long,
+) {
+    companion object {
+        const val KIND_HEARTBEAT = "heartbeat"
+        const val KIND_PLAYBACK = "playback"
+        const val KIND_ERROR = "error"
+    }
+}
+
+@Serializable
 data class DeviceErrorBody(
     val error: String? = null,
 )

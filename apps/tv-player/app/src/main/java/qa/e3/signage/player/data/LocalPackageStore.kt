@@ -146,6 +146,13 @@ class LocalPackageStore(
         db.syncStateDao().upsert(local.copy(lastError = message))
     }
 
+    suspend fun lastError(): String? = db.syncStateDao().get()?.lastError
+
+    suspend fun currentPackageState(): ContentPackageState? {
+        val raw = db.syncStateDao().get()?.packageState ?: return null
+        return runCatching { ContentPackageState.valueOf(raw) }.getOrNull()
+    }
+
     private fun ContentPackageEntity.toSnapshot() = PackageSnapshot(
         manifestVersion = manifestVersion,
         state = runCatching { ContentPackageState.valueOf(state) }.getOrDefault(ContentPackageState.PENDING),

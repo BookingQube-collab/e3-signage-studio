@@ -30,6 +30,7 @@ class PackageSyncCoordinator(
     private val packages: LocalPackageStore,
     private val downloader: AssetDownloader,
     private val filesDir: File,
+    private val onActivated: () -> Unit = {},
 ) {
     private val mutex = Mutex()
     private val _activations = MutableSharedFlow<Int>(extraBufferCapacity = 1)
@@ -214,6 +215,7 @@ class PackageSyncCoordinator(
         val outcome = packages.switchActive(manifest.manifestVersion, path)
         confirm(credentials, manifest.manifestVersion, ContentPackageState.ACTIVE)
         Log.i(TAG, "ACTIVE v${outcome.activeVersion}; previous=${outcome.previousVersion ?: "none"}")
+        onActivated()
         _activations.tryEmit(outcome.activeVersion)
     }
 

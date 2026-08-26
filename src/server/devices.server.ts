@@ -693,40 +693,45 @@ export async function deviceHeartbeat(
   if (!parsed.success) return fail(400, parsed.error.issues[0]?.message ?? "Invalid heartbeat.");
   if (parsed.data.screenId !== auth.screen.id) return fail(403, "screenId does not match this device.");
   const now = isoNow();
+  const operationalStatus =
+    auth.screen.operational_status === "DISABLED" ? "DISABLED" : parsed.data.operationalStatus;
+  const lastSuccessfulSyncAt = parsed.data.lastSuccessfulSyncAt ?? null;
   const { error: hbError } = await auth.admin.from("device_heartbeats").insert({
     screen_id: auth.screen.id,
     device_id: auth.screen.device_id,
     app_version: parsed.data.appVersion,
     uptime_seconds: parsed.data.uptimeSeconds,
-    active_manifest_version: parsed.data.activeManifestVersion,
-    active_playlist_id: parsed.data.activePlaylistId,
-    currently_playing_media_id: parsed.data.currentlyPlayingMediaId,
+    active_manifest_version: parsed.data.activeManifestVersion ?? 0,
+    active_playlist_id: parsed.data.activePlaylistId ?? null,
+    currently_playing_media_id: parsed.data.currentlyPlayingMediaId ?? null,
     total_storage: parsed.data.totalStorageBytes,
     available_storage: parsed.data.availableStorageBytes,
     network_online: parsed.data.networkOnline,
-    last_successful_sync_at: parsed.data.lastSuccessfulSyncAt,
-    last_error: parsed.data.lastError,
-    operational_status: parsed.data.operationalStatus,
+    last_successful_sync_at: lastSuccessfulSyncAt,
+    last_error: parsed.data.lastError ?? null,
+    operational_status: operationalStatus,
     sync_state: parsed.data.syncState,
     sync_progress: parsed.data.syncProgress,
     received_at: now,
   });
   throwIfError(hbError, "Could not store heartbeat.");
 
+  const screenPatch: Record<string, unknown> = {
+    last_heartbeat_at: now,
+    app_version: parsed.data.appVersion,
+    operational_status: operationalStatus,
+    total_storage: parsed.data.totalStorageBytes,
+    available_storage: parsed.data.availableStorageBytes,
+    current_playlist_id: parsed.data.activePlaylistId ?? null,
+    currently_playing_media_id: parsed.data.currentlyPlayingMediaId ?? null,
+    last_error: parsed.data.lastError ?? null,
+    local_manifest_version: parsed.data.activeManifestVersion ?? 0,
+  };
+  if (lastSuccessfulSyncAt) screenPatch["last_sync_at"] = lastSuccessfulSyncAt;
+
   const { error: screenError } = await auth.admin
     .from("screens")
-    .update({
-      last_heartbeat_at: now,
-      app_version: parsed.data.appVersion,
-      operational_status: parsed.data.operationalStatus,
-      total_storage: parsed.data.totalStorageBytes,
-      available_storage: parsed.data.availableStorageBytes,
-      current_playlist_id: parsed.data.activePlaylistId,
-      currently_playing_media_id: parsed.data.currentlyPlayingMediaId,
-      last_error: parsed.data.lastError,
-      last_sync_at: parsed.data.lastSuccessfulSyncAt,
-      local_manifest_version: parsed.data.activeManifestVersion,
-    })
+    .update(screenPatch)
     .eq("id", auth.screen.id);
   throwIfError(screenError, "Could not update screen from heartbeat.");
 
@@ -872,10 +877,10 @@ export async function devicePlaybackLogs(
     batch_id: parsed.data.batchId,
     client_event_id: event.clientEventId,
     screen_id: auth.screen.id,
-    campaign_id: event.campaignId,
-    playlist_id: event.playlistId,
+    campaign_id: event.campaignId ?? null,
+    playlist_id: event.playlistId ?? null,
     media_id: event.mediaId,
-    media_version_id: event.mediaVersionId,
+    media_version_id: event.mediaVersionId ?? null,
     started_at: event.startedAt,
     ended_at: event.endedAt,
     duration_ms: event.durationMs,

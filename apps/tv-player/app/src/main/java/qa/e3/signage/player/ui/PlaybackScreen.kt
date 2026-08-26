@@ -54,20 +54,14 @@ fun PlaybackRoute(viewModel: PlaybackViewModel = viewModel()) {
 }
 
 @Composable
-fun PlaybackScreen(state: PlaybackUiState, onVideoFinished: (Int) -> Unit) {
+fun PlaybackScreen(state: PlaybackUiState, onVideoFinished: (Int, Boolean) -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(parseHex(state.background)),
     ) {
-        if (!state.playing && state.waitingMessage != null) {
-            Text(
-                text = state.waitingMessage,
-                color = Color.White.copy(alpha = 0.35f),
-                fontFamily = SpaceGrotesk,
-                fontSize = 18.sp,
-                modifier = Modifier.align(Alignment.Center),
-            )
+        if (!state.playing && state.waitingKind != null) {
+            WaitingScreen(state.waitingKind)
         }
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val density = LocalDensity.current
@@ -87,7 +81,7 @@ fun PlaybackScreen(state: PlaybackUiState, onVideoFinished: (Int) -> Unit) {
 }
 
 @Composable
-private fun ZoneContent(zone: ZoneUiState, timezone: String, onVideoFinished: (Int) -> Unit) {
+private fun ZoneContent(zone: ZoneUiState, timezone: String, onVideoFinished: (Int, Boolean) -> Unit) {
     when (val presentation = zone.presentation) {
         is ZonePresentation.Video -> LocalVideoZone(
             fileUri = presentation.fileUri,
@@ -111,7 +105,7 @@ private fun LocalVideoZone(
     generation: Int,
     loop: Boolean,
     fit: FitMode,
-    onFinished: (Int) -> Unit,
+    onFinished: (Int, Boolean) -> Unit,
 ) {
     val context = LocalContext.current
     val player = remember(key, generation) {
@@ -126,11 +120,11 @@ private fun LocalVideoZone(
     DisposableEffect(player, generation) {
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (!loop && playbackState == Player.STATE_ENDED) onFinished(generation)
+                if (!loop && playbackState == Player.STATE_ENDED) onFinished(generation, false)
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                if (!loop) onFinished(generation)
+                if (!loop) onFinished(generation, true)
             }
         }
         player.addListener(listener)
