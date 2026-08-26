@@ -15,6 +15,7 @@ import {
   archiveMediaFn,
 } from "@/lib/media-functions";
 import { assertUploadSize, inferMediaMime } from "@/lib/media-file";
+import { describeBrowserUploadFailure } from "@/lib/media-upload-error";
 import { probeMediaDimensions, sha256HexOfBlob } from "@/lib/media-hash";
 import { getBrowserAccessToken } from "@/lib/supabase";
 import type { Media } from "@/types";
@@ -50,9 +51,27 @@ function putWithProgress(
         resolve();
         return;
       }
-      reject(new Error(`Upload failed (${xhr.status}).`));
+      reject(
+        new Error(
+          describeBrowserUploadFailure({
+            status: xhr.status,
+            url,
+            responseText: xhr.responseText,
+          }),
+        ),
+      );
     };
-    xhr.onerror = () => reject(new Error("Upload failed. Check your connection and try again."));
+    xhr.onerror = () =>
+      reject(
+        new Error(
+          describeBrowserUploadFailure({
+            status: xhr.status || 0,
+            url,
+            responseText: xhr.responseText,
+          }),
+        ),
+      );
+    xhr.ontimeout = () => reject(new Error("Upload timed out. Try again."));
     xhr.send(file);
   });
 }

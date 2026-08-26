@@ -11,6 +11,8 @@ test("admin responses advertise HSTS, CSP, and clickjacking protections", () => 
   assert.match(csp, /frame-ancestors 'none'/);
   assert.match(csp, /upgrade-insecure-requests/);
   assert.match(csp, /https:\/\/\*\.supabase\.co/);
+  assert.match(csp, /https:\/\/\*\.r2\.cloudflarestorage\.com/);
+  assert.match(csp, /https:\/\/\*\.eu\.r2\.cloudflarestorage\.com/);
 });
 
 test("caller headers win over defaults so CORS and Retry-After still apply", () => {

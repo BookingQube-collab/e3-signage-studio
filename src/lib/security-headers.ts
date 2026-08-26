@@ -1,4 +1,4 @@
-/** Applied to CMS HTML and device JSON. CSP allows Google Fonts + Supabase Auth. */
+/** Applied to CMS HTML and device JSON. CSP allows Google Fonts, Supabase Auth, and R2 signed uploads. */
 
 export const SECURITY_HEADERS: Record<string, string> = {
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
@@ -16,7 +16,7 @@ export const SECURITY_HEADERS: Record<string, string> = {
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com data:",
     "img-src 'self' data: blob: https:",
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.vercel.app",
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.vercel.app https://*.r2.cloudflarestorage.com https://*.eu.r2.cloudflarestorage.com",
     "upgrade-insecure-requests",
   ].join("; "),
 };
