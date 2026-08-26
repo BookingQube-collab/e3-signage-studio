@@ -202,27 +202,23 @@ async function toRecords(
     names.set(asString((row as { id: string }).id), asString((row as { name: string }).name));
   }
 
-  const thumbKeys: string[] = [];
+  const previewKeys: string[] = [];
   const picked = mediaRows.map((row) => {
     const versions = (versionsByMedia.get(row.id) ?? []).sort(
       (a, b) => b.version_number - a.version_number,
     );
     const current =
       versions.find((v) => v.id === row.current_version_id) ?? versions[0];
-    const image =
-      current &&
-      current.status === "READY" &&
-      current.mime_type.startsWith("image/") &&
-      current.storage_key
-        ? current.storage_key
-        : null;
-    if (image) thumbKeys.push(image);
-    return { row, current, image };
+    const previewKey =
+      current && current.status === "READY" && current.storage_key ? current.storage_key : null;
+    const image = previewKey && current?.mime_type.startsWith("image/") ? previewKey : null;
+    if (previewKey) previewKeys.push(previewKey);
+    return { row, current, image, previewKey };
   });
 
-  const thumbs = await createObjectDownloadUrls(thumbKeys);
+  const urls = await createObjectDownloadUrls(previewKeys);
 
-  return picked.map(({ row, current, image }) => {
+  return picked.map(({ row, current, image, previewKey }) => {
     const type = isMediaType(row.type) ? row.type : "IMAGE";
     const status = isMediaStatus(row.status) ? row.status : "PROCESSING";
     const checksum = current?.checksum_sha256 ?? row.id.replace(/-/g, "").slice(0, 64);
@@ -241,7 +237,8 @@ async function toRecords(
       uploadedAt: dateLabel(row.created_at),
       version: current ? `v${current.version_number}` : "v1",
       thumbnailHue: hueFromChecksum(checksum),
-      thumbnailUrl: image ? (thumbs.get(image) ?? null) : null,
+      thumbnailUrl: image ? (urls.get(image) ?? null) : null,
+      previewUrl: previewKey ? (urls.get(previewKey) ?? null) : null,
       usedIn: usedIn.get(row.id) ?? { playlists: [], campaigns: [], screens: [] },
     };
   });

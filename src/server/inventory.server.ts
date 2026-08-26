@@ -306,6 +306,7 @@ async function loadScreenRecords(
       nowPlaying: row.currently_playing_media_id
         ? (mediaName.get(row.currently_playing_media_id) ?? null)
         : null,
+      nowPlayingMediaId: row.currently_playing_media_id,
       syncState,
       syncProgress: sync?.progress ?? 0,
       lastHeartbeatAt: row.last_heartbeat_at,

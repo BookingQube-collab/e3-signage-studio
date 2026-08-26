@@ -49,6 +49,7 @@ export interface Screen {
   playlistId: string | null;
   playlistName: string | null;
   nowPlaying: string | null;
+  nowPlayingMediaId: string | null;
   syncState: SyncState;
   syncProgress: number;
   lastSeen: string;
@@ -90,6 +91,7 @@ export interface Media {
   version: string;
   thumbnailHue: number;
   thumbnailUrl?: string;
+  previewUrl?: string;
   usedIn: { playlists: string[]; campaigns: string[]; screens: string[] };
 }
 

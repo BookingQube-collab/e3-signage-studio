@@ -20,6 +20,7 @@ export type MediaRecord = {
   version: string;
   thumbnailHue: number;
   thumbnailUrl: string | null;
+  previewUrl: string | null;
   usedIn: { playlists: string[]; campaigns: string[]; screens: string[] };
 };
 
@@ -39,5 +40,6 @@ export function toUiMedia(row: MediaRecord): Media {
     usedIn: row.usedIn,
   };
   if (row.thumbnailUrl) media.thumbnailUrl = row.thumbnailUrl;
+  if (row.previewUrl) media.previewUrl = row.previewUrl;
   return media;
 }

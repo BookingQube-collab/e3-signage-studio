@@ -51,6 +51,7 @@ export type ScreenRecord = {
   playlistId: string | null;
   playlistName: string | null;
   nowPlaying: string | null;
+  nowPlayingMediaId: string | null;
   syncState: DeviceSyncState;
   syncProgress: number;
   lastHeartbeatAt: string | null;
@@ -133,6 +134,7 @@ export function toUiScreen(row: ScreenRecord): Screen {
     playlistId: row.playlistId,
     playlistName: row.playlistName,
     nowPlaying: row.nowPlaying,
+    nowPlayingMediaId: row.nowPlayingMediaId,
     syncState: syncLabel as SyncState,
     syncProgress: row.syncProgress,
     lastSeen: formatLastActive(row.lastHeartbeatAt),

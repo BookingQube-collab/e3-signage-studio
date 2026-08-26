@@ -48,6 +48,36 @@ test("builds unique READY assets and skips unfinished media", () => {
   assert.equal(assets[1]?.fileSize, 2_000_000);
 });
 
+test("keeps two distinct READY images and does not unique by checksum", () => {
+  const assets = toManifestAssets(
+    [
+      {
+        id: "image-a",
+        name: "rajan.jpeg",
+        type: "IMAGE",
+        currentVersionId: "ver-a",
+        status: "READY",
+      },
+      {
+        id: "image-b",
+        name: "wireframe.png",
+        type: "IMAGE",
+        currentVersionId: "ver-b",
+        status: "READY",
+      },
+    ],
+    [
+      { id: "ver-a", checksumSha256: "a".repeat(64), sizeBytes: 100 },
+      { id: "ver-b", checksumSha256: "b".repeat(64), sizeBytes: 200 },
+    ],
+  );
+  assert.equal(assets.length, 2);
+  assert.deepEqual(
+    assets.map((row) => row.localFilename),
+    ["rajan.jpeg", "wireframe.png"],
+  );
+});
+
 test("drops READY rows whose current version is missing", () => {
   const assets = toManifestAssets(
     [

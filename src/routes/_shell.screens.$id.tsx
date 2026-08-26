@@ -23,9 +23,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { playlistService, screenService } from "@/services";
+import { playlistService, mediaService, screenService } from "@/services";
 import { ADMIN_MONITORING_REFETCH_MS } from "@/lib/monitoring";
+import { bindPreviewClips } from "@/lib/playlist-preview";
 import { useLiveMonitoring } from "@/lib/use-live-monitoring";
+import { PlaylistLoopPreview } from "@/features/playlists/PlaylistLoopPreview";
 
 export const Route = createFileRoute("/_shell/screens/$id")({
   head: () => ({
@@ -60,6 +62,12 @@ function ScreenDetailPage() {
     refetchInterval: ADMIN_MONITORING_REFETCH_MS,
   });
   const playlists = useQuery({ queryKey: ["playlists"], queryFn: playlistService.list });
+  const mediaQuery = useQuery({ queryKey: ["media"], queryFn: mediaService.list });
+  const assignedPlaylist = useQuery({
+    queryKey: ["playlist", screenQuery.data?.playlistId],
+    queryFn: () => playlistService.get(screenQuery.data!.playlistId!),
+    enabled: Boolean(screenQuery.data?.playlistId),
+  });
   const logsQuery = useQuery({
     queryKey: ["screen-logs", id],
     queryFn: () => screenService.logs(id),
@@ -131,6 +139,28 @@ function ScreenDetailPage() {
   });
 
   const screen = screenQuery.data;
+  const mediaById = new Map((mediaQuery.data ?? []).map((m) => [m.id, m]));
+  let previewClips = bindPreviewClips(assignedPlaylist.data?.items ?? [], mediaById);
+  if (previewClips.length === 0) {
+    const onAir =
+      (screen?.nowPlayingMediaId ? mediaById.get(screen.nowPlayingMediaId) : undefined) ??
+      (mediaQuery.data ?? []).find((m) => m.filename === screen?.nowPlaying);
+    if (onAir) {
+      previewClips = bindPreviewClips(
+        [
+          {
+            id: onAir.id,
+            mediaId: onAir.id,
+            filename: onAir.filename,
+            type: onAir.type,
+            durationSec: onAir.durationSec ?? 10,
+            transition: "Fade",
+          },
+        ],
+        mediaById,
+      );
+    }
+  }
 
   return (
     <div>
@@ -178,26 +208,22 @@ function ScreenDetailPage() {
                 <E3Card>
                   <E3CardHeader
                     title="Current content"
-                    description={screen.nowPlaying ?? "Nothing playing"}
+                    description={
+                      previewClips.length > 1
+                        ? `${screen.nowPlaying ?? "Assigned playlist"} · ${previewClips.length} items looping`
+                        : (screen.nowPlaying ?? "Nothing playing")
+                    }
                   />
                   <E3CardBody>
-                    <div
-                      className="grid aspect-video w-full place-items-center rounded-xl border border-border"
-                      style={{
-                        background:
-                          "radial-gradient(ellipse at 30% 20%, rgba(233,90,157,.18), transparent 60%), radial-gradient(ellipse at 80% 80%, rgba(91,162,237,.18), transparent 60%), #0f0d11",
-                      }}
-                    >
-                      <div className="text-center">
-                        <MonitorPlay className="mx-auto size-8 text-muted-foreground" aria-hidden />
-                        <p className="font-display mt-3 text-lg font-semibold">
-                          {screen.nowPlaying ?? "No playback"}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {screen.resolution} · {screen.orientation}
-                        </p>
-                      </div>
-                    </div>
+                    <PlaylistLoopPreview
+                      clips={previewClips}
+                      startMediaId={screen.nowPlayingMediaId}
+                      emptyLabel={
+                        screen.nowPlaying
+                          ? `${screen.nowPlaying} · ${screen.resolution} · ${screen.orientation}`
+                          : "No playback"
+                      }
+                    />
 
                     {screen.syncState === "Downloading" ? (
                       <E3Progress

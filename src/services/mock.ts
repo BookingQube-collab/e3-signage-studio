@@ -70,6 +70,7 @@ export const mockServices: AppServices = {
         playlistId: null,
         playlistName: null,
         nowPlaying: null,
+        nowPlayingMediaId: null,
         syncState: "Waiting",
         syncProgress: 0,
         lastSeen: "just now",

@@ -167,6 +167,7 @@ export const screens: Screen[] = Object.entries(screenSeeds).flatMap(([locationI
       playlistId: playlistName.toLowerCase().replace(/[^a-z]+/g, "-"),
       playlistName,
       nowPlaying: status === "offline" ? null : nowPlaying,
+      nowPlayingMediaId: null,
       syncState: status === "offline" ? "Offline" : syncing ? "Downloading" : "Ready",
       syncProgress: syncing ? 78 : status === "offline" ? 0 : 100,
       lastSeen: status === "offline" ? "3 hours ago" : `${(i % 5) + 1} minutes ago`,

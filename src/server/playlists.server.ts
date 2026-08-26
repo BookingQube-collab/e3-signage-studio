@@ -252,5 +252,13 @@ export async function savePlaylist(
 
   const saved = await getPlaylist(accessToken, playlistId);
   if (!saved) throw new Error("Playlist not found.");
+  if (isUuid(playlistId)) {
+    try {
+      const { republishScreensUsingPlaylist } = await import("./campaigns.server");
+      await republishScreensUsingPlaylist(accessToken, playlistId);
+    } catch {
+      // Playlist is saved. A later save or device poll can still bump the package.
+    }
+  }
   return saved;
 }

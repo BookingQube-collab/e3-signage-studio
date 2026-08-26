@@ -25,6 +25,8 @@ import {
 } from "@/components/ui/select";
 import { mediaService, playlistService } from "@/services";
 import type { Playlist, PlaylistItem, Transition } from "@/types";
+import { bindPreviewClips } from "@/lib/playlist-preview";
+import { PlaylistLoopPreview } from "./PlaylistLoopPreview";
 
 const TRANSITIONS: Transition[] = ["Cut", "Fade", "Slide"];
 
@@ -42,7 +44,13 @@ export function PlaylistBuilder({ initial }: { initial: Playlist }) {
     onSuccess: (p) => {
       void qc.invalidateQueries({ queryKey: ["playlists"] });
       void qc.invalidateQueries({ queryKey: ["playlist"] });
-      toast.success(`${p.name} saved`);
+      void qc.invalidateQueries({ queryKey: ["screens"] });
+      void qc.invalidateQueries({ queryKey: ["campaigns"] });
+      toast.success(
+        p.usedByScreens > 0
+          ? `${p.name} saved · live screens will download the updated loop`
+          : `${p.name} saved`,
+      );
       void navigate({ to: "/playlists" });
     },
     onError: (error) => {
@@ -51,6 +59,10 @@ export function PlaylistBuilder({ initial }: { initial: Playlist }) {
   });
 
   const totalSec = playlist.items.reduce((sum, i) => sum + i.durationSec, 0);
+  const previewClips = bindPreviewClips(
+    playlist.items,
+    new Map((mediaQuery.data ?? []).map((m) => [m.id, m])),
+  );
 
   function move(from: number, to: number) {
     if (to < 0 || to >= playlist.items.length) return;
@@ -82,7 +94,15 @@ export function PlaylistBuilder({ initial }: { initial: Playlist }) {
             >
               Save Draft
             </E3Button>
-            <E3Button variant="outline" onClick={() => toast.info("Preview is UI-only")}>
+            <E3Button
+              variant="outline"
+              onClick={() =>
+                document.getElementById("playlist-loop-preview")?.scrollIntoView({
+                  behavior: "smooth",
+                  block: "nearest",
+                })
+              }
+            >
               Preview
             </E3Button>
             <E3Button
@@ -249,25 +269,17 @@ export function PlaylistBuilder({ initial }: { initial: Playlist }) {
           </E3Card>
         </div>
 
-        <E3Card className="h-fit">
-          <E3CardHeader title="Preview" description="Loop order and timing" />
+        <E3Card className="h-fit" id="playlist-loop-preview">
+          <E3CardHeader
+            title="Preview"
+            description={
+              playlist.usedByScreens > 0
+                ? "How this loop plays on paired TVs. Saving updates live campaigns automatically."
+                : "Loop order, timing, and transitions"
+            }
+          />
           <E3CardBody className="space-y-4">
-            <div
-              className="grid aspect-video place-items-center rounded-xl border border-border text-center"
-              style={{
-                background:
-                  "radial-gradient(ellipse at 20% 10%, rgba(141,92,221,.22), transparent 60%), #0f0d11",
-              }}
-            >
-              <div>
-                <p className="font-display text-base font-semibold">
-                  {playlist.items[0]?.filename ?? "No content"}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {playlist.items[0] ? `${playlist.items[0].durationSec}s` : "Add media to preview"}
-                </p>
-              </div>
-            </div>
+            <PlaylistLoopPreview clips={previewClips} />
             <ol className="space-y-2 text-sm">
               {playlist.items.map((i, idx) => (
                 <li key={i.id} className="flex justify-between gap-3">

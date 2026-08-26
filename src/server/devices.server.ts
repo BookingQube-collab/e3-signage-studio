@@ -40,6 +40,7 @@ import {
 } from "@/lib/device-token";
 import { uiTime } from "@/lib/schedule-days";
 import { wallTimeToIso } from "@/lib/zoned-time";
+import { bindPlaylistItemsToAssets } from "@/lib/playlist-snapshot";
 import { isUuid } from "@/services/inventory-map";
 import type { JsonResult } from "./http/contracts";
 import { DOWNLOAD_URL_TTL_SECONDS, createObjectDownloadUrls } from "./storage.server";
@@ -374,6 +375,12 @@ export async function deviceSyncStatus(
 ): Promise<JsonResult<DeviceSyncStatusResponse | { error: string }>> {
   const auth = await requireDevice(token, deviceId);
   if (!("ok" in auth)) return auth;
+  try {
+    const { republishScreenIfPlaylistStale } = await import("./campaigns.server");
+    await republishScreenIfPlaylistStale(auth.screen.id, auth.screen.organization_id);
+  } catch {
+    // Keep serving the current package if rebuild fails.
+  }
   const { data, error } = await auth.admin
     .from("device_sync_states")
     .select(
@@ -482,6 +489,7 @@ async function buildManifest(
 
   const assets: ContentManifest["assets"] = [];
   const localByVersion = new Map<string, string>();
+  const localByMediaId = new Map<string, string>();
   const usedNames = new Set<string>();
   for (const raw of assetRows ?? []) {
     const row = raw as Record<string, unknown>;
@@ -495,6 +503,7 @@ async function buildManifest(
     if (usedNames.has(localFilename)) localFilename = `${asString(row["media_id"]).slice(0, 8)}_${localFilename}`;
     usedNames.add(localFilename);
     localByVersion.set(versionId, localFilename);
+    localByMediaId.set(asString(row["media_id"]), localFilename);
     const checksum = asString(row["checksum_sha256"], asString(version["checksum_sha256"])).toLowerCase();
     if (!/^[a-f0-9]{64}$/.test(checksum)) continue;
     const type = asString(row["asset_type"], asString(version["mime_type"]));
@@ -535,28 +544,30 @@ async function buildManifest(
       .order("position");
     throwIfError(itemError, "Could not load playlist items.");
     const loop = await orgLoopsPlaylists(admin, screen.organization_id);
+    const extraLayouts: string[] = [];
+    const draftItems = (items ?? []).map((raw) => {
+      const row = raw as Record<string, unknown>;
+      const extraLayout = asNullableString(row["layout_id"]);
+      if (extraLayout) extraLayouts.push(extraLayout);
+      return {
+        mediaId: asString(row["media_id"]),
+        mediaVersionId: asString(row["media_version_id"]),
+        durationSeconds: Math.max(0.1, asNumber(row["duration_seconds"], 10)),
+        transition: asString(row["transition"], "FADE"),
+      };
+    });
+    for (const extra of extraLayouts) layoutIds.add(extra);
     playlist = {
       id: playlistId,
       version: 1,
       loop,
-      items: (items ?? []).flatMap((raw) => {
-        const row = raw as Record<string, unknown>;
-        const mediaVersionId = asString(row["media_version_id"]);
-        const extraLayout = asNullableString(row["layout_id"]);
-        if (extraLayout) layoutIds.add(extraLayout);
-        const localFilename = localByVersion.get(mediaVersionId);
-        if (!localFilename) return [];
-        const transition = asString(row["transition"], "FADE");
-        return [
-          {
-            mediaId: asString(row["media_id"]),
-            mediaVersionId,
-            durationSeconds: Math.max(0.1, asNumber(row["duration_seconds"], 10)),
-            transition: isTransition(transition) ? transition : "FADE",
-            localFilename,
-          },
-        ];
-      }),
+      items: bindPlaylistItemsToAssets(draftItems, localByVersion, localByMediaId).map((item) => ({
+        mediaId: item.mediaId,
+        mediaVersionId: item.mediaVersionId,
+        durationSeconds: item.durationSeconds,
+        transition: isTransition(item.transition) ? item.transition : "FADE",
+        localFilename: item.localFilename,
+      })),
     };
   }
 

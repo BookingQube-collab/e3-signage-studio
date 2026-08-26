@@ -82,4 +82,31 @@ class PlaylistSequencerTest {
         assertEquals(PlaylistItemKind.VIDEO, resolved[0].kind)
         assertEquals(PlaylistItemKind.IMAGE, resolved[1].kind)
     }
+
+    @Test
+    fun twoImagesBothResolveAndLoop() {
+        val root = createTempDirectory("e3-two").toFile()
+        File(root, "media/image").mkdirs()
+        File(root, "media/image/rajan.jpeg").writeText("jpg")
+        File(root, "media/image/wireframe.png").writeText("png")
+        val playlist = ManifestPlaylist(
+            id = "p2",
+            version = 1,
+            loop = true,
+            items = listOf(
+                ManifestPlaylistItem("m1", "v1", 10.0, "FADE", "rajan.jpeg"),
+                ManifestPlaylistItem("m2", "v2", 10.0, "FADE", "wireframe.png"),
+            ),
+        )
+        val assets = listOf(
+            ManifestAsset("m1", 1, MediaKind.IMAGE, "a".repeat(64), 1, "rajan.jpeg", "image/jpeg"),
+            ManifestAsset("m2", 1, MediaKind.IMAGE, "b".repeat(64), 1, "wireframe.png", "image/png"),
+        )
+        val resolved = resolvePlaylistItems(playlist, assets, root)
+        assertEquals(listOf("m1", "m2"), resolved.map { it.mediaId })
+        val seq = PlaylistSequencer(resolved, loop = true)
+        assertEquals("m1", seq.current()?.mediaId)
+        assertEquals("m2", seq.advance()?.mediaId)
+        assertEquals("m1", seq.advance()?.mediaId)
+    }
 }
