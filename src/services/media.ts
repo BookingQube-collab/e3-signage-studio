@@ -72,7 +72,8 @@ function putWithProgress(
         ),
       );
     xhr.ontimeout = () => reject(new Error("Upload timed out. Try again."));
-    xhr.send(file);
+    const signedType = headers["Content-Type"] ?? headers["content-type"];
+    xhr.send(signedType ? new Blob([file], { type: signedType }) : file);
   });
 }
 

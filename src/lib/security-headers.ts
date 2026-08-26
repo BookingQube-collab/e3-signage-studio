@@ -16,7 +16,8 @@ export const SECURITY_HEADERS: Record<string, string> = {
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com data:",
     "img-src 'self' data: blob: https:",
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.vercel.app https://*.r2.cloudflarestorage.com https://*.eu.r2.cloudflarestorage.com",
+    "media-src 'self' blob: https://*.r2.cloudflarestorage.com https://*.eu.r2.cloudflarestorage.com https://5943ff30718b0c415cee9c1d7a5e95b4.r2.cloudflarestorage.com",
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.vercel.app https://*.r2.cloudflarestorage.com https://*.eu.r2.cloudflarestorage.com https://5943ff30718b0c415cee9c1d7a5e95b4.r2.cloudflarestorage.com",
     "upgrade-insecure-requests",
   ].join("; "),
 };

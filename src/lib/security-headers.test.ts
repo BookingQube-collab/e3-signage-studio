@@ -13,6 +13,8 @@ test("admin responses advertise HSTS, CSP, and clickjacking protections", () => 
   assert.match(csp, /https:\/\/\*\.supabase\.co/);
   assert.match(csp, /https:\/\/\*\.r2\.cloudflarestorage\.com/);
   assert.match(csp, /https:\/\/\*\.eu\.r2\.cloudflarestorage\.com/);
+  assert.match(csp, /media-src/);
+  assert.match(csp, /5943ff30718b0c415cee9c1d7a5e95b4\.r2\.cloudflarestorage\.com/);
 });
 
 test("caller headers win over defaults so CORS and Retry-After still apply", () => {
