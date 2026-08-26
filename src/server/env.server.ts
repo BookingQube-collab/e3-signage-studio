@@ -19,6 +19,8 @@ export type ServerEnv = {
   r2SecretAccessKey: string | undefined;
   r2Bucket: string | undefined;
   r2Endpoint: string | undefined;
+  mediaMaxImageBytes: string | undefined;
+  mediaMaxVideoBytes: string | undefined;
 };
 
 export type PublicSupabaseConfig = {
@@ -228,6 +230,8 @@ export function getServerEnv(): ServerEnv {
     r2SecretAccessKey: readEnvValue(envName(["R2", "SECRET", "ACCESS", "KEY"])),
     r2Bucket: readEnvValue(envName(["R2", "BUCKET"])),
     r2Endpoint: readEnvValue(envName(["R2", "ENDPOINT"])),
+    mediaMaxImageBytes: readEnvValue(envName(["MEDIA", "MAX", "IMAGE", "BYTES"])),
+    mediaMaxVideoBytes: readEnvValue(envName(["MEDIA", "MAX", "VIDEO", "BYTES"])),
   };
 }
 

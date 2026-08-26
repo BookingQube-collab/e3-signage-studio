@@ -49,6 +49,8 @@ export const apiServices: AppServices = {
     createFolder: () => notConfigured(),
     deleteFolder: () => notConfigured(),
     moveToFolder: () => notConfigured(),
+    moveManyToFolder: () => notConfigured(),
+    removeMany: () => notConfigured(),
   },
   playlistService: {
     list: () => notConfigured(),

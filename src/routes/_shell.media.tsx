@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { FolderPlus, Image as ImageIcon, LayoutGrid, List, Search } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { toast } from "sonner";
 
 import {
+  E3Alert,
   E3Button,
   E3Card,
   E3CardBody,
@@ -24,8 +25,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { BulkToolbar } from "@/features/media/BulkToolbar";
 import { FolderCard } from "@/features/media/FolderCard";
 import { UploadDropzone } from "@/features/media/UploadDropzone";
+import {
+  applySelectionClick,
+  inUseDeleteMessage,
+  partitionBulkDelete,
+  selectAllIds,
+} from "@/lib/media-bulk";
 import { ACCEPT_MEDIA } from "@/lib/media-file";
 import {
   folderCardLabel,
@@ -70,8 +78,11 @@ function MediaPage() {
   const [renaming, setRenaming] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
-  const [moving, setMoving] = useState<Media | null>(null);
+  const [moveIds, setMoveIds] = useState<string[]>([]);
   const [moveTarget, setMoveTarget] = useState(UNFILED_VALUE);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [anchorId, setAnchorId] = useState<string | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const mediaQuery = useQuery({ queryKey: ["media"], queryFn: mediaService.list });
   const foldersQuery = useQuery({ queryKey: ["media-folders"], queryFn: mediaService.listFolders });
@@ -126,14 +137,25 @@ function MediaPage() {
   });
 
   const moveToFolder = useMutation({
-    mutationFn: ({ id, nextFolderId }: { id: string; nextFolderId: string | null }) =>
-      mediaService.moveToFolder(id, nextFolderId),
-    onSuccess: (m) => {
+    mutationFn: ({ ids, nextFolderId }: { ids: string[]; nextFolderId: string | null }) =>
+      mediaService.moveManyToFolder(ids, nextFolderId),
+    onSuccess: (moved) => {
       void qc.invalidateQueries({ queryKey: ["media"] });
       void qc.invalidateQueries({ queryKey: ["media-folders"] });
-      setSelected((prev) => (prev?.id === m.id ? m : prev));
-      setMoving(null);
-      toast.success(m.folderName ? `Moved to ${m.folderName}` : "Moved to Unfiled");
+      const first = moved[0];
+      setSelected((prev) => (prev && moved.some((item) => item.id === prev.id) ? (moved.find((item) => item.id === prev.id) ?? prev) : prev));
+      setMoveIds([]);
+      clearSelection();
+      const dest = first?.folderName;
+      toast.success(
+        moved.length === 1
+          ? dest
+            ? `Moved to ${dest}`
+            : "Moved to Unfiled"
+          : dest
+            ? `Moved ${moved.length} files to ${dest}`
+            : `Moved ${moved.length} files to Unfiled`,
+      );
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Could not move media.");
@@ -188,6 +210,21 @@ function MediaPage() {
     },
   });
 
+  const removeMany = useMutation({
+    mutationFn: mediaService.removeMany,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["media"] });
+      void qc.invalidateQueries({ queryKey: ["media-folders"] });
+      setDeleteOpen(false);
+      setSelected(null);
+      clearSelection();
+      toast.success("Media deleted");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Could not delete.");
+    },
+  });
+
   const download = useMutation({
     mutationFn: mediaService.downloadUrl,
     onSuccess: ({ url, filename }) => {
@@ -222,14 +259,60 @@ function MediaPage() {
       .slice(0, filter === "Recently Added" ? 8 : undefined);
   }, [mediaQuery.data, libraryView, filter]);
 
+  const visibleIds = useMemo(() => items.map((item) => item.id), [items]);
+  const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+  const overlayOpen = createOpen || moveIds.length > 0 || Boolean(selected) || deleteOpen;
+  const bulkPlan = partitionBulkDelete(mediaQuery.data ?? [], selectedIds);
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+    setAnchorId(null);
+  }
+
   function openMove(item: Media) {
-    setMoving(item);
+    setMoveIds([item.id]);
     setMoveTarget(item.folderId ?? UNFILED_VALUE);
   }
+
+  function applyClick(id: string, mods: { toggle: boolean; range: boolean }) {
+    const next = applySelectionClick(selectedIds, visibleIds, id, mods, anchorId);
+    setSelectedIds(next.selected);
+    setAnchorId(next.anchorId);
+  }
+
+  function handleOpenMedia(item: Media, event?: MouseEvent<HTMLButtonElement>) {
+    if (event?.shiftKey) {
+      event.preventDefault();
+      applyClick(item.id, { toggle: event.metaKey || event.ctrlKey, range: true });
+      return;
+    }
+    if (event && (event.metaKey || event.ctrlKey || selectedIds.size > 0)) {
+      event.preventDefault();
+      applyClick(item.id, { toggle: true, range: false });
+      return;
+    }
+    setSelected(item);
+    setRenaming(item.filename);
+  }
+
+  useEffect(() => {
+    clearSelection();
+  }, [folderId, search, filter]);
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      if (overlayOpen) return;
+      clearSelection();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [overlayOpen]);
 
   const loading = mediaQuery.isLoading || foldersQuery.isLoading;
   const errored = mediaQuery.isError || foldersQuery.isError;
   const empty = visibleFolders.length === 0 && items.length === 0;
+  const selectionActive = selectedIds.size > 0;
 
   return (
     <div>
@@ -282,7 +365,7 @@ function MediaPage() {
         />
       </div>
 
-      <E3Card className="mb-6">
+      <E3Card className="mb-4">
         <E3CardBody className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
           <div className="relative">
             <Search
@@ -314,6 +397,18 @@ function MediaPage() {
                 {f}
               </button>
             ))}
+            {items.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedIds(selectAllIds(visibleIds));
+                  setAnchorId(visibleIds[0] ?? null);
+                }}
+                className="rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                {allSelected ? "All selected" : "Select all"}
+              </button>
+            ) : null}
             <div className="flex overflow-hidden rounded-xl border border-border">
               <button
                 type="button"
@@ -337,6 +432,23 @@ function MediaPage() {
           </div>
         </E3CardBody>
       </E3Card>
+
+      <BulkToolbar
+        count={selectedIds.size}
+        visibleCount={visibleIds.length}
+        allSelected={allSelected}
+        onSelectAll={() => {
+          setSelectedIds(selectAllIds(visibleIds));
+          setAnchorId(visibleIds[0] ?? null);
+        }}
+        onClear={clearSelection}
+        onMove={() => {
+          setMoveIds([...selectedIds]);
+          setMoveTarget(UNFILED_VALUE);
+        }}
+        onDelete={() => setDeleteOpen(true)}
+        busy={moveToFolder.isPending || removeMany.isPending}
+      />
 
       <E3QueryBoundary
         isLoading={loading}
@@ -370,30 +482,40 @@ function MediaPage() {
             folders={visibleFolders}
             items={items}
             searching={searching}
+            selectedIds={selectedIds}
+            selectionActive={selectionActive}
             showUnfiledHeading={!searching && !currentFolder && items.length > 0 && visibleFolders.length > 0}
+            onBackgroundClick={clearSelection}
             onOpenFolder={(folder) => {
               setFolderId(folder.id);
               setSearch("");
             }}
-            onOpenMedia={(item) => {
-              setSelected(item);
-              setRenaming(item.filename);
-            }}
+            onOpenMedia={handleOpenMedia}
+            onToggle={(item, event) =>
+              applyClick(item.id, { toggle: true, range: event.shiftKey })
+            }
             onMove={openMove}
           />
         ) : (
-          <div className="space-y-2">
+          <div
+            className="space-y-2"
+            onClick={(event) => {
+              if (!(event.target instanceof Element) || event.target.closest("[data-media-card]")) return;
+              clearSelection();
+            }}
+          >
             {items.map((m) => (
               <E3MediaCard
                 key={m.id}
                 item={m}
                 view="list"
+                selectable
+                checked={selectedIds.has(m.id)}
+                selectionActive={selectionActive}
                 folderLabel={folderCardLabel(m.folderName, searching || Boolean(m.folderName))}
                 onMove={openMove}
-                onOpen={(x) => {
-                  setSelected(x);
-                  setRenaming(x.filename);
-                }}
+                onToggle={(item, event) => applyClick(item.id, { toggle: true, range: event.shiftKey })}
+                onOpen={handleOpenMedia}
               />
             ))}
           </div>
@@ -435,22 +557,21 @@ function MediaPage() {
       </E3Modal>
 
       <E3Modal
-        open={Boolean(moving)}
-        onOpenChange={(o) => !o && setMoving(null)}
-        title="Move to folder"
-        description="Organization only — playlists keep using this file."
+        open={moveIds.length > 0}
+        onOpenChange={(o) => !o && setMoveIds([])}
+        title={moveIds.length > 1 ? `Move ${moveIds.length} files` : "Move to folder"}
+        description="Organization only — playlists keep using these files."
         footer={
           <>
-            <E3Button variant="outline" onClick={() => setMoving(null)}>
+            <E3Button variant="outline" onClick={() => setMoveIds([])}>
               Cancel
             </E3Button>
             <E3Button
               variant="primary"
-              disabled={!moving || moveToFolder.isPending}
+              disabled={moveIds.length === 0 || moveToFolder.isPending}
               onClick={() =>
-                moving &&
                 moveToFolder.mutate({
-                  id: moving.id,
+                  ids: moveIds,
                   nextFolderId: moveTarget === UNFILED_VALUE ? null : moveTarget,
                 })
               }
@@ -475,6 +596,55 @@ function MediaPage() {
               ))}
             </SelectContent>
           </Select>
+        </div>
+      </E3Modal>
+
+      <E3Modal
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title={bulkPlan.deletable.length > 0 ? "Delete files?" : "These files stay on the live screens"}
+        description={
+          bulkPlan.blocked.length > 0
+            ? "Files in live playlists are never deleted silently."
+            : "This cannot be undone."
+        }
+        footer={
+          <>
+            <E3Button variant="outline" onClick={() => setDeleteOpen(false)}>
+              {bulkPlan.deletable.length > 0 ? "Cancel" : "Close"}
+            </E3Button>
+            {bulkPlan.deletable.length > 0 ? (
+              <E3Button
+                variant="danger"
+                disabled={removeMany.isPending}
+                onClick={() => removeMany.mutate(bulkPlan.deletable.map((item) => item.id))}
+              >
+                {bulkPlan.blocked.length > 0
+                  ? `Delete ${bulkPlan.deletable.length} unused`
+                  : `Delete ${bulkPlan.deletable.length}`}
+              </E3Button>
+            ) : null}
+          </>
+        }
+      >
+        <div className="space-y-3">
+          {bulkPlan.blocked.length > 0 ? (
+            <E3Alert
+              severity="critical"
+              title="Used in live playlists"
+              detail={inUseDeleteMessage(bulkPlan.blocked)}
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Delete {bulkPlan.deletable.length} file{bulkPlan.deletable.length === 1 ? "" : "s"} from the library.
+            </p>
+          )}
+          {bulkPlan.blocked.length > 0 && bulkPlan.deletable.length > 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {bulkPlan.deletable.length} unused file{bulkPlan.deletable.length === 1 ? "" : "s"} can still be deleted.
+              In-use files stay so the live TV keeps playing.
+            </p>
+          ) : null}
         </div>
       </E3Modal>
 
@@ -601,21 +771,35 @@ function LibraryGrid({
   folders,
   items,
   searching,
+  selectedIds,
+  selectionActive,
   showUnfiledHeading,
+  onBackgroundClick,
   onOpenFolder,
   onOpenMedia,
+  onToggle,
   onMove,
 }: {
   folders: MediaFolder[];
   items: Media[];
   searching: boolean;
+  selectedIds: Set<string>;
+  selectionActive: boolean;
   showUnfiledHeading: boolean;
+  onBackgroundClick: () => void;
   onOpenFolder: (folder: MediaFolder) => void;
-  onOpenMedia: (item: Media) => void;
+  onOpenMedia: (item: Media, event?: MouseEvent<HTMLButtonElement>) => void;
+  onToggle: (item: Media, event: MouseEvent<HTMLButtonElement>) => void;
   onMove: (item: Media) => void;
 }) {
+  function handleBackground(event: MouseEvent<HTMLDivElement>) {
+    if (!(event.target instanceof Element)) return;
+    if (event.target.closest("[data-media-card], button")) return;
+    onBackgroundClick();
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" onClick={handleBackground}>
       {folders.length > 0 ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {folders.map((folder) => (
@@ -634,8 +818,12 @@ function LibraryGrid({
             <E3MediaCard
               key={m.id}
               item={m}
+              selectable
+              checked={selectedIds.has(m.id)}
+              selectionActive={selectionActive}
               folderLabel={folderCardLabel(m.folderName, searching)}
               onOpen={onOpenMedia}
+              onToggle={onToggle}
               onMove={onMove}
             />
           ))}

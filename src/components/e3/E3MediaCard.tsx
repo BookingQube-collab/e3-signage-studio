@@ -1,4 +1,5 @@
-import { FileImage, FolderInput, MoreVertical, PlayCircle, QrCode, Sparkles } from "lucide-react";
+import { Check, FileImage, FolderInput, MoreVertical, PlayCircle, QrCode, Sparkles } from "lucide-react";
+import type { MouseEvent } from "react";
 
 import {
   DropdownMenu,
@@ -45,31 +46,49 @@ export function E3MediaCard({
   selected,
   folderLabel,
   onMove,
+  selectable,
+  checked,
+  selectionActive,
+  onToggle,
 }: {
   item: Media;
   view?: "grid" | "list";
   size?: "default" | "picker";
-  onOpen?: (item: Media) => void;
+  onOpen?: (item: Media, event: MouseEvent<HTMLButtonElement>) => void;
   selected?: boolean;
   folderLabel?: string | null;
   onMove?: (item: Media) => void;
+  selectable?: boolean;
+  checked?: boolean;
+  selectionActive?: boolean;
+  onToggle?: (item: Media, event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   const meta = [item.dimensions, item.durationSec ? `${item.durationSec}s` : null, `${item.sizeMb.toFixed(1)} MB`]
     .filter(Boolean)
     .join(" · ");
   const picker = size === "picker";
+  const highlighted = Boolean(selected || checked);
 
   if (view === "list") {
     return (
       <div
+        data-media-card=""
         className={cn(
           "flex w-full items-center gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors hover:bg-accent/50",
-          selected && "e3-gradient-border border-0",
+          highlighted && "e3-gradient-border border-0",
         )}
       >
+        {selectable ? (
+          <SelectCheckbox
+            item={item}
+            checked={Boolean(checked)}
+            alwaysVisible
+            onToggle={onToggle}
+          />
+        ) : null}
         <button
           type="button"
-          onClick={() => onOpen?.(item)}
+          onClick={(event) => onOpen?.(item, event)}
           className="flex min-w-0 flex-1 items-center gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <MediaThumb item={item} className="size-12 shrink-0" />
@@ -91,14 +110,25 @@ export function E3MediaCard({
 
   return (
     <div
+      data-media-card=""
       className={cn(
         "group relative flex w-full flex-col rounded-2xl border border-border bg-card p-3 text-left transition-all hover:-translate-y-0.5 hover:border-e3-purple/40",
-        selected && "e3-gradient-border border-0",
+        highlighted && "e3-gradient-border border-0",
       )}
     >
+      {selectable ? (
+        <div className="absolute left-5 top-5 z-10">
+          <SelectCheckbox
+            item={item}
+            checked={Boolean(checked)}
+            alwaysVisible={Boolean(checked || selectionActive)}
+            onToggle={onToggle}
+          />
+        </div>
+      ) : null}
       <button
         type="button"
-        onClick={() => onOpen?.(item)}
+        onClick={(event) => onOpen?.(item, event)}
         className="flex w-full flex-col text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <MediaThumb
@@ -117,6 +147,41 @@ export function E3MediaCard({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function SelectCheckbox({
+  item,
+  checked,
+  alwaysVisible,
+  onToggle,
+}: {
+  item: Media;
+  checked: boolean;
+  alwaysVisible: boolean;
+  onToggle?: (item: Media, event: MouseEvent<HTMLButtonElement>) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      aria-label={checked ? `Deselect ${item.filename}` : `Select ${item.filename}`}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onToggle?.(item, event);
+      }}
+      className={cn(
+        "grid size-6 place-items-center rounded-md border-2 shadow-sm transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        checked
+          ? "border-e3-purple bg-e3-purple text-white opacity-100"
+          : "border-white/80 bg-card/90 text-transparent hover:text-muted-foreground",
+        alwaysVisible ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+      )}
+    >
+      <Check className="size-3.5" strokeWidth={3} />
+    </button>
   );
 }
 

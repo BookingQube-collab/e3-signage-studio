@@ -1,4 +1,5 @@
 import * as db from "@/mocks/data";
+import { applyBulkFolderMove, assertBulkDeleteAllowed, partitionBulkDelete } from "@/lib/media-bulk";
 import type {
   Campaign,
   DeviceLogLine,
@@ -191,7 +192,27 @@ export const mockServices: AppServices = {
       return delay(existing, 200);
     },
     remove: (id: string) => {
+      const existing = store.media.find((m) => m.id === id);
+      if (!existing) return Promise.reject(new Error("Media not found."));
+      if (existing.usedIn.playlists.length > 0) {
+        return Promise.reject(new Error("This media is used in a playlist. Archive it instead of deleting."));
+      }
       store.media = store.media.filter((m) => m.id !== id);
+      return delay(true, 200);
+    },
+    removeMany: (ids: string[]) => {
+      const { blocked, deletable } = partitionBulkDelete(store.media, ids);
+      try {
+        assertBulkDeleteAllowed(blocked);
+      } catch (error) {
+        return Promise.reject(error);
+      }
+      const deletableIds = new Set(deletable.map((item) => item.id));
+      store.media = store.media.filter((m) => !deletableIds.has(m.id));
+      store.folders = store.folders.map((f) => ({
+        ...f,
+        fileCount: store.media.filter((m) => m.folderId === f.id).length,
+      }));
       return delay(true, 200);
     },
     downloadUrl: (id: string) => {
@@ -228,6 +249,17 @@ export const mockServices: AppServices = {
         fileCount: store.media.filter((m) => m.folderId === f.id).length,
       }));
       return delay(next, 200);
+    },
+    moveManyToFolder: (ids: string[], folderId: string | null) => {
+      const folder = folderId ? store.folders.find((f) => f.id === folderId) : null;
+      if (folderId && !folder) return Promise.reject(new Error("Folder not found."));
+      store.media = applyBulkFolderMove(store.media, ids, folderId, folder?.name ?? null);
+      store.folders = store.folders.map((f) => ({
+        ...f,
+        fileCount: store.media.filter((m) => m.folderId === f.id).length,
+      }));
+      const moved = store.media.filter((m) => ids.includes(m.id));
+      return delay(moved, 200);
     },
   },
 

@@ -85,11 +85,13 @@ export type MediaService = {
   rename: (id: string, filename: string) => Promise<Media>;
   archive: (id: string) => Promise<Media>;
   remove: (id: string) => Promise<boolean>;
+  removeMany: (ids: string[]) => Promise<boolean>;
   downloadUrl: (id: string) => Promise<{ url: string; filename: string }>;
   listFolders: () => Promise<MediaFolder[]>;
   createFolder: (name: string) => Promise<MediaFolder>;
   deleteFolder: (id: string) => Promise<boolean>;
   moveToFolder: (id: string, folderId: string | null) => Promise<Media>;
+  moveManyToFolder: (ids: string[], folderId: string | null) => Promise<Media[]>;
 };
 
 export type PlaylistService = {

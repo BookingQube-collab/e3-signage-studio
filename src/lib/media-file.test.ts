@@ -2,14 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  MAX_IMAGE_UPLOAD_BYTES,
+  MAX_VIDEO_UPLOAD_BYTES,
+  parseUploadByteLimit,
+} from "../../packages/validation/src/index.ts";
+import {
+  MediaUploadTooLargeError,
   assertUploadSize,
   buildStorageKey,
+  collectUploadableFiles,
   fileExtension,
   hueFromChecksum,
   inferMediaMime,
   mediaTypeFromMime,
   normalizeChecksum,
   safeMediaFilename,
+  uploadLimitsHint,
 } from "./media-file.ts";
 
 test("infers mime from extension when the browser omits type", () => {
@@ -36,10 +44,31 @@ test("builds append-only storage keys that include org, media, version, and chec
   assert.ok(key.includes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
 });
 
-test("rejects oversized images and empty files", () => {
-  assert.throws(() => assertUploadSize("image/png", 0));
-  assert.throws(() => assertUploadSize("image/png", 51 * 1024 * 1024));
-  assert.doesNotThrow(() => assertUploadSize("image/png", 1024));
+test("rejects oversized images and videos with type-specific limits", () => {
+  assert.throws(() => assertUploadSize("image/png", 0), /empty/i);
+  assert.throws(
+    () => assertUploadSize("image/png", MAX_IMAGE_UPLOAD_BYTES + 1),
+    (err: Error) => err instanceof MediaUploadTooLargeError && err.status === 413 && /25 MB/.test(err.message),
+  );
+  assert.doesNotThrow(() => assertUploadSize("image/png", MAX_IMAGE_UPLOAD_BYTES));
+  assert.throws(
+    () => assertUploadSize("video/mp4", MAX_VIDEO_UPLOAD_BYTES + 1),
+    (err: Error) => err instanceof MediaUploadTooLargeError && /500 MB/.test(err.message),
+  );
+  assert.doesNotThrow(() => assertUploadSize("video/mp4", MAX_VIDEO_UPLOAD_BYTES));
+  assert.equal(uploadLimitsHint(), "Images up to 25 MB · Videos up to 500 MB");
+  assert.equal(parseUploadByteLimit(undefined, 10), 10);
+  assert.equal(parseUploadByteLimit("26", 10), 26);
+});
+
+test("collectUploadableFiles rejects oversize before upload starts", () => {
+  const huge = { name: "hero.jpg", type: "image/jpeg", size: MAX_IMAGE_UPLOAD_BYTES + 1 } as File;
+  const ok = { name: "loop.mp4", type: "video/mp4", size: 12_000_000 } as File;
+  const { accepted, errors } = collectUploadableFiles([huge, ok]);
+  assert.equal(accepted.length, 1);
+  assert.equal(accepted[0]?.name, "loop.mp4");
+  assert.match(errors[0] ?? "", /hero\.jpg/);
+  assert.match(errors[0] ?? "", /25 MB/);
 });
 
 test("normalizes filenames and checksums", () => {

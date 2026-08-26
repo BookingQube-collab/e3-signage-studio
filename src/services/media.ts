@@ -2,12 +2,14 @@ import {
   completeMediaUploadFn,
   createMediaFolderFn,
   createMediaUploadIntentFn,
+  deleteMediaBulkFn,
   deleteMediaFolderFn,
   deleteMediaFn,
   getMediaFn,
   listMediaFoldersFn,
   listMediaFn,
   mediaDownloadUrlFn,
+  moveMediaBulkFn,
   moveMediaToFolderFn,
   renameMediaFn,
   archiveMediaFn,
@@ -125,6 +127,8 @@ export const liveMediaService: MediaService = {
     return toUiMedia(row);
   },
   remove: async (id) => deleteMediaFn({ data: { accessToken: await accessToken(), id } }),
+  removeMany: async (ids) =>
+    deleteMediaBulkFn({ data: { accessToken: await accessToken(), ids } }),
   downloadUrl: async (id) => mediaDownloadUrlFn({ data: { accessToken: await accessToken(), id } }),
   listFolders: async () => {
     const rows = await listMediaFoldersFn({ data: { accessToken: await accessToken() } });
@@ -141,6 +145,12 @@ export const liveMediaService: MediaService = {
       data: { accessToken: await accessToken(), id, folderId },
     });
     return toUiMedia(row);
+  },
+  moveManyToFolder: async (ids, folderId) => {
+    const rows = await moveMediaBulkFn({
+      data: { accessToken: await accessToken(), ids, folderId },
+    });
+    return rows.map(toUiMedia);
   },
 };
 

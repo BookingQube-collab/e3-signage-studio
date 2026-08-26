@@ -5,8 +5,22 @@ import {
   type MediaType,
 } from "@e3/shared-types";
 import type { AllowedMediaMime } from "@e3/validation";
+import {
+  MAX_IMAGE_UPLOAD_BYTES,
+  MAX_VIDEO_UPLOAD_BYTES,
+  parseUploadByteLimit,
+} from "@e3/validation";
 
 import type { MediaFolderRecord, MediaRecord } from "@/services/media-map";
+import { assertBulkDeleteAllowed, MAX_BULK_MEDIA_IDS } from "../lib/media-bulk";
+import {
+  assertUploadSize,
+  buildStorageKey,
+  hueFromChecksum,
+  mediaTypeFromMime,
+  normalizeChecksum,
+  safeMediaFilename,
+} from "../lib/media-file";
 import {
   FOLDER_DUPLICATE_MESSAGE,
   assertFolderDeletable,
@@ -15,7 +29,7 @@ import {
 } from "../lib/media-folders";
 import { requireCmsPermission } from "./auth.server";
 import type { MediaFolderRow, MediaRow, MediaVersionRow } from "./db/types";
-import { buildStorageKey, hueFromChecksum, mediaTypeFromMime, normalizeChecksum, safeMediaFilename } from "../lib/media-file";
+import { getServerEnv } from "./env.server";
 import {
   createObjectDownloadUrl,
   createObjectDownloadUrls,
@@ -37,6 +51,22 @@ type UsedIn = MediaRecord["usedIn"];
 
 function throwIfError(error: { message: string } | null, fallback: string): void {
   if (error) throw new Error(error.message || fallback);
+}
+
+function serverUploadLimits(): { imageBytes: number; videoBytes: number } {
+  const env = getServerEnv();
+  return {
+    imageBytes: parseUploadByteLimit(env.mediaMaxImageBytes, MAX_IMAGE_UPLOAD_BYTES),
+    videoBytes: parseUploadByteLimit(env.mediaMaxVideoBytes, MAX_VIDEO_UPLOAD_BYTES),
+  };
+}
+
+function uniqueMediaIds(ids: string[]): string[] {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (unique.length > MAX_BULK_MEDIA_IDS) {
+    throw new Error(`Select ${MAX_BULK_MEDIA_IDS} files or fewer.`);
+  }
+  return unique;
 }
 
 function asString(value: unknown, fallback = ""): string {
@@ -397,6 +427,7 @@ export async function createUploadIntent(
 ): Promise<UploadIntentResult> {
   const auth = await requireCmsPermission(accessToken, "media.manage");
   const client = getUserClient(accessToken);
+  assertUploadSize(input.mimeType, input.sizeBytes, serverUploadLimits());
   const checksum = normalizeChecksum(input.checksumSha256);
   const filename = safeMediaFilename(input.filename);
   const type = mediaTypeFromMime(input.mimeType);
@@ -623,16 +654,67 @@ export async function deleteMedia(accessToken: string, id: string): Promise<bool
   const client = getUserClient(accessToken);
   const existing = await getMediaRow(client, id, auth.profile.organizationId);
   if (!existing) throw new Error("Media not found.");
+  await assertIdsDeletable(client, [existing]);
+  await purgeMediaRow(client, id);
+  return true;
+}
 
-  const { count, error: usedError } = await client
+export async function deleteMediaBulk(accessToken: string, ids: string[]): Promise<boolean> {
+  const auth = await requireCmsPermission(accessToken, "media.manage");
+  const client = getUserClient(accessToken);
+  const unique = uniqueMediaIds(ids);
+  if (unique.length === 0) return true;
+  const rows = await getMediaRows(client, unique, auth.profile.organizationId);
+  if (rows.length !== unique.length) throw new Error("Some files were not found.");
+  await assertIdsDeletable(client, rows);
+  for (const row of rows) {
+    await purgeMediaRow(client, row.id);
+  }
+  return true;
+}
+
+async function getMediaRows(
+  client: ReturnType<typeof getUserClient>,
+  ids: string[],
+  organizationId: string,
+): Promise<MediaRow[]> {
+  const { data, error } = await client
+    .from("media")
+    .select(MEDIA_SELECT)
+    .in("id", ids)
+    .eq("organization_id", organizationId);
+  throwIfError(error, "Could not load media.");
+  return (data ?? []).map((row) => mapMedia(row as Record<string, unknown>));
+}
+
+async function assertIdsDeletable(
+  client: ReturnType<typeof getUserClient>,
+  rows: MediaRow[],
+): Promise<void> {
+  const ids = rows.map((row) => row.id);
+  const { data: itemRows, error } = await client
     .from("playlist_items")
-    .select("id", { count: "exact", head: true })
-    .eq("media_id", id);
-  throwIfError(usedError, "Could not check media usage.");
-  if ((count ?? 0) > 0) {
+    .select("media_id")
+    .in("media_id", ids);
+  throwIfError(error, "Could not check media usage.");
+  const usedIds = new Set(
+    (itemRows ?? []).map((row) => asString((row as { media_id: string }).media_id)),
+  );
+  if (usedIds.size === 0) return;
+  if (rows.length === 1) {
     throw new Error("This media is used in a playlist. Archive it instead of deleting.");
   }
+  const usedIn = await loadUsedIn(client, [...usedIds]);
+  const blocked = rows
+    .filter((row) => usedIds.has(row.id))
+    .map((row) => ({
+      filename: row.name,
+      usedIn: usedIn.get(row.id) ?? { playlists: [], campaigns: [], screens: [] },
+    }));
+  assertBulkDeleteAllowed(blocked);
+}
 
+async function purgeMediaRow(client: ReturnType<typeof getUserClient>, id: string): Promise<void> {
   const { data: versions, error: versionError } = await client
     .from("media_versions")
     .select("storage_key, thumbnail_key")
@@ -663,7 +745,6 @@ export async function deleteMedia(accessToken: string, id: string): Promise<bool
   } catch {
     // DB row is already gone; leftover objects can be cleaned by a later storage sweep.
   }
-  return true;
 }
 
 export async function mediaDownloadUrl(
@@ -771,19 +852,32 @@ export async function moveMediaToFolder(
   id: string,
   folderId: string | null,
 ): Promise<MediaRecord> {
-  const auth = await requireCmsPermission(accessToken, "media.manage");
-  const client = getUserClient(accessToken);
-  const existing = await getMediaRow(client, id, auth.profile.organizationId);
-  if (!existing) throw new Error("Media not found.");
-  const nextFolderId = await requireFolderId(client, auth.profile.organizationId, folderId);
-  const { error } = await client.from("media").update({ folder_id: nextFolderId }).eq("id", id);
-  throwIfError(error, "Could not move media.");
-  const updated = await getMediaRow(client, id, auth.profile.organizationId);
-  if (!updated) throw new Error("Media not found.");
-  const records = await toRecords(client, [updated]);
-  const result = records[0];
+  const moved = await moveMediaBulk(accessToken, [id], folderId);
+  const result = moved[0];
   if (!result) throw new Error("Media not found.");
   return result;
+}
+
+export async function moveMediaBulk(
+  accessToken: string,
+  ids: string[],
+  folderId: string | null,
+): Promise<MediaRecord[]> {
+  const auth = await requireCmsPermission(accessToken, "media.manage");
+  const client = getUserClient(accessToken);
+  const unique = uniqueMediaIds(ids);
+  if (unique.length === 0) return [];
+  const existing = await getMediaRows(client, unique, auth.profile.organizationId);
+  if (existing.length !== unique.length) throw new Error("Some files were not found.");
+  const nextFolderId = await requireFolderId(client, auth.profile.organizationId, folderId);
+  const { error } = await client
+    .from("media")
+    .update({ folder_id: nextFolderId })
+    .in("id", unique)
+    .eq("organization_id", auth.profile.organizationId);
+  throwIfError(error, "Could not move media.");
+  const updated = await getMediaRows(client, unique, auth.profile.organizationId);
+  return toRecords(client, updated);
 }
 
 export function mediaStorageBackend(): "r2" | "supabase" {

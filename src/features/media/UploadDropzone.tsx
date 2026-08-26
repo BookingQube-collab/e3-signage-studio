@@ -3,7 +3,7 @@ import { useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { E3Button, E3Progress } from "@/components/e3";
-import { ACCEPT_MEDIA } from "@/lib/media-file";
+import { ACCEPT_MEDIA, collectUploadableFiles, uploadLimitsHint } from "@/lib/media-file";
 import { cn } from "@/lib/utils";
 
 interface PendingUpload {
@@ -28,9 +28,15 @@ export function UploadDropzone({
 
   async function startUpload(files: File[]) {
     if (files.length === 0 || busy) return;
-    setPending(files.map((file) => ({ name: file.name, progress: 0 })));
+    const { accepted, errors } = collectUploadableFiles(files);
+    for (const message of errors) toast.error(message);
+    if (accepted.length === 0) {
+      if (inputRef.current) inputRef.current.value = "";
+      return;
+    }
+    setPending(accepted.map((file) => ({ name: file.name, progress: 0 })));
     try {
-      await onUpload(files, (fileName, percent) => {
+      await onUpload(accepted, (fileName, percent) => {
         setPending((prev) =>
           prev.map((item) => (item.name === fileName ? { ...item, progress: percent } : item)),
         );
@@ -66,6 +72,7 @@ export function UploadDropzone({
           Drop media here
         </p>
         <p className="mt-1 text-sm text-muted-foreground">{hint ?? "Video · Image · Promotional Media"}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{uploadLimitsHint()}</p>
         <E3Button
           className="mt-5"
           variant="primary"

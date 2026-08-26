@@ -1,8 +1,12 @@
 import {
   ALLOWED_MEDIA_MIME,
+  HARD_MAX_UPLOAD_BYTES,
+  MAX_IMAGE_UPLOAD_BYTES,
+  MAX_VIDEO_UPLOAD_BYTES,
   isAllowedMediaMime,
   maxUploadBytesForMime,
   type AllowedMediaMime,
+  type UploadByteLimits,
 } from "../../packages/validation/src/index.ts";
 
 const MIME_BY_EXT: Record<string, AllowedMediaMime> = {
@@ -45,13 +49,52 @@ export function extensionForMime(mime: AllowedMediaMime): string {
   return "mp4";
 }
 
-export function assertUploadSize(mime: AllowedMediaMime, sizeBytes: number): void {
-  const max = maxUploadBytesForMime(mime);
+export function uploadLimitMb(bytes: number): number {
+  return Math.round(bytes / (1024 * 1024));
+}
+
+export function uploadLimitsHint(): string {
+  return `Images up to ${uploadLimitMb(MAX_IMAGE_UPLOAD_BYTES)} MB · Videos up to ${uploadLimitMb(MAX_VIDEO_UPLOAD_BYTES)} MB`;
+}
+
+export class MediaUploadTooLargeError extends Error {
+  readonly status = 413;
+  constructor(kind: "Image" | "Video", maxMb: number) {
+    super(`${kind} is too large. Maximum is ${maxMb} MB.`);
+    this.name = "MediaUploadTooLargeError";
+  }
+}
+
+export function assertUploadSize(
+  mime: AllowedMediaMime,
+  sizeBytes: number,
+  limits?: UploadByteLimits,
+): void {
+  const max = maxUploadBytesForMime(mime, limits);
   if (sizeBytes <= 0) throw new Error("File is empty.");
   if (sizeBytes > max) {
-    const mb = Math.round(max / (1024 * 1024));
-    throw new Error(`File is too large. Maximum is ${mb} MB for this type.`);
+    const kind = mime.startsWith("video/") ? "Video" : "Image";
+    throw new MediaUploadTooLargeError(kind, uploadLimitMb(max));
   }
+}
+
+export function collectUploadableFiles(files: File[]): { accepted: File[]; errors: string[] } {
+  const accepted: File[] = [];
+  const errors: string[] = [];
+  for (const file of files) {
+    const mime = inferMediaMime(file.name, file.type);
+    if (!mime) {
+      errors.push(`Unsupported file type: ${file.name}. Use JPEG, PNG, WebP, or MP4.`);
+      continue;
+    }
+    try {
+      assertUploadSize(mime, file.size);
+      accepted.push(file);
+    } catch (error) {
+      errors.push(`${file.name}: ${error instanceof Error ? error.message : "Too large."}`);
+    }
+  }
+  return { accepted, errors };
 }
 
 export function normalizeChecksum(value: string): string {
@@ -84,4 +127,9 @@ export function isAllowedMediaFilename(filename: string): boolean {
 export const ACCEPT_MEDIA =
   "image/jpeg,image/png,image/webp,video/mp4,.jpg,.jpeg,.png,.webp,.mp4";
 
-export { ALLOWED_MEDIA_MIME };
+export {
+  ALLOWED_MEDIA_MIME,
+  HARD_MAX_UPLOAD_BYTES,
+  MAX_IMAGE_UPLOAD_BYTES,
+  MAX_VIDEO_UPLOAD_BYTES,
+};

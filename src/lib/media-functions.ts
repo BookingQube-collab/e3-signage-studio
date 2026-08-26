@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-import { mediaMimeSchema, sha256Schema } from "@e3/validation";
+import { HARD_MAX_UPLOAD_BYTES, mediaMimeSchema, sha256Schema } from "@e3/validation";
 
 import type { MediaFolderRecord, MediaRecord } from "@/services/media-map";
 
@@ -26,7 +26,7 @@ export const createMediaUploadIntentFn = createServerFn({ method: "POST" })
     accessTokenSchema.extend({
       filename: z.string().min(1).max(255),
       mimeType: mediaMimeSchema,
-      sizeBytes: z.number().int().positive().max(8_000_000_000),
+      sizeBytes: z.number().int().positive().max(HARD_MAX_UPLOAD_BYTES),
       checksumSha256: sha256Schema,
       width: z.number().int().positive().nullable(),
       height: z.number().int().positive().nullable(),
@@ -85,6 +85,17 @@ export const deleteMediaFn = createServerFn({ method: "POST" })
     return deleteMedia(data.accessToken, data.id);
   });
 
+export const deleteMediaBulkFn = createServerFn({ method: "POST" })
+  .validator(
+    accessTokenSchema.extend({
+      ids: z.array(z.string().uuid()).min(1).max(100),
+    }),
+  )
+  .handler(async ({ data }): Promise<boolean> => {
+    const { deleteMediaBulk } = await import("@/server/media.server");
+    return deleteMediaBulk(data.accessToken, data.ids);
+  });
+
 export const mediaDownloadUrlFn = createServerFn({ method: "POST" })
   .validator(accessTokenSchema.extend({ id: z.string().uuid() }))
   .handler(async ({ data }): Promise<{ url: string; filename: string }> => {
@@ -123,4 +134,16 @@ export const moveMediaToFolderFn = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<MediaRecord> => {
     const { moveMediaToFolder } = await import("@/server/media.server");
     return moveMediaToFolder(data.accessToken, data.id, data.folderId);
+  });
+
+export const moveMediaBulkFn = createServerFn({ method: "POST" })
+  .validator(
+    accessTokenSchema.extend({
+      ids: z.array(z.string().uuid()).min(1).max(100),
+      folderId: z.string().uuid().nullable(),
+    }),
+  )
+  .handler(async ({ data }): Promise<MediaRecord[]> => {
+    const { moveMediaBulk } = await import("@/server/media.server");
+    return moveMediaBulk(data.accessToken, data.ids, data.folderId);
   });
