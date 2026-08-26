@@ -44,6 +44,7 @@ data class SyncStatusResponse(
     val manifestVersion: Int,
     val configVersion: Int,
     val syncRequested: Boolean,
+    val rotatedToken: String? = null,
 )
 
 @Serializable
@@ -57,6 +58,7 @@ data class SyncConfirmationRequest(
 @Serializable
 data class OkResponse(
     val ok: Boolean = true,
+    val rotatedToken: String? = null,
 )
 
 @Serializable

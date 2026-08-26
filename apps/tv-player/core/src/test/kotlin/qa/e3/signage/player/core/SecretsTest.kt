@@ -23,4 +23,10 @@ class SecretsTest {
         assertFalse(redacted.contains("abcdefghijklmnop"))
         assertEquals(true, redacted.contains("••••"))
     }
+
+    @Test
+    fun redactStripsRotatedTokens() {
+        val raw = """{"rotatedToken":"abcdefghijklmnop"}"""
+        assertFalse(redactHttp(raw).contains("abcdefghijklmnop"))
+    }
 }

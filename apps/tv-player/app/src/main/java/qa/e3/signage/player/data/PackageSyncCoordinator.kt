@@ -17,6 +17,7 @@ import qa.e3.signage.player.core.DeviceHttpException
 import qa.e3.signage.player.core.SyncConfirmationRequest
 import qa.e3.signage.player.core.expectedMediaFile
 import qa.e3.signage.player.core.firstInvalidAsset
+import qa.e3.signage.player.core.persistRotatedToken
 import qa.e3.signage.player.core.planDownloads
 import qa.e3.signage.player.core.progressPercent
 import qa.e3.signage.player.core.shouldFetchManifest
@@ -50,6 +51,8 @@ class PackageSyncCoordinator(
             Log.w(TAG, "sync-status: ${error.message}")
             return
         }
+        persistRotatedToken(store, status.rotatedToken)
+        val live = store.read() ?: credentials
         packages.noteCloudVersion(status.manifestVersion)
 
         val activeVersion = packages.activeVersion() ?: 0
@@ -61,18 +64,18 @@ class PackageSyncCoordinator(
         }
 
         val manifest = try {
-            loadOrFetchManifest(credentials, status.manifestVersion, inflight) ?: return
+            loadOrFetchManifest(live, status.manifestVersion, inflight) ?: return
         } catch (_: ScreenDisabledException) {
             Log.w(TAG, "screen disabled; keeping previous ACTIVE")
             val path = inflight?.manifestPath.orEmpty()
             if (inflight != null && inflight.state != ContentPackageState.ACTIVE.name) {
-                failInflight(credentials, status.manifestVersion, path, error = "This screen is disabled.")
+                failInflight(live, status.manifestVersion, path, error = "This screen is disabled.")
             }
             return
         }
 
         if (manifest.manifestVersion == activeVersion && inflight == null) {
-            confirm(credentials, manifest.manifestVersion, ContentPackageState.ACTIVE)
+            confirm(live, manifest.manifestVersion, ContentPackageState.ACTIVE)
             return
         }
 
@@ -84,13 +87,13 @@ class PackageSyncCoordinator(
         }
 
         try {
-            downloadAndActivate(credentials, manifest, path)
+            downloadAndActivate(live, manifest, path)
         } catch (_: ScreenDisabledException) {
             Log.w(TAG, "screen disabled; keeping previous ACTIVE")
-            failInflight(credentials, manifest.manifestVersion, path, error = "This screen is disabled.")
+            failInflight(live, manifest.manifestVersion, path, error = "This screen is disabled.")
         } catch (error: ChecksumFailedException) {
             failInflight(
-                credentials,
+                live,
                 manifest.manifestVersion,
                 path,
                 failedAssetId = error.assetId,
@@ -105,7 +108,7 @@ class PackageSyncCoordinator(
             packages.noteError(error.message)
         } catch (error: Exception) {
             Log.w(TAG, "package sync failed: ${error.message}")
-            failInflight(credentials, manifest.manifestVersion, path, error = error.message)
+            failInflight(live, manifest.manifestVersion, path, error = error.message)
         }
     }
 

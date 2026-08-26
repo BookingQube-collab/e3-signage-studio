@@ -33,6 +33,11 @@ import {
   hashDeviceToken,
   hashPairingCode,
 } from "@/lib/device-crypto";
+import {
+  DEVICE_TOKEN_GRACE_MS,
+  isDeviceTokenExpired,
+  shouldRotateDeviceToken,
+} from "@/lib/device-token";
 import { uiTime } from "@/lib/schedule-days";
 import { wallTimeToIso } from "@/lib/zoned-time";
 import { isUuid } from "@/services/inventory-map";
@@ -138,6 +143,8 @@ type DeviceAuthOk = {
   ok: true;
   screen: DeviceScreen;
   tokenId: string;
+  tokenCreatedAt: string;
+  rotatedFromId: string | null;
   admin: AdminClient;
 };
 
@@ -151,14 +158,26 @@ export async function requireDevice(
   const tokenHash = hashDeviceToken(token);
   const { data: tokenRow, error: tokenError } = await admin
     .from("device_tokens")
-    .select("id, screen_id, revoked_at")
+    .select("id, screen_id, revoked_at, created_at, expires_at, rotated_from_id")
     .eq("token_hash", tokenHash)
     .maybeSingle();
   throwIfError(tokenError, "Could not validate device token.");
-  if (!tokenRow || asNullableString((tokenRow as { revoked_at: string | null }).revoked_at)) {
+  const tokenRecord = tokenRow as {
+    id: string;
+    screen_id: string;
+    revoked_at: string | null;
+    created_at: string;
+    expires_at: string | null;
+    rotated_from_id: string | null;
+  } | null;
+  if (
+    !tokenRecord ||
+    asNullableString(tokenRecord.revoked_at) ||
+    isDeviceTokenExpired(asNullableString(tokenRecord.expires_at))
+  ) {
     return fail(401, "Invalid device token.");
   }
-  const screenId = asString((tokenRow as { screen_id: string }).screen_id);
+  const screenId = asString(tokenRecord.screen_id);
   const { data: screen, error: screenError } = await admin
     .from("screens")
     .select(
@@ -173,13 +192,61 @@ export async function requireDevice(
   if (deviceIdParam !== row.id && deviceIdParam !== row.device_id) {
     return fail(403, "Token does not match this device.");
   }
-  await touchToken(admin, asString((tokenRow as { id: string }).id));
+  const tokenId = asString(tokenRecord.id);
+  await touchToken(admin, tokenId);
+  const parentId = asNullableString(tokenRecord.rotated_from_id);
+  if (parentId) {
+    const now = isoNow();
+    await admin
+      .from("device_tokens")
+      .update({ revoked_at: now, expires_at: now })
+      .eq("id", parentId)
+      .is("revoked_at", null);
+  }
   return {
     ok: true,
     screen: row,
-    tokenId: asString((tokenRow as { id: string }).id),
+    tokenId,
+    tokenCreatedAt: asString(tokenRecord.created_at, isoNow()),
+    rotatedFromId: parentId,
     admin,
   };
+}
+
+async function maybeRotateToken(auth: DeviceAuthOk): Promise<string | undefined> {
+  if (!shouldRotateDeviceToken(auth.tokenCreatedAt)) return undefined;
+  const { data: successor, error: successorError } = await auth.admin
+    .from("device_tokens")
+    .select("id")
+    .eq("rotated_from_id", auth.tokenId)
+    .is("revoked_at", null)
+    .maybeSingle();
+  throwIfError(successorError, "Could not check token rotation.");
+  if (successor) return undefined;
+
+  const rawToken = generateDeviceToken();
+  const now = isoNow();
+  const graceUntil = new Date(Date.now() + DEVICE_TOKEN_GRACE_MS).toISOString();
+  const { error: expireError } = await auth.admin
+    .from("device_tokens")
+    .update({ expires_at: graceUntil })
+    .eq("id", auth.tokenId);
+  throwIfError(expireError, "Could not schedule previous token expiry.");
+  const { error: insertError } = await auth.admin.from("device_tokens").insert({
+    screen_id: auth.screen.id,
+    token_hash: hashDeviceToken(rawToken),
+    rotated_from_id: auth.tokenId,
+    last_used_at: now,
+  });
+  throwIfError(insertError, "Could not rotate the device token.");
+  await auth.admin.from("audit_logs").insert({
+    organization_id: auth.screen.organization_id,
+    action: "DEVICE_TOKEN_ROTATED",
+    resource_type: "screen",
+    resource_id: auth.screen.id,
+    new_value: { tokenId: auth.tokenId },
+  });
+  return rawToken;
 }
 
 export async function pairDevice(input: unknown): Promise<JsonResult<DevicePairResponse | { error: string }>> {
@@ -329,10 +396,12 @@ export async function deviceSyncStatus(
   );
   const pending = asNullableString((data as { pending_manifest_id?: string | null } | null)?.pending_manifest_id);
   const requestedAt = asNullableString((data as { sync_requested_at?: string | null } | null)?.sync_requested_at);
+  const rotatedToken = await maybeRotateToken(auth);
   return ok({
     manifestVersion: cloud,
     configVersion: configVersion > 0 ? configVersion : 1,
     syncRequested: Boolean(requestedAt) || cloud > local || Boolean(pending),
+    ...(rotatedToken ? { rotatedToken } : {}),
   });
 }
 
@@ -686,7 +755,7 @@ export async function deviceHeartbeat(
   deviceId: string,
   token: string | null,
   input: unknown,
-): Promise<JsonResult<{ ok: true } | { error: string }>> {
+): Promise<JsonResult<{ ok: true; rotatedToken?: string } | { error: string }>> {
   const auth = await requireDevice(token, deviceId);
   if (!("ok" in auth)) return auth;
   const parsed = deviceHeartbeatRequestSchema.safeParse(input);
@@ -772,7 +841,8 @@ export async function deviceHeartbeat(
       detail: "Heartbeat",
     });
   }
-  return ok({ ok: true });
+  const rotatedToken = await maybeRotateToken(auth);
+  return ok({ ok: true, ...(rotatedToken ? { rotatedToken } : {}) });
 }
 
 export async function deviceSyncConfirmation(

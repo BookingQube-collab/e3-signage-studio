@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: E3 Digital Signage API
-  version: 0.2.0
+  version: 0.14.0
   description: |
     Shared contracts for the Lovable admin CMS and Android TV players.
     Admin calls use a Supabase session. Devices use a revocable device bearer token.
@@ -147,6 +147,7 @@ components:
         manifestVersion: { type: integer }
         configVersion: { type: integer }
         syncRequested: { type: boolean }
+        rotatedToken: { type: string, description: "Present when the server rotated the device token. Persist immediately; previous token remains valid for 24h." }
     ContentManifest:
       type: object
       required: [screenId, manifestVersion, configVersion, generatedAt, assets]

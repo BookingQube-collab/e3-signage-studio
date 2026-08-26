@@ -12,4 +12,5 @@ fun redactHttp(message: String): String {
         .replace(Regex("""(?i)(Authorization:\s*Bearer\s+)\S+"""), "$1••••")
         .replace(Regex("""(?i)(X-Device-Token:\s*)\S+"""), "$1••••")
         .replace(Regex("""(?i)("deviceToken"\s*:\s*")[^"]+"""), "$1••••")
+        .replace(Regex("""(?i)("rotatedToken"\s*:\s*")[^"]+"""), "$1••••")
 }

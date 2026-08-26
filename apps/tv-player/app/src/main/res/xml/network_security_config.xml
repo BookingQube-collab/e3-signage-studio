@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- LAN HTTP during install. Production CMS should be HTTPS (Phase 14). -->
-    <base-config cleartextTrafficPermitted="true">
+    <!-- Production CMS is HTTPS. Cleartext is not used against e3-cms.vercel.app. -->
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>

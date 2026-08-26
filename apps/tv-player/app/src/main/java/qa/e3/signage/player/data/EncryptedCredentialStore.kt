@@ -23,7 +23,7 @@ class EncryptedCredentialStore(context: Context) : DeviceCredentialStore {
             .putString(KEY_TOKEN, credentials.deviceToken)
             .putString(KEY_DEVICE_ID, credentials.deviceId)
             .putString(KEY_SCREEN_ID, credentials.screenId)
-            .apply()
+            .commit()
     }
 
     override fun clear() {

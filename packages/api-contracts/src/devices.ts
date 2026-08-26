@@ -49,6 +49,7 @@ export const deviceSyncStatusResponseSchema = z.object({
   manifestVersion: z.number().int().min(0),
   configVersion: z.number().int().min(0),
   syncRequested: z.boolean(),
+  rotatedToken: z.string().min(16).optional(),
 });
 
 export const manifestAssetSchema = z.object({
@@ -176,10 +177,15 @@ export const errorLogBatchSchema = z.object({
   events: z.array(errorLogEventSchema).min(1).max(200),
 });
 
+export const deviceOkResponseSchema = z.object({
+  ok: z.literal(true),
+  rotatedToken: z.string().min(16).optional(),
+});
 export type DevicePairRequest = z.infer<typeof devicePairRequestSchema>;
 export type DevicePairResponse = z.infer<typeof devicePairResponseSchema>;
 export type DeviceActivateResponse = z.infer<typeof deviceActivateResponseSchema>;
 export type DeviceSyncStatusResponse = z.infer<typeof deviceSyncStatusResponseSchema>;
+export type DeviceOkResponse = z.infer<typeof deviceOkResponseSchema>;
 export type ContentManifest = z.infer<typeof contentManifestSchema>;
 export type DeviceHeartbeatRequest = z.infer<typeof deviceHeartbeatRequestSchema>;
 export type PlaybackLogBatch = z.infer<typeof playbackLogBatchSchema>;

@@ -19,6 +19,7 @@ import { Route as ShellScheduleRouteImport } from './routes/_shell.schedule'
 import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
 import { Route as ShellUsersRouteImport } from './routes/_shell.users'
 import { Route as ApiPublicConfigRouteImport } from './routes/api.public-config'
+import { Route as ApiAuthLoginAttemptRouteImport } from './routes/api.auth.login-attempt'
 import { Route as ShellCampaignsIndexRouteImport } from './routes/_shell.campaigns.index'
 import { Route as ShellCampaignsIdRouteImport } from './routes/_shell.campaigns.$id'
 import { Route as ShellCampaignsNewRouteImport } from './routes/_shell.campaigns.new'
@@ -88,6 +89,11 @@ const ShellUsersRoute = ShellUsersRouteImport.update({
 const ApiPublicConfigRoute = ApiPublicConfigRouteImport.update({
   id: '/api/public-config',
   path: '/api/public-config',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthLoginAttemptRoute = ApiAuthLoginAttemptRouteImport.update({
+  id: '/api/auth/login-attempt',
+  path: '/api/auth/login-attempt',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ShellCampaignsIndexRoute = ShellCampaignsIndexRouteImport.update({
@@ -212,6 +218,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof ShellSettingsRoute
   '/users': typeof ShellUsersRoute
   '/api/public-config': typeof ApiPublicConfigRoute
+  '/api/auth/login-attempt': typeof ApiAuthLoginAttemptRoute
   '/campaigns/$id': typeof ShellCampaignsIdRoute
   '/campaigns/new': typeof ShellCampaignsNewRoute
   '/layouts/$id': typeof ShellLayoutsIdRoute
@@ -244,6 +251,7 @@ export interface FileRoutesByTo {
   '/settings': typeof ShellSettingsRoute
   '/users': typeof ShellUsersRoute
   '/api/public-config': typeof ApiPublicConfigRoute
+  '/api/auth/login-attempt': typeof ApiAuthLoginAttemptRoute
   '/campaigns/$id': typeof ShellCampaignsIdRoute
   '/campaigns/new': typeof ShellCampaignsNewRoute
   '/layouts/$id': typeof ShellLayoutsIdRoute
@@ -278,6 +286,7 @@ export interface FileRoutesById {
   '/_shell/settings': typeof ShellSettingsRoute
   '/_shell/users': typeof ShellUsersRoute
   '/api/public-config': typeof ApiPublicConfigRoute
+  '/api/auth/login-attempt': typeof ApiAuthLoginAttemptRoute
   '/_shell/campaigns/$id': typeof ShellCampaignsIdRoute
   '/_shell/campaigns/new': typeof ShellCampaignsNewRoute
   '/_shell/layouts/$id': typeof ShellLayoutsIdRoute
@@ -312,6 +321,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/users'
     | '/api/public-config'
+    | '/api/auth/login-attempt'
     | '/campaigns/$id'
     | '/campaigns/new'
     | '/layouts/$id'
@@ -344,6 +354,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/users'
     | '/api/public-config'
+    | '/api/auth/login-attempt'
     | '/campaigns/$id'
     | '/campaigns/new'
     | '/layouts/$id'
@@ -377,6 +388,7 @@ export interface FileRouteTypes {
     | '/_shell/settings'
     | '/_shell/users'
     | '/api/public-config'
+    | '/api/auth/login-attempt'
     | '/_shell/campaigns/$id'
     | '/_shell/campaigns/new'
     | '/_shell/layouts/$id'
@@ -405,6 +417,7 @@ export interface RootRouteChildren {
   ShellRoute: typeof ShellRouteWithChildren
   LoginRoute: typeof LoginRoute
   ApiPublicConfigRoute: typeof ApiPublicConfigRoute
+  ApiAuthLoginAttemptRoute: typeof ApiAuthLoginAttemptRoute
   ApiDevicesActivateRoute: typeof ApiDevicesActivateRoute
   ApiDevicesPairRoute: typeof ApiDevicesPairRoute
   ApiDevicesDeviceIdErrorLogsRoute: typeof ApiDevicesDeviceIdErrorLogsRoute
@@ -485,6 +498,13 @@ declare module '@tanstack/react-router' {
       path: '/api/public-config'
       fullPath: '/api/public-config'
       preLoaderRoute: typeof ApiPublicConfigRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/login-attempt': {
+      id: '/api/auth/login-attempt'
+      path: '/api/auth/login-attempt'
+      fullPath: '/api/auth/login-attempt'
+      preLoaderRoute: typeof ApiAuthLoginAttemptRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_shell/campaigns/': {
@@ -688,6 +708,7 @@ const rootRouteChildren: RootRouteChildren = {
   ShellRoute: ShellRouteWithChildren,
   LoginRoute: LoginRoute,
   ApiPublicConfigRoute: ApiPublicConfigRoute,
+  ApiAuthLoginAttemptRoute: ApiAuthLoginAttemptRoute,
   ApiDevicesActivateRoute: ApiDevicesActivateRoute,
   ApiDevicesPairRoute: ApiDevicesPairRoute,
   ApiDevicesDeviceIdErrorLogsRoute: ApiDevicesDeviceIdErrorLogsRoute,

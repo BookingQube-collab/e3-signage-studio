@@ -27,6 +27,7 @@ import qa.e3.signage.player.core.newBatchId
 import qa.e3.signage.player.core.newPlaybackEventId
 import qa.e3.signage.player.core.nextPlaybackBatch
 import qa.e3.signage.player.core.operationalStatusForPackage
+import qa.e3.signage.player.core.persistRotatedToken
 import qa.e3.signage.player.core.shouldRetainUploadedLog
 import qa.e3.signage.player.core.syncProgressForPackage
 import qa.e3.signage.player.core.syncStateForPackage
@@ -83,10 +84,12 @@ class DeviceTelemetry(
                     return@withLock
                 }
                 try {
-                    api.heartbeat(credentials.deviceId, credentials.deviceToken, body)
+                    val ack = api.heartbeat(credentials.deviceId, credentials.deviceToken, body)
+                    persistRotatedToken(store, ack.rotatedToken)
                     db.pendingUploadDao().deleteKind(QueuedUpload.KIND_HEARTBEAT)
                     prefs.edit().putLong(KEY_LAST_SENT, System.currentTimeMillis()).apply()
-                    flushLocked(credentials.deviceId, credentials.deviceToken, credentials.screenId)
+                    val live = store.read() ?: credentials
+                    flushLocked(live.deviceId, live.deviceToken, live.screenId)
                 } catch (error: Exception) {
                     Log.w(TAG, "heartbeat: ${error.message}")
                     queueHeartbeat(encoded)
@@ -160,7 +163,8 @@ class DeviceTelemetry(
             json.decodeFromString(DeviceHeartbeatRequest.serializer(), latest.payloadJson)
         }.getOrNull() ?: return
         try {
-            api.heartbeat(deviceId, token, body)
+            val ack = api.heartbeat(deviceId, token, body)
+            persistRotatedToken(store, ack.rotatedToken)
             db.pendingUploadDao().deleteKind(QueuedUpload.KIND_HEARTBEAT)
         } catch (error: Exception) {
             Log.w(TAG, "queued heartbeat: ${error.message}")

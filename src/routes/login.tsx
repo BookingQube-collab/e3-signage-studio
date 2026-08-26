@@ -88,6 +88,15 @@ function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
+      const limited = await fetch("/api/auth/login-attempt", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      if (limited.status === 429) {
+        setError("Too many sign-in attempts. Try again in a few minutes.");
+        return;
+      }
       const { data, error: signError } = await getSupabase().auth.signInWithPassword({
         email,
         password,
@@ -128,6 +137,15 @@ function LoginPage() {
     }
     setError(null);
     try {
+      const limited = await fetch("/api/auth/login-attempt", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      if (limited.status === 429) {
+        setError("Too many password reset attempts. Try again in a few minutes.");
+        return;
+      }
       const { error: resetError } = await getSupabase().auth.resetPasswordForEmail(email, {
         redirectTo: `${getPublicCmsUrl()}/login`,
       });

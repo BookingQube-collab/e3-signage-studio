@@ -1,22 +1,39 @@
+import { withSecurityHeaders } from "@/lib/security-headers";
+
 export function corsHeaders(): Record<string, string> {
-  return {
+  return withSecurityHeaders({
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Device-Token",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Max-Age": "86400",
-  };
+  });
 }
 
-export function jsonResult(status: number, body: unknown): Response {
-  return Response.json(body, { status, headers: corsHeaders() });
+export function jsonResult(
+  status: number,
+  body: unknown,
+  extraHeaders?: Record<string, string>,
+): Response {
+  return Response.json(body, { status, headers: { ...corsHeaders(), ...extraHeaders } });
 }
 
-export function fromJsonResult(result: { status: number; body: unknown }): Response {
-  return jsonResult(result.status, result.body);
+export function fromJsonResult(
+  result: { status: number; body: unknown },
+  extraHeaders?: Record<string, string>,
+): Response {
+  return jsonResult(result.status, result.body, extraHeaders);
 }
 
 export function optionsResult(): Response {
   return new Response(null, { status: 204, headers: corsHeaders() });
+}
+
+export function rateLimitedResult(message: string, retryAfterSeconds: number): Response {
+  return jsonResult(
+    429,
+    { error: message },
+    { "Retry-After": String(Math.max(1, retryAfterSeconds || 60)) },
+  );
 }
 
 export function bearerToken(request: Request): string | null {
