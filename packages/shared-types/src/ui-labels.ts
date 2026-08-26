@@ -61,7 +61,7 @@ export const UI_LABELS = {
     PUBLISHING: "Publishing",
     ACTIVE: "Active",
     PAUSED: "Paused",
-    EXPIRED: "Expired",
+    EXPIRED: "Ended",
     ARCHIVED: "Archived",
   },
   transition: { CUT: "Cut", FADE: "Fade", SLIDE: "Slide", ZOOM: "Zoom", NONE: "None" },

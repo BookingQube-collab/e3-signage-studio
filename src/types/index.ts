@@ -181,6 +181,7 @@ export type CampaignStatus =
   | "Active"
   | "Paused"
   | "Expired"
+  | "Ended"
   | "Archived";
 
 export interface Schedule {

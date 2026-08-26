@@ -12,6 +12,8 @@ import {
   E3Table,
   type E3Column,
 } from "@/components/e3";
+import { CampaignRowMenu } from "@/features/campaigns/CampaignRowMenu";
+import { effectiveCampaignStatus, formatCampaignDateTime } from "@/lib/campaign-window";
 import { campaignService } from "@/services";
 import type { Campaign } from "@/types";
 
@@ -51,14 +53,26 @@ function CampaignsPage() {
         </div>
       ),
     },
-    { key: "status", header: "Status", cell: (c) => <E3StatusBadge status={c.status} /> },
+    {
+      key: "status",
+      header: "Status",
+      cell: (c) => <E3StatusBadge status={effectiveCampaignStatus(c.status, c.schedule)} />,
+    },
     {
       key: "target",
       header: "Target",
       cell: (c) => `${c.locationIds.length} locations`,
     },
-    { key: "start", header: "Start", cell: (c) => c.schedule.startDate },
-    { key: "end", header: "End", cell: (c) => c.schedule.endDate },
+    {
+      key: "start",
+      header: "Start",
+      cell: (c) => formatCampaignDateTime(c.schedule.startDate, c.schedule.startTime, c.schedule.timezone),
+    },
+    {
+      key: "end",
+      header: "End",
+      cell: (c) => formatCampaignDateTime(c.schedule.endDate, c.schedule.endTime, c.schedule.timezone),
+    },
     { key: "screens", header: "Screens", cell: (c) => c.screenIds.length },
     {
       key: "sync",
@@ -74,6 +88,12 @@ function CampaignsPage() {
           />
         ),
     },
+    {
+      key: "actions",
+      header: "Actions",
+      className: "w-14 text-right",
+      cell: (c) => <CampaignRowMenu campaign={c} />,
+    },
   ];
 
   return (
@@ -83,7 +103,7 @@ function CampaignsPage() {
         description="Everything currently published or planned across the network."
         actions={
           <E3Button variant="primary" asChild>
-            <Link to="/campaigns/new">
+            <Link to="/campaigns/new" search={{}}>
               <Plus /> New campaign
             </Link>
           </E3Button>
@@ -98,7 +118,7 @@ function CampaignsPage() {
             description="Create a campaign to publish content to screens on a schedule."
             action={
               <E3Button variant="primary" asChild>
-                <Link to="/campaigns/new">
+                <Link to="/campaigns/new" search={{}}>
                   <Plus /> New campaign
                 </Link>
               </E3Button>

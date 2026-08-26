@@ -13,6 +13,7 @@ import {
   E3StatusBadge,
 } from "@/components/e3";
 import { cn } from "@/lib/utils";
+import { effectiveCampaignStatus, formatCampaignDateTime } from "@/lib/campaign-window";
 import { scheduleService } from "@/services";
 
 export const Route = createFileRoute("/_shell/schedule")({
@@ -153,9 +154,10 @@ function SchedulePage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="text-sm text-muted-foreground">
-                    {c.schedule.startDate} → {c.schedule.endDate}
+                    {formatCampaignDateTime(c.schedule.startDate, c.schedule.startTime, c.schedule.timezone)} →{" "}
+                    {formatCampaignDateTime(c.schedule.endDate, c.schedule.endTime, c.schedule.timezone)}
                   </span>
-                  <E3StatusBadge status={c.status} />
+                  <E3StatusBadge status={effectiveCampaignStatus(c.status, c.schedule)} />
                 </div>
               </Link>
             ))}

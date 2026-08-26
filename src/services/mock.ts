@@ -305,6 +305,10 @@ export const mockServices: AppServices = {
         : [published, ...store.campaigns];
       return delay(published, 400);
     },
+    remove: (id: string) => {
+      store.campaigns = store.campaigns.filter((c) => c.id !== id);
+      return delay(undefined, 250);
+    },
     syncStatus: (campaignId: string): Promise<SyncStatusItem[]> => {
       const campaign = store.campaigns.find((c) => c.id === campaignId);
       const targets = store.screens.filter((s) => campaign?.screenIds.includes(s.id));

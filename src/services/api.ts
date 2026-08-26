@@ -67,6 +67,7 @@ export const apiServices: AppServices = {
     get: () => notConfigured(),
     save: () => notConfigured(),
     publish: () => notConfigured(),
+    remove: () => notConfigured(),
     syncStatus: () => notConfigured(),
   },
   scheduleService: {

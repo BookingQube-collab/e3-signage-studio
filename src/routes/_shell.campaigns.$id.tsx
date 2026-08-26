@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, createFileRoute } from "@tanstack/react-router";
-import { Pause, Play } from "lucide-react";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Pause, Pencil, Play } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -14,6 +14,7 @@ import {
   E3StatusBadge,
 } from "@/components/e3";
 import { SyncStatusPanel } from "@/features/campaigns/SyncStatusPanel";
+import { effectiveCampaignStatus, formatCampaignDateTime } from "@/lib/campaign-window";
 import { campaignService } from "@/services";
 
 export const Route = createFileRoute("/_shell/campaigns/$id")({
@@ -34,6 +35,7 @@ export const Route = createFileRoute("/_shell/campaigns/$id")({
 function CampaignDetailPage() {
   const { id } = Route.useParams();
   const qc = useQueryClient();
+  const navigate = useNavigate();
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["campaign", id],
@@ -53,7 +55,7 @@ function CampaignDetailPage() {
       void qc.invalidateQueries({ queryKey: ["campaigns"] });
       void qc.invalidateQueries({ queryKey: ["campaign-sync", id] });
       void qc.invalidateQueries({ queryKey: ["schedule"] });
-      toast.success(c.status === "Paused" ? "Campaign paused" : "Campaign resumed");
+      toast.success(c.status === "Paused" ? "Campaign stopped" : "Campaign resumed");
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Could not update campaign.");
@@ -84,11 +86,18 @@ function CampaignDetailPage() {
             description={data.description}
             actions={
               <>
-                <E3StatusBadge status={data.status} className="self-center" />
+                <E3StatusBadge status={effectiveCampaignStatus(data.status, data.schedule)} className="self-center" />
+                <E3Button
+                  variant="outline"
+                  onClick={() => void navigate({ to: "/campaigns/new", search: { edit: data.id } })}
+                >
+                  <Pencil />
+                  Edit
+                </E3Button>
                 {data.status === "Paused" || data.status === "Active" || data.status === "Scheduled" ? (
                   <E3Button variant="primary" disabled={toggle.isPending} onClick={() => toggle.mutate()}>
                     {data.status === "Paused" ? <Play /> : <Pause />}
-                    {data.status === "Paused" ? "Resume" : "Pause"}
+                    {data.status === "Paused" ? "Resume" : "Stop"}
                   </E3Button>
                 ) : null}
               </>
@@ -106,8 +115,7 @@ function CampaignDetailPage() {
                       ["Content type", data.contentType],
                       ["Target screens", `${data.screenIds.length}`],
                       ["Locations", `${data.locationIds.length}`],
-                      ["Window", `${data.schedule.startDate} → ${data.schedule.endDate}`],
-                      ["Time", `${data.schedule.startTime}–${data.schedule.endTime}`],
+                      ["Window", `${formatCampaignDateTime(data.schedule.startDate, data.schedule.startTime, data.schedule.timezone)} → ${formatCampaignDateTime(data.schedule.endDate, data.schedule.endTime, data.schedule.timezone)}`],
                       ["Days", data.schedule.days.join(" ")],
                       ["Time zone", data.schedule.timezone],
                       ["Priority", `${data.schedule.priority}`],

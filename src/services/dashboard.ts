@@ -1,5 +1,6 @@
 import { dashboardActivityFn } from "@/lib/monitoring-functions";
 import { activityFromMonitoring, deriveAlerts, storageAlertCount } from "@/lib/monitoring";
+import { effectiveCampaignStatus } from "@/lib/campaign-window";
 import { getBrowserAccessToken } from "@/lib/supabase";
 import { liveCampaignService } from "./campaigns";
 import { liveLocationService } from "./locations";
@@ -39,8 +40,8 @@ export const liveDashboardService: DashboardService = {
       online: screens.filter((s) => s.status === "online").length,
       offline: screens.filter((s) => s.status === "offline").length,
       syncing: screens.filter((s) => s.status === "syncing").length,
-      activeCampaigns: campaigns.filter((c) => c.status === "Active").length,
-      scheduledCampaigns: campaigns.filter((c) => c.status === "Scheduled").length,
+      activeCampaigns: campaigns.filter((c) => effectiveCampaignStatus(c.status, c.schedule) === "Active").length,
+      scheduledCampaigns: campaigns.filter((c) => effectiveCampaignStatus(c.status, c.schedule) === "Scheduled").length,
       storageAlerts: storageAlertCount(screens),
       locationStatus: visible.map((l) => ({
         id: l.id,

@@ -10,6 +10,7 @@ import {
   type MediaType,
 } from "@e3/shared-types";
 
+import { campaignLifecycleStatus } from "@/lib/campaign-window";
 import { daysToNumbers, numbersToDays, uiTime } from "@/lib/schedule-days";
 import { toManifestAssets } from "@/lib/manifest-assets";
 import { isPlaylistSnapshotStale } from "@/lib/playlist-snapshot";
@@ -112,19 +113,6 @@ function dateLabel(iso: string): string {
   return iso.slice(0, 10);
 }
 
-function todayInTz(timeZone: string): string {
-  try {
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(new Date());
-  } catch {
-    return new Date().toISOString().slice(0, 10);
-  }
-}
-
 function asDayNums(value: unknown): number[] {
   if (!Array.isArray(value)) return [0, 1, 2, 3, 4, 5, 6];
   return value.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6);
@@ -154,13 +142,17 @@ function contentFields(input: CampaignWriteInput): {
 }
 
 function publishStatus(schedule: CampaignWriteInput["schedule"]): CampaignStatus {
-  const tz = schedule.timezone || "Asia/Qatar";
-  const today = todayInTz(tz);
-  if (schedule.endDate < today) {
+  const life = campaignLifecycleStatus({
+    startDate: schedule.startDate,
+    endDate: schedule.endDate,
+    startTime: schedule.startTime,
+    endTime: schedule.endTime,
+    timezone: schedule.timezone || "Asia/Qatar",
+  });
+  if (life === "Ended") {
     throw new Error("This campaign window has already ended.");
   }
-  if (schedule.startDate > today) return "SCHEDULED";
-  return "ACTIVE";
+  return life === "Scheduled" ? "SCHEDULED" : "ACTIVE";
 }
 
 function defaultSchedule(row?: {
@@ -887,6 +879,81 @@ async function writeManifestForScreen(
   throwIfError(screenError, "Could not update screen manifest version.");
 }
 
+/** Push an empty package so a stopped campaign leaves the screen without unpairing it. */
+async function writeIdleManifestForScreen(
+  admin: ReturnType<typeof getServiceRoleClient>,
+  userId: string,
+  screen: ScreenLite,
+): Promise<void> {
+  const { data: latest, error: latestError } = await admin
+    .from("content_manifests")
+    .select("manifest_version")
+    .eq("screen_id", screen.id)
+    .order("manifest_version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  throwIfError(latestError, "Could not load existing manifests.");
+  const nextVersion = asNumber((latest as { manifest_version?: number } | null)?.manifest_version, 0) + 1;
+  const { data: manifest, error: manifestError } = await admin
+    .from("content_manifests")
+    .insert({
+      screen_id: screen.id,
+      campaign_id: null,
+      manifest_version: nextVersion,
+      config_version: 1,
+      payload: { campaignId: null, playlistId: null, layoutId: null, schedule: null, assets: [] },
+      created_by: userId && isUuid(userId) ? userId : null,
+    })
+    .select("id")
+    .single();
+  throwIfError(manifestError, "Could not create idle content package.");
+  const manifestId = asString((manifest as { id: string }).id);
+  const now = new Date().toISOString();
+  const { data: existing, error: existingError } = await admin
+    .from("device_sync_states")
+    .select("screen_id, sync_state")
+    .eq("screen_id", screen.id)
+    .maybeSingle();
+  throwIfError(existingError, "Could not load device sync state.");
+  const fromState = asString((existing as { sync_state?: string } | null)?.sync_state, "WAITING");
+  const syncPatch = {
+    cloud_manifest_version: nextVersion,
+    pending_manifest_id: manifestId,
+    package_state: "PENDING",
+    sync_state: "NOTIFIED",
+    sync_progress: 0,
+    sync_requested_at: now,
+    last_error: null,
+    updated_at: now,
+  };
+  if (existing) {
+    const { error } = await admin.from("device_sync_states").update(syncPatch).eq("screen_id", screen.id);
+    throwIfError(error, "Could not update device sync state.");
+  } else {
+    const { error } = await admin.from("device_sync_states").insert({
+      screen_id: screen.id,
+      ...syncPatch,
+    });
+    throwIfError(error, "Could not create device sync state.");
+  }
+  const { error: eventError } = await admin.from("sync_events").insert({
+    screen_id: screen.id,
+    manifest_id: manifestId,
+    from_state: isSyncState(fromState) ? fromState : "WAITING",
+    to_state: "NOTIFIED",
+    detail: "Campaign stopped — idle package",
+  });
+  throwIfError(eventError, "Could not record sync event.");
+  const { error: screenError } = await admin
+    .from("screens")
+    .update({
+      cloud_manifest_version: nextVersion,
+      current_playlist_id: null,
+    })
+    .eq("id", screen.id);
+  throwIfError(screenError, "Could not update screen manifest version.");
+}
+
 async function notifyScreens(
   accessToken: string,
   screenIds: string[],
@@ -926,7 +993,12 @@ async function notifyScreens(
         createdAt: campaign.createdAt,
       }));
     const winnerPick = pickWinningSchedule(candidates);
-    if (!winnerPick) continue;
+    if (!winnerPick) {
+      if (!opts.onlyIfCampaignId) {
+        await writeIdleManifestForScreen(admin, auth.userId, screen);
+      }
+      continue;
+    }
     if (opts.onlyIfCampaignId && winnerPick.campaignId !== opts.onlyIfCampaignId) continue;
     const winner = contest.find((campaign) => campaign.id === winnerPick.campaignId);
     if (!winner) continue;
@@ -1127,6 +1199,8 @@ export async function publishCampaign(
 ): Promise<CampaignRecord> {
   const auth = await requireCmsPermission(accessToken, "campaigns.publish");
   const client = getUserClient(accessToken);
+  const previous = isUuid(input.id) ? await getCampaign(accessToken, input.id) : null;
+  const previousScreenIds = previous?.screenIds ?? [];
   const screens = await loadOrgScreens(client, auth.profile.organizationId);
   const eligible = resolveTargetScreenIds(
     input.screenIds.filter(isUuid).map((id) => ({ type: "SCREEN" as const, targetId: id })),
@@ -1138,11 +1212,28 @@ export async function publishCampaign(
   }
   const status = publishStatus(input.schedule);
   const id = await persistCampaign(accessToken, { ...input, status }, status);
-  const uniqueScreens = [...new Set(input.screenIds.filter(isUuid))];
-  await notifyScreens(accessToken, uniqueScreens, { onlyIfCampaignId: id });
+  const targeted = [...new Set(input.screenIds.filter(isUuid))];
+  const removed = previousScreenIds.filter((screenId) => !targeted.includes(screenId));
+  await notifyScreens(accessToken, targeted, { onlyIfCampaignId: id });
+  await notifyScreens(accessToken, removed, {});
   const saved = await getCampaign(accessToken, id);
   if (!saved) throw new Error("Campaign not found.");
   return saved;
+}
+
+export async function archiveCampaign(accessToken: string, id: string): Promise<void> {
+  if (!isUuid(id)) throw new Error("Campaign not found.");
+  const existing = await getCampaign(accessToken, id);
+  if (!existing) throw new Error("Campaign not found.");
+  const auth = await requireCmsPermission(accessToken, "campaigns.manage");
+  const client = getUserClient(accessToken);
+  const { error } = await client
+    .from("campaigns")
+    .update({ status: "ARCHIVED", archived_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("organization_id", auth.profile.organizationId);
+  throwIfError(error, "Could not delete campaign.");
+  await notifyScreens(accessToken, existing.screenIds.filter(isUuid), {});
 }
 
 export async function campaignSyncStatus(

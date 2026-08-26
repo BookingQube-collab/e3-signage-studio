@@ -17,6 +17,7 @@ import {
   type E3Column,
 } from "@/components/e3";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { effectiveCampaignStatus, formatCampaignDateTime } from "@/lib/campaign-window";
 import { campaignService, locationService, screenService } from "@/services";
 import type { Campaign } from "@/types";
 
@@ -63,12 +64,13 @@ function LocationDetailPage() {
         </Link>
       ),
     },
-    { key: "status", header: "Status", cell: (c) => <E3StatusBadge status={c.status} /> },
+    { key: "status", header: "Status", cell: (c) => <E3StatusBadge status={effectiveCampaignStatus(c.status, c.schedule)} /> },
     { key: "content", header: "Content", cell: (c) => c.contentName },
     {
       key: "dates",
       header: "Window",
-      cell: (c) => `${c.schedule.startDate} → ${c.schedule.endDate}`,
+      cell: (c) =>
+        `${formatCampaignDateTime(c.schedule.startDate, c.schedule.startTime, c.schedule.timezone)} → ${formatCampaignDateTime(c.schedule.endDate, c.schedule.endTime, c.schedule.timezone)}`,
     },
   ];
 

@@ -111,6 +111,7 @@ export type CampaignService = {
   get: (id: string) => Promise<Campaign | null>;
   save: (campaign: Campaign) => Promise<Campaign>;
   publish: (campaign: Campaign) => Promise<Campaign>;
+  remove: (id: string) => Promise<void>;
   syncStatus: (campaignId: string) => Promise<SyncStatusItem[]>;
 };
 

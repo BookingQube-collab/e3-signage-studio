@@ -70,6 +70,14 @@ export const campaignSyncStatusFn = createServerFn({ method: "POST" })
     return campaignSyncStatus(data.accessToken, data.campaignId);
   });
 
+export const archiveCampaignFn = createServerFn({ method: "POST" })
+  .validator(accessTokenSchema.extend({ id: z.string().min(1) }))
+  .handler(async ({ data }): Promise<{ ok: true }> => {
+    const { archiveCampaign } = await import("@/server/campaigns.server");
+    await archiveCampaign(data.accessToken, data.id);
+    return { ok: true };
+  });
+
 export const listScheduledCampaignsFn = createServerFn({ method: "POST" })
   .validator(accessTokenSchema)
   .handler(async ({ data }): Promise<CampaignRecord[]> => {

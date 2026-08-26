@@ -1,4 +1,5 @@
 import {
+  archiveCampaignFn,
   campaignSyncStatusFn,
   getCampaignFn,
   listCampaignsFn,
@@ -51,6 +52,9 @@ export const liveCampaignService: CampaignService = {
       data: { accessToken: await accessToken(), ...toWriteInput(campaign) },
     });
     return toUiCampaign(row);
+  },
+  remove: async (id: string) => {
+    await archiveCampaignFn({ data: { accessToken: await accessToken(), id } });
   },
   syncStatus: async (campaignId: string) => {
     return campaignSyncStatusFn({

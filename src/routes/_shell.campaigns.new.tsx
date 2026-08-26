@@ -1,17 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Check } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
-import {
-  E3Button,
-  E3Card,
-  E3CardBody,
-  E3CardHeader,
-  E3PageHeader,
-  E3Progress,
-} from "@/components/e3";
+import { E3Button, E3Card, E3CardBody, E3CardHeader, E3PageHeader, E3Progress, E3QueryBoundary } from "@/components/e3";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -29,6 +22,10 @@ import { campaignService, layoutService, locationService, playlistService, scree
 import type { Campaign } from "@/types";
 
 export const Route = createFileRoute("/_shell/campaigns/new")({
+  validateSearch: (search: Record<string, unknown>): { edit?: string; duplicate?: string } => ({
+    edit: typeof search.edit === "string" && search.edit.length > 0 ? search.edit : undefined,
+    duplicate: typeof search.duplicate === "string" && search.duplicate.length > 0 ? search.duplicate : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "New campaign — E3 Digital Signage" },
@@ -54,14 +51,8 @@ const STEPS = [
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-function NewCampaignPage() {
-  const qc = useQueryClient();
-  const navigate = useNavigate();
-  const [step, setStep] = useState(0);
-  const [publishing, setPublishing] = useState(false);
-  const [progress, setProgress] = useState(0);
-
-  const [draft, setDraft] = useState<Campaign>({
+function blankCampaign(): Campaign {
+  return {
     id: `cmp-${Date.now()}`,
     name: "",
     description: "",
@@ -83,7 +74,52 @@ function NewCampaignPage() {
     syncReady: 0,
     syncTotal: 0,
     modifiedAt: new Date().toISOString().slice(0, 10),
+  };
+}
+
+function NewCampaignPage() {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const { edit, duplicate } = Route.useSearch();
+  const sourceId = edit ?? duplicate;
+  const mode = edit ? "edit" : duplicate ? "duplicate" : "create";
+  const [step, setStep] = useState(0);
+  const [publishing, setPublishing] = useState(false);
+  const [progress, setProgress] = useState(0);
+
+  const [draft, setDraft] = useState<Campaign>(blankCampaign);
+
+  const source = useQuery({
+    queryKey: ["campaign", sourceId],
+    queryFn: () => campaignService.get(sourceId!),
+    enabled: Boolean(sourceId),
   });
+
+  useEffect(() => {
+    if (!source.data) return;
+    if (mode === "edit") {
+      setDraft(source.data);
+      return;
+    }
+    if (mode === "duplicate") {
+      setDraft({
+        ...source.data,
+        id: `cmp-${Date.now()}`,
+        name: source.data.name.startsWith("Copy of ") ? source.data.name : `Copy of ${source.data.name}`,
+        status: "Draft",
+        syncReady: 0,
+      });
+    }
+  }, [source.data, mode]);
+
+  const liveEdit = mode === "edit" && (draft.status === "Active" || draft.status === "Scheduled");
+  const title = mode === "edit" ? "Edit campaign" : mode === "duplicate" ? "Duplicate campaign" : "New campaign";
+  const description =
+    mode === "edit"
+      ? "Change name, schedule, screens or playlist, then save to republish the package."
+      : mode === "duplicate"
+        ? "A new draft copied from an existing campaign."
+        : "Six steps from content to published screens.";
 
   const playlists = useQuery({ queryKey: ["playlists"], queryFn: playlistService.list });
   const layouts = useQuery({ queryKey: ["layouts"], queryFn: layoutService.list });
@@ -111,8 +147,10 @@ function NewCampaignPage() {
     },
     onSuccess: (c) => {
       setProgress(100);
-      toast.success("Campaign published");
+      toast.success(liveEdit ? "Campaign updated" : "Campaign published");
       void qc.invalidateQueries({ queryKey: ["campaigns"] });
+      void qc.invalidateQueries({ queryKey: ["campaign", c.id] });
+      void qc.invalidateQueries({ queryKey: ["campaign-sync", c.id] });
       void qc.invalidateQueries({ queryKey: ["schedule"] });
       void qc.invalidateQueries({ queryKey: ["dashboard"] });
       void navigate({ to: "/campaigns/$id", params: { id: c.id } });
@@ -150,10 +188,15 @@ function NewCampaignPage() {
   }
 
   return (
+    <E3QueryBoundary
+      isLoading={Boolean(sourceId) && source.isLoading}
+      isError={Boolean(sourceId) && source.isError}
+      refetch={() => void source.refetch()}
+    >
     <div>
       <E3PageHeader
-        title="New campaign"
-        description="Six steps from content to published screens."
+        title={title}
+        description={description}
       />
 
       <ol className="mb-6 grid gap-2 sm:grid-cols-3 xl:grid-cols-6">
@@ -426,13 +469,15 @@ function NewCampaignPage() {
           {step === 0 ? "Cancel" : "Back"}
         </E3Button>
         <div className="flex gap-2">
-          <E3Button
-            variant="ghost"
-            disabled={save.isPending || publishMut.isPending}
-            onClick={() => save.mutate(draft)}
-          >
-            Save draft
-          </E3Button>
+          {liveEdit ? null : (
+            <E3Button
+              variant="ghost"
+              disabled={save.isPending || publishMut.isPending}
+              onClick={() => save.mutate(draft)}
+            >
+              Save draft
+            </E3Button>
+          )}
           {step < STEPS.length - 1 ? (
             <E3Button
               variant="primary"
@@ -448,11 +493,12 @@ function NewCampaignPage() {
               disabled={publishing || publishMut.isPending}
               onClick={publish}
             >
-              PUBLISH CAMPAIGN
+              {mode === "edit" ? "Save changes" : "PUBLISH CAMPAIGN"}
             </E3Button>
           )}
         </div>
       </div>
     </div>
+    </E3QueryBoundary>
   );
 }

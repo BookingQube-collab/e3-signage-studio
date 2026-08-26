@@ -602,7 +602,7 @@ export const campaigns: Campaign[] = [
     id: "cmp-ramadan",
     name: "Ramadan 2026",
     description: "Seasonal campaign, completed.",
-    status: "Expired",
+    status: "Ended",
     contentType: "Playlist",
     contentId: "pl-archive",
     contentName: "Ramadan 2026",
