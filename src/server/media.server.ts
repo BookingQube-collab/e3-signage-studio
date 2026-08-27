@@ -27,6 +27,7 @@ import {
   safeMediaFilename,
 } from "../lib/media-file";
 import { mediaKeysToSign } from "../lib/media-sign";
+import { describeCanceledStatement } from "../lib/media-upload-error";
 import {
   FOLDER_DUPLICATE_MESSAGE,
   assertFolderName,
@@ -62,7 +63,7 @@ import { getUserClient } from "./supabase.server";
 
 const MEDIA_SELECT =
   "id, organization_id, name, type, mime_type, current_version_id, status, archived_at, folder_id, location_ids, created_at, updated_at, created_by, uploaded_by";
-const FOLDER_SELECT = "id, organization_id, name, created_at, updated_at, created_by";
+const FOLDER_SELECT = "id, organization_id, name, archived_at, created_at, updated_at, created_by";
 const VERSION_SELECT =
   "id, media_id, version_number, storage_key, thumbnail_key, size_bytes, width, height, duration_ms, checksum_sha256, mime_type, status, created_at, created_by";
 
@@ -175,6 +176,7 @@ function mapFolder(row: Record<string, unknown>): MediaFolderRow {
     id: asString(row["id"]),
     organization_id: asString(row["organization_id"]),
     name: asString(row["name"]),
+    archived_at: asNullableString(row["archived_at"]),
     created_at: asString(row["created_at"]),
     updated_at: asString(row["updated_at"]),
     created_by: asNullableString(row["created_by"]),
@@ -395,7 +397,7 @@ async function requireFolderId(
 ): Promise<string | null> {
   if (!folderId) return null;
   const folder = await getFolderRow(client, folderId, organizationId);
-  if (!folder) throw new Error("Folder not found.");
+  if (!folder || folder.archived_at) throw new Error("Folder not found.");
   return folder.id;
 }
 
@@ -1079,6 +1081,7 @@ export async function listFolders(accessToken: string): Promise<MediaFolderRecor
     .from("media_folders")
     .select(FOLDER_SELECT)
     .eq("organization_id", orgId)
+    .is("archived_at", null)
     .order("name", { ascending: true });
   throwIfError(error, "Could not load folders.");
   const folders = (data ?? []).map((row) => mapFolder(row as Record<string, unknown>));
@@ -1104,6 +1107,7 @@ export async function listFolders(accessToken: string): Promise<MediaFolderRecor
       name: folder.name,
       createdAt: dateLabel(folder.created_at),
       fileCount: counts.get(folder.id) ?? 0,
+      archivedAt: folder.archived_at,
     })),
   );
 }
@@ -1120,12 +1124,12 @@ export async function createFolder(accessToken: string, name: string): Promise<M
   throwIfError(existingError, "Could not load folders.");
   const rows = (existing ?? []).map((row) => mapFolder(row as Record<string, unknown>));
   const resolved = resolveFolderCreate(
-    rows.map((row) => ({ id: row.id, name: row.name })),
+    rows.map((row) => ({ id: row.id, name: row.name, archivedAt: row.archived_at })),
     normalized,
     "",
   );
   if (resolved.reused) {
-    const match = rows.find((row) => row.id === resolved.folder.id);
+    const match = rows.find((row) => row.id === resolved.folder.id && !row.archived_at);
     if (match) return toFolderRecord(client, match);
   }
   const { data, error } = await client
@@ -1144,7 +1148,10 @@ export async function createFolder(accessToken: string, name: string): Promise<M
       .eq("organization_id", orgId);
     throwIfError(racedError, "Could not load folders.");
     const racedRows = (raced ?? []).map((row) => mapFolder(row as Record<string, unknown>));
-    const match = findFolderByName(racedRows, normalized);
+    const match = findFolderByName(
+      racedRows.filter((row) => !row.archived_at),
+      normalized,
+    );
     if (match) return toFolderRecord(client, match);
     throw new Error(FOLDER_DUPLICATE_MESSAGE);
   }
@@ -1171,19 +1178,43 @@ export async function deleteFolder(accessToken: string, id: string): Promise<boo
   const client = getUserClient(accessToken);
   const existing = await getFolderRow(client, id, auth.profile.organizationId);
   if (!existing) throw new Error("Folder not found.");
+  if (existing.archived_at) return true;
+
   const rows = await mediaRowsInFolder(client, id, auth.profile.organizationId);
   for (const row of rows) {
     assertCanMutateOwnedContent(auth.profile, row.created_by);
   }
   const visible = rows.filter((row) => !row.archived_at && isVisibleLibraryStatus(row.status));
-  if (visible.length > 0) {
-    await assertIdsDeletable(client, visible);
+  await assertIdsDeletable(client, visible);
+
+  try {
+    for (const row of rows) {
+      await purgeMediaRow(client, row.id);
+    }
+  } catch (error) {
+    const raw = error instanceof Error ? error.message : "";
+    throw new Error(
+      describeCanceledStatement(
+        raw,
+        "Could not finish deleting this folder. It is still in the library. Try again, or remove files from live playlists first.",
+      ),
+    );
   }
-  for (const row of rows) {
-    await purgeMediaRow(client, row.id);
+
+  const { error: archiveError } = await client
+    .from("media_folders")
+    .update({ archived_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("organization_id", auth.profile.organizationId)
+    .is("archived_at", null);
+  throwIfError(archiveError, "Could not delete folder.");
+
+  await client.from("media_folders").delete().eq("id", id);
+
+  const leftover = await getFolderRow(client, id, auth.profile.organizationId);
+  if (leftover && !leftover.archived_at) {
+    throw new Error("Could not delete folder.");
   }
-  const { error } = await client.from("media_folders").delete().eq("id", id);
-  throwIfError(error, "Could not delete folder.");
   return true;
 }
 

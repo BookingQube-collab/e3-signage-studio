@@ -103,6 +103,7 @@ export type MediaFolderRow = {
   id: string;
   organization_id: string;
   name: string;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
   created_by: string | null;

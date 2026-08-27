@@ -1,3 +1,14 @@
+/** Postgres surfaces this when a statement is aborted or times out — never show it raw. */
+export function isCanceledStatementError(message: string): boolean {
+  return /canceling statement/i.test(message);
+}
+
+export function describeCanceledStatement(message: string, fallback: string): string {
+  if (isCanceledStatementError(message)) return fallback;
+  const trimmed = message.trim();
+  return trimmed || fallback;
+}
+
 /** Maps XMLHttpRequest PUT failures (R2 / Supabase) to a toast the operator can act on. */
 
 function hostOf(url: string): string {
@@ -36,6 +47,10 @@ export function describeBrowserUploadFailure(input: {
   const where = storageLabel(host);
   const snippet = snippetFromBody(input.responseText);
   const hostHint = host ? ` (${host})` : "";
+
+  if (snippet && isCanceledStatementError(snippet)) {
+    return "Upload was interrupted. Try that file again.";
+  }
 
   if (input.status === 0) {
     if (where === "R2") {

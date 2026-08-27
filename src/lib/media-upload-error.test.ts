@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { describeBrowserUploadFailure } from "./media-upload-error.ts";
+import { describeBrowserUploadFailure, describeCanceledStatement, isCanceledStatementError } from "./media-upload-error.ts";
 
 const r2 =
   "https://5943ff30718b0c415cee9c1d7a5e95b4.r2.cloudflarestorage.com/e3-content-management/key";
@@ -41,4 +41,24 @@ test("other HTTP errors include status and host", () => {
   const message = describeBrowserUploadFailure({ status: 500, url: r2, responseText: "Internal" });
   assert.match(message, /500/);
   assert.match(message, /Internal/);
+});
+
+test("postgres canceling statement is never shown raw", () => {
+  assert.equal(isCanceledStatementError("canceling statement due to statement timeout"), true);
+  assert.equal(isCanceledStatementError("canceling statement due to user request"), true);
+  assert.equal(
+    describeCanceledStatement(
+      "canceling statement due to statement timeout",
+      "Upload was interrupted. Try that file again.",
+    ),
+    "Upload was interrupted. Try that file again.",
+  );
+  assert.equal(describeCanceledStatement("Checksum mismatch.", "fallback"), "Checksum mismatch.");
+  const fromHttp = describeBrowserUploadFailure({
+    status: 500,
+    url: supabase,
+    responseText: "canceling statement due to statement timeout",
+  });
+  assert.match(fromHttp, /interrupted/i);
+  assert.doesNotMatch(fromHttp, /canceling statement/i);
 });

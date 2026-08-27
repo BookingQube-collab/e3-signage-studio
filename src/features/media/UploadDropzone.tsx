@@ -30,7 +30,13 @@ export function UploadDropzone({
   const busy = uploading || Boolean(disabled);
 
   async function startUpload(files: File[]) {
-    if (files.length === 0 || busy) return;
+    if (files.length === 0) return;
+    if (busy) {
+      if (disabled) {
+        toast.error("Wait until this folder is removed before uploading.");
+      }
+      return;
+    }
     const { accepted, errors } = collectUploadableFiles(files);
     for (const message of errors) toast.error(message);
     if (accepted.length === 0) {

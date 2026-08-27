@@ -5,6 +5,7 @@ import {
   clientUploadDedupeKey,
   incompleteVersionReusable,
   isVisibleLibraryStatus,
+  settleEachUpload,
   shouldDiscardIncompleteMedia,
   shouldPurgeAbandonedUpload,
 } from "./media-upload-lifecycle.ts";
@@ -90,4 +91,29 @@ test("in-flight client uploads of the same file share one key", () => {
     clientUploadDedupeKey(file),
     clientUploadDedupeKey({ ...file, folderId: "f-inflata" }),
   );
+});
+
+test("a failed file does not cancel the rest of a multi-upload batch", async () => {
+  const files = [{ name: "one.jpg" }, { name: "two.jpg" }, { name: "three.jpg" }];
+  const attempted: string[] = [];
+  const result = await settleEachUpload(
+    files,
+    async (file) => {
+      attempted.push(file.name);
+      if (file.name === "two.jpg") {
+        throw new Error("canceling statement due to statement timeout");
+      }
+      return file.name;
+    },
+    (error, fileName) =>
+      error instanceof Error && /canceling statement/i.test(error.message)
+        ? `Could not finish uploading ${fileName}. Try that file again.`
+        : `Could not upload ${fileName}.`,
+  );
+  assert.deepEqual(attempted, ["one.jpg", "two.jpg", "three.jpg"]);
+  assert.deepEqual(result.uploaded, ["one.jpg", "three.jpg"]);
+  assert.equal(result.failed.length, 1);
+  assert.equal(result.failed[0]?.name, "two.jpg");
+  assert.match(result.failed[0]?.message ?? "", /two\.jpg/);
+  assert.doesNotMatch(result.failed[0]?.message ?? "", /canceling statement/i);
 });

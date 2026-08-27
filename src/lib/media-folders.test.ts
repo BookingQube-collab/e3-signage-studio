@@ -12,9 +12,11 @@ import {
   findFolderByName,
   folderCardLabel,
   folderDeleteCopy,
+  isArchivedFolder,
   isDuplicateFolderName,
   foldersInLibraryView,
   libraryViewFor,
+  liveFolders,
   mediaInLibraryView,
   mergeLibraryMedia,
   resolveFolderCreate,
@@ -128,6 +130,38 @@ test("recreating a folder name reuses the live row instead of stacking a duplica
   const upserted = upsertFolder(live, { id: "f-new", name: "InflataPark", fileCount: 3 });
   assert.equal(upserted.filter((folder) => folderNameMatch(folder.name)).length, 1);
   assert.equal(upserted.find((folder) => folderNameMatch(folder.name))?.id, "f-new");
+});
+
+test("archived folders stay out of the library and are not revived by create or upsert", () => {
+  const archived = {
+    id: "f-old",
+    name: "InflataPark",
+    fileCount: 4,
+    archivedAt: "2026-08-27T16:00:00.000Z",
+  };
+  const office = { id: "f-office", name: "Rajan Office", fileCount: 0 };
+  const mixed = [archived, office];
+  assert.equal(isArchivedFolder(archived), true);
+  assert.deepEqual(
+    liveFolders(mixed).map((folder) => folder.id),
+    ["f-office"],
+  );
+  assert.equal(
+    uniqueFoldersByName(mixed).some((folder) => folder.id === "f-old"),
+    false,
+  );
+  const created = resolveFolderCreate(mixed, "InflataPark", "f-new");
+  assert.equal(created.reused, false);
+  assert.deepEqual(created.folder, { id: "f-new", name: "InflataPark" });
+  const revived = upsertFolder(mixed, { ...archived, fileCount: 4 });
+  assert.equal(
+    revived.some((folder) => folder.id === "f-old"),
+    false,
+  );
+  assert.equal(
+    revived.some((folder) => folder.id === "f-office"),
+    true,
+  );
 });
 
 function folderNameMatch(name: string): boolean {

@@ -30,18 +30,32 @@ export function isDuplicateFolderName(existingNames: string[], name: string): bo
   return existingNames.some((value) => folderNameKey(value) === needle);
 }
 
+export type FolderArchiveFields = {
+  archivedAt?: string | null;
+  status?: string;
+};
+
+export function isArchivedFolder(folder: FolderArchiveFields): boolean {
+  if (typeof folder.archivedAt === "string" && folder.archivedAt.length > 0) return true;
+  return (folder.status ?? "").toUpperCase() === "ARCHIVED";
+}
+
+export function liveFolders<T extends FolderArchiveFields>(folders: T[]): T[] {
+  return folders.filter((folder) => !isArchivedFolder(folder));
+}
+
 export function findFolderByName<T extends { name: string }>(folders: T[], name: string): T | undefined {
   const needle = folderNameKey(name);
   if (!needle) return undefined;
   return folders.find((folder) => folderNameKey(folder.name) === needle);
 }
 
-/** One card per name so a recreate after delete cannot stack duplicates. */
-export function uniqueFoldersByName<T extends { id: string; name: string; fileCount?: number }>(
-  folders: T[],
-): T[] {
+/** One live card per name. Archived rows must not reappear as library folders. */
+export function uniqueFoldersByName<
+  T extends { id: string; name: string; fileCount?: number } & FolderArchiveFields,
+>(folders: T[]): T[] {
   const seen = new Map<string, T>();
-  for (const folder of folders) {
+  for (const folder of liveFolders(folders)) {
     const key = folderNameKey(folder.name);
     const existing = seen.get(key);
     if (!existing) {
@@ -55,9 +69,15 @@ export function uniqueFoldersByName<T extends { id: string; name: string; fileCo
   return [...seen.values()];
 }
 
-export function upsertFolder<T extends { id: string; name: string }>(folders: T[], folder: T): T[] {
+export function upsertFolder<T extends { id: string; name: string } & FolderArchiveFields>(
+  folders: T[],
+  folder: T,
+): T[] {
+  if (isArchivedFolder(folder)) {
+    return liveFolders(folders).filter((item) => item.id !== folder.id);
+  }
   const key = folderNameKey(folder.name);
-  const without = folders.filter(
+  const without = liveFolders(folders).filter(
     (item) => item.id !== folder.id && folderNameKey(item.name) !== key,
   );
   return [...without, folder].sort((a, b) => a.name.localeCompare(b.name));
@@ -103,14 +123,14 @@ export function applyUploadedMedia<
   return { media: merged, folders: nextFolders };
 }
 
-/** Reuse a live folder with the same name instead of inserting a second row. */
-export function resolveFolderCreate<T extends { id: string; name: string }>(
+/** Reuse a live folder with the same name. Archived folders stay gone. */
+export function resolveFolderCreate<T extends { id: string; name: string } & FolderArchiveFields>(
   existing: T[],
   name: string,
   newId: string,
 ): { folder: { id: string; name: string }; reused: boolean } {
   const normalized = assertFolderName(name);
-  const found = findFolderByName(existing, normalized);
+  const found = findFolderByName(liveFolders(existing), normalized);
   if (found) return { folder: { id: found.id, name: found.name }, reused: true };
   return { folder: { id: newId, name: normalized }, reused: false };
 }

@@ -54,6 +54,7 @@ import {
   uniqueFoldersByName,
   upsertFolder,
 } from "@/lib/media-folders";
+import { describeCanceledStatement } from "@/lib/media-upload-error";
 import { cn } from "@/lib/utils";
 import { mediaService } from "@/services";
 import type { Media, MediaFolder } from "@/types";
@@ -164,45 +165,42 @@ function MediaPage() {
   const deleteFolder = useMutation({
     mutationFn: mediaService.deleteFolder,
     onMutate: async (id) => {
-      const previousMedia = qc.getQueryData<Media[]>(["media"]);
-      const previousFolders = qc.getQueryData<MediaFolder[]>(["media-folders"]);
-      const mediaIds = (previousMedia ?? [])
-        .filter((item) => item.folderId === id)
-        .map((item) => item.id);
+      const previousMedia = qc.getQueryData<Media[]>(["media"]) ?? [];
+      const mediaIds = previousMedia.filter((item) => item.folderId === id).map((item) => item.id);
+      return { mediaIds, folderId: id };
+    },
+    onSuccess: (_ok, id, ctx) => {
+      const previousMedia = qc.getQueryData<Media[]>(["media"]) ?? [];
+      const previousFolders = qc.getQueryData<MediaFolder[]>(["media-folders"]) ?? [];
+      const mediaIds = ctx?.mediaIds ?? previousMedia.filter((item) => item.folderId === id).map((item) => item.id);
       setHiddenFolderIds((prev) => unionIds(prev, [id]));
       setHiddenMediaIds((prev) => unionIds(prev, mediaIds));
-      await qc.cancelQueries({ queryKey: ["media"] });
-      await qc.cancelQueries({ queryKey: ["media-folders"] });
-      const cascaded = applyFolderCascadeDelete(previousMedia ?? [], previousFolders ?? [], id);
+      const cascaded = applyFolderCascadeDelete(previousMedia, previousFolders, id);
       qc.setQueryData(["media"], cascaded.media);
       qc.setQueryData(["media-folders"], cascaded.folders);
       setFolderId((prev) => (prev === id ? null : prev));
       setSelected((prev) => (prev?.folderId === id ? null : prev));
       setDeleteFolderTarget(null);
       setSelectedIds((prev) => withoutIds(prev, mediaIds));
-      return { previousMedia, previousFolders, mediaIds, folderId: id };
-    },
-    onSuccess: () => {
       toast.success("Folder deleted");
     },
-    onError: (error, _id, ctx) => {
-      if (ctx) {
-        setHiddenFolderIds((prev) => withoutIds(prev, [ctx.folderId]));
-        setHiddenMediaIds((prev) => withoutIds(prev, ctx.mediaIds));
-        if (ctx.previousMedia) qc.setQueryData(["media"], ctx.previousMedia);
-        if (ctx.previousFolders) qc.setQueryData(["media-folders"], ctx.previousFolders);
-      }
-      toast.error(error instanceof Error ? error.message : "Could not delete folder.");
+    onError: (error) => {
+      toast.error(
+        describeCanceledStatement(
+          error instanceof Error ? error.message : "",
+          "Could not finish deleting this folder. It is still in the library. Try again, or remove files from live playlists first.",
+        ),
+      );
     },
-    onSettled: async (_data, _error, _id, ctx) => {
+    onSettled: async (_data, error, id, ctx) => {
       await qc.invalidateQueries({ queryKey: ["media"] });
       await qc.invalidateQueries({ queryKey: ["media-folders"] });
-      if (!ctx) return;
+      if (error || !ctx) return;
       setHiddenMediaIds((prev) =>
         releaseHiddenIfGone(prev, qc.getQueryData<Media[]>(["media"]) ?? [], ctx.mediaIds),
       );
       setHiddenFolderIds((prev) =>
-        releaseHiddenIfGone(prev, qc.getQueryData<MediaFolder[]>(["media-folders"]) ?? [], [ctx.folderId]),
+        releaseHiddenIfGone(prev, qc.getQueryData<MediaFolder[]>(["media-folders"]) ?? [], [id]),
       );
     },
   });
@@ -364,6 +362,8 @@ function MediaPage() {
   const visibleIds = useMemo(() => items.map((item) => item.id), [items]);
   const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
   const overlayOpen = createOpen || moveIds.length > 0 || Boolean(selected) || deleteOpen;
+  const deletingFolderId = deleteFolder.isPending ? (deleteFolder.variables ?? null) : null;
+  const uploadBlockedInThisFolder = Boolean(deletingFolderId && folderId === deletingFolderId);
   const bulkPlan = partitionBulkDelete(libraryMedia, selectedIds);
   const folderFiles = deleteFolderTarget
     ? libraryMedia.filter((item) => item.folderId === deleteFolderTarget.id)
@@ -476,7 +476,7 @@ function MediaPage() {
                 Delete folder
               </E3Button>
             ) : null}
-            <E3Button variant="primary" disabled={deleteFolder.isPending} onClick={() => setCreateOpen(true)}>
+            <E3Button variant="primary" onClick={() => setCreateOpen(true)}>
               <FolderPlus /> Create folder
             </E3Button>
           </>
@@ -485,10 +485,10 @@ function MediaPage() {
 
       <div className="mb-6">
         <UploadDropzone
-          disabled={deleteFolder.isPending}
+          disabled={uploadBlockedInThisFolder}
           hint={
-            deleteFolder.isPending
-              ? "Wait until the folder is removed before uploading"
+            uploadBlockedInThisFolder
+              ? "Wait until this folder is removed before uploading"
               : folderId && !searching
                 ? `Uploads go into ${currentFolder?.name ?? "this folder"}`
                 : "Uploads stay in Unfiled until you move them"
@@ -598,7 +598,7 @@ function MediaPage() {
                   : "Create a folder for a venue or campaign, or drop files into Unfiled."
             }
             action={
-              libraryView.mode === "folder" || deleteFolder.isPending ? undefined : (
+              libraryView.mode === "folder" ? undefined : (
                 <E3Button variant="primary" onClick={() => setCreateOpen(true)}>
                   <FolderPlus /> Create folder
                 </E3Button>
@@ -677,7 +677,7 @@ function MediaPage() {
             <E3Button
               variant="primary"
               loading={createFolder.isPending}
-              disabled={!newFolderName.trim() || deleteFolder.isPending}
+              disabled={!newFolderName.trim()}
               onClick={submitNewFolder}
             >
               Create folder
@@ -693,7 +693,7 @@ function MediaPage() {
             onChange={(e) => setNewFolderName(e.target.value)}
             placeholder="e.g. InflataPark, Rajan Office, Birthday - Poppy"
             onKeyDown={(e) => {
-              if (e.key === "Enter" && newFolderName.trim() && !createFolder.isPending && !deleteFolder.isPending) {
+              if (e.key === "Enter" && newFolderName.trim() && !createFolder.isPending) {
                 submitNewFolder();
               }
             }}

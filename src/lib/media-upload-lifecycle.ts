@@ -59,3 +59,26 @@ export function clientUploadDedupeKey(input: {
 }): string {
   return `${input.mediaId ?? "new"}:${input.folderId ?? ""}:${input.name}:${input.size}:${input.lastModified}`;
 }
+
+export type SettledUpload<T> = {
+  uploaded: T[];
+  failed: Array<{ name: string; message: string }>;
+};
+
+/** Run each file on its own. A failure must not skip or abort the rest of the batch. */
+export async function settleEachUpload<TFile extends { name: string }, TResult>(
+  files: TFile[],
+  uploadOne: (file: TFile) => Promise<TResult>,
+  describeError: (error: unknown, fileName: string) => string,
+): Promise<SettledUpload<TResult>> {
+  const uploaded: TResult[] = [];
+  const failed: Array<{ name: string; message: string }> = [];
+  for (const file of files) {
+    try {
+      uploaded.push(await uploadOne(file));
+    } catch (error) {
+      failed.push({ name: file.name, message: describeError(error, file.name) });
+    }
+  }
+  return { uploaded, failed };
+}

@@ -1,3 +1,5 @@
+import { toast } from "sonner";
+
 import {
   completeMediaUploadFn,
   createMediaFolderFn,
@@ -16,8 +18,8 @@ import {
   archiveMediaFn,
 } from "@/lib/media-functions";
 import { assertUploadSize, inferMediaMime } from "@/lib/media-file";
-import { clientUploadDedupeKey } from "@/lib/media-upload-lifecycle";
-import { describeBrowserUploadFailure } from "@/lib/media-upload-error";
+import { describeBrowserUploadFailure, describeCanceledStatement } from "@/lib/media-upload-error";
+import { clientUploadDedupeKey, settleEachUpload } from "@/lib/media-upload-lifecycle";
 import { probeMediaDimensions, sha256HexOfBlob } from "@/lib/media-hash";
 import { getBrowserAccessToken } from "@/lib/supabase";
 import type { Media } from "@/types";
@@ -74,6 +76,7 @@ function putWithProgress(
         ),
       );
     xhr.ontimeout = () => reject(new Error("Upload timed out. Try again."));
+    xhr.onabort = () => reject(new Error("Upload was interrupted. Try that file again."));
     const signedType = headers["Content-Type"] ?? headers["content-type"];
     xhr.send(signedType ? new Blob([file], { type: signedType }) : file);
   });
@@ -175,15 +178,28 @@ export const liveMediaService: MediaService = {
     return row ? toUiMedia(row) : null;
   },
   upload: async (files, onProgress, folderId) => {
-    const added: Media[] = [];
-    for (const file of files) {
-      added.push(
-        await uploadOne(file, null, (percent) => {
-          onProgress?.(file.name, percent);
-        }, folderId),
-      );
+    const { uploaded, failed } = await settleEachUpload(
+      files,
+      (file) =>
+        uploadOne(
+          file,
+          null,
+          (percent) => {
+            onProgress?.(file.name, percent);
+          },
+          folderId,
+        ),
+      (error, fileName) =>
+        describeCanceledStatement(
+          error instanceof Error ? error.message : "",
+          `Could not finish uploading ${fileName}. The file was not added to the library. Try that file again.`,
+        ),
+    );
+    if (uploaded.length === 0 && failed.length > 0) {
+      throw new Error(failed[0]?.message ?? "Upload failed.");
     }
-    return added;
+    for (const item of failed) toast.error(item.message);
+    return uploaded;
   },
   replace: async (id, file, onProgress) => uploadOne(file, id, onProgress),
   rename: async (id, filename) => {
