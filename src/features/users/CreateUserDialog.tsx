@@ -316,7 +316,7 @@ export function CreateUserDialog({
                 Optional for Super Admin and Marketing — they already see every location.
               </p>
             )}
-            <div className="max-h-40 space-y-2 overflow-y-auto rounded-xl border border-border p-3">
+            <div className="space-y-2 rounded-xl border border-border p-3">
               {assignableLocations.map((loc) => (
                 <label key={loc.id} className="flex items-center gap-2 text-sm">
                   <input

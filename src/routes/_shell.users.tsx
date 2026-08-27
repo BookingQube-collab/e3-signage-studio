@@ -326,7 +326,7 @@ function UsersPage() {
           {locationOptions.length > 0 ? (
             <div className="space-y-2">
               <Label>Assigned locations</Label>
-              <div className="max-h-40 space-y-2 overflow-y-auto rounded-xl border border-border p-3">
+              <div className="space-y-2 rounded-xl border border-border p-3">
                 {assignableLocations.map((loc) => (
                   <label key={loc.id} className="flex items-center gap-2 text-sm">
                     <input
