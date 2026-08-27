@@ -120,6 +120,19 @@ export const syncNowFn = createServerFn({ method: "POST" })
     return requestScreenSync(data.accessToken, data.id);
   });
 
+export const repairScreenFn = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      accessToken: z.string(),
+      id: z.string().uuid(),
+      code: z.string().min(6).max(12),
+    }),
+  )
+  .handler(async ({ data }): Promise<ScreenRecord> => {
+    const { repairScreen } = await import("@/server/inventory.server");
+    return repairScreen(data.accessToken, data.id, data.code);
+  });
+
 export const unpairScreenFn = createServerFn({ method: "POST" })
   .validator(z.object({ accessToken: z.string(), id: z.string().uuid() }))
   .handler(async ({ data }): Promise<boolean> => {

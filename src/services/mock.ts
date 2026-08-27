@@ -88,6 +88,16 @@ export const mockServices: AppServices = {
       store.screens = [screen, ...store.screens];
       return delay(screen, 600);
     },
+    repair: (id: string) => {
+      const screen = store.screens.find((s) => s.id === id);
+      if (!screen) return Promise.reject(new Error("Screen not found."));
+      store.screens = store.screens.map((s) =>
+        s.id === id
+          ? { ...s, syncState: "Waiting", syncProgress: 0, lastSeen: "just now", lastError: null }
+          : s,
+      );
+      return delay(store.screens.find((s) => s.id === id)!, 400);
+    },
     update: (id: string, patch: Partial<Screen>) => {
       store.screens = store.screens.map((s) => (s.id === id ? { ...s, ...patch } : s));
       return delay(

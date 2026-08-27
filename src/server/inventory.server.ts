@@ -652,46 +652,14 @@ export async function pairScreen(
     }
   }
 
-  const codeHash = hashPairingCode(digits);
-  const { data: existing, error: pairLookupError } = await admin
-    .from("device_pairing_codes")
-    .select("id, expires_at, consumed_at, screen_id")
-    .eq("code_hash", codeHash)
-    .maybeSingle();
-  throwIfError(pairLookupError, "Could not look up pairing code.");
-
-  if (existing) {
-    const row = existing as {
-      id: string;
-      expires_at: string;
-      consumed_at: string | null;
-      screen_id: string | null;
-    };
-    if (row.consumed_at) throw new Error("This pairing code was already used.");
-    if (new Date(row.expires_at).getTime() < Date.now()) {
-      throw new Error("This pairing code has expired.");
-    }
-    if (row.screen_id && row.screen_id !== screen.id) {
-      throw new Error("This pairing code is already linked to another screen.");
-    }
-    const { error: linkError } = await admin
-      .from("device_pairing_codes")
-      .update({
-        screen_id: screen.id,
-        organization_id: auth.profile.organizationId,
-      })
-      .eq("id", row.id);
-    throwIfError(linkError, "Could not link the pairing code.");
-  } else {
-    // Admin-entered code with no TV row yet. Persist the hash so Phase 8 can claim it.
-    const { error: pendingError } = await admin.from("device_pairing_codes").insert({
-      organization_id: auth.profile.organizationId,
-      code_hash: codeHash,
-      expires_at: new Date(Date.now() + PENDING_PAIR_TTL_MS).toISOString(),
-      screen_id: screen.id,
-    });
-    throwIfError(pendingError, "Could not store the pairing code.");
-  }
+  const existing = await lookupPairingCode(admin, digits);
+  await attachPairingCodeToScreen(
+    admin,
+    auth.profile.organizationId,
+    screen.id,
+    digits,
+    existing,
+  );
 
   const records = await loadScreenRecords(client, auth.profile.organizationId, [screen]);
   const record = records[0];
@@ -827,22 +795,78 @@ export async function requestScreenSync(accessToken: string, id: string): Promis
   return next;
 }
 
+export async function repairScreen(
+  accessToken: string,
+  id: string,
+  code: string,
+): Promise<ScreenRecord> {
+  const auth = await requireCmsPermission(accessToken, "screens.manage");
+  const current = await getScreen(accessToken, id);
+  if (!current) throw new Error("Screen not found.");
+  await requireScreenLocation(accessToken, auth, current);
+
+  const digits = assertPairingCodeDigits(code);
+  const admin = getServiceRoleClient();
+  const existing = await lookupPairingCode(admin, digits);
+  if (!existing) {
+    throw new Error(
+      "No player is showing this code. Start pairing on the TV first, then enter the 6-digit code.",
+    );
+  }
+  const linkErrorMessage = pairingCodeLinkError(
+    {
+      expiresAt: existing.expires_at,
+      consumedAt: existing.consumed_at,
+      screenId: existing.screen_id,
+    },
+    id,
+  );
+  if (linkErrorMessage) throw new Error(linkErrorMessage);
+
+  const now = new Date().toISOString();
+  const { error: tokenError } = await admin
+    .from("device_tokens")
+    .update({ revoked_at: now })
+    .eq("screen_id", id)
+    .is("revoked_at", null);
+  throwIfError(tokenError, "Could not revoke device tokens.");
+
+  const { error: pairError } = await admin
+    .from("device_pairing_codes")
+    .update({ consumed_at: now })
+    .eq("screen_id", id)
+    .is("consumed_at", null)
+    .neq("id", existing.id);
+  throwIfError(pairError, "Could not invalidate previous pairing codes.");
+
+  await attachPairingCodeToScreen(admin, auth.profile.organizationId, id, digits, existing);
+
+  const { error: heartbeatError } = await admin
+    .from("screens")
+    .update({ last_heartbeat_at: null })
+    .eq("id", id);
+  throwIfError(heartbeatError, "Could not reset the screen connection.");
+
+  const { error: syncError } = await admin
+    .from("device_sync_states")
+    .update({
+      sync_state: "WAITING",
+      sync_progress: 0,
+      package_state: "PENDING",
+    })
+    .eq("screen_id", id);
+  throwIfError(syncError, "Could not reset sync state.");
+
+  const next = await getScreen(accessToken, id);
+  if (!next) throw new Error("Screen not found.");
+  return next;
+}
+
 export async function unpairScreen(accessToken: string, id: string): Promise<boolean> {
   const auth = await requireCmsPermission(accessToken, "screens.manage");
   const current = await getScreen(accessToken, id);
   if (!current) throw new Error("Screen not found.");
-  const client = getUserClient(accessToken);
-  const { data: location, error: locError } = await client
-    .from("locations")
-    .select("type")
-    .eq("id", current.locationId)
-    .maybeSingle();
-  throwIfError(locError, "Could not load location.");
-  assertAssignedLocation(
-    auth.profile,
-    current.locationId,
-    asString((location as { type?: string } | null)?.type),
-  );
+  await requireScreenLocation(accessToken, auth, current);
 
   const admin = getServiceRoleClient();
   const now = new Date().toISOString();

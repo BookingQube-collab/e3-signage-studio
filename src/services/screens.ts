@@ -3,6 +3,7 @@ import {
   listScreensByLocationFn,
   listScreensFn,
   pairScreenFn,
+  repairScreenFn,
   syncNowFn,
   unpairScreenFn,
   updateScreenFn,
@@ -60,6 +61,12 @@ export const liveScreenService: ScreenService = {
         resolution: input.resolution,
         groupIds: input.groupIds.filter(isUuid),
       },
+    });
+    return toUiScreen(row);
+  },
+  repair: async (id, code) => {
+    const row = await repairScreenFn({
+      data: { accessToken: await accessToken(), id, code },
     });
     return toUiScreen(row);
   },

@@ -25,6 +25,7 @@ export const apiServices: AppServices = {
     get: () => notConfigured(),
     listByLocation: () => notConfigured(),
     pair: () => notConfigured(),
+    repair: () => notConfigured(),
     update: () => notConfigured(),
     syncNow: () => notConfigured(),
     unpair: () => notConfigured(),

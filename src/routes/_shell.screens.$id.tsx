@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { MonitorPlay, PowerOff, RefreshCw, ScrollText, Unlink } from "lucide-react";
+import { MonitorPlay, PowerOff, RefreshCw, ScrollText, Unlink, Wrench } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -29,6 +29,7 @@ import { ADMIN_MONITORING_REFETCH_MS } from "@/lib/monitoring";
 import { bindPreviewClips } from "@/lib/playlist-preview";
 import { useLiveMonitoring } from "@/lib/use-live-monitoring";
 import { PlaylistLoopPreview } from "@/features/playlists/PlaylistLoopPreview";
+import { RepairScreenDialog } from "@/features/screens/RepairScreenDialog";
 
 export const Route = createFileRoute("/_shell/screens/$id")({
   head: () => ({
@@ -55,6 +56,7 @@ function ScreenDetailPage() {
   const [logsOpen, setLogsOpen] = useState(false);
   const [playlistOpen, setPlaylistOpen] = useState(false);
   const [unpairOpen, setUnpairOpen] = useState(false);
+  const [repairOpen, setRepairOpen] = useState(false);
   const [nextPlaylist, setNextPlaylist] = useState("");
 
   const screenQuery = useQuery({
@@ -321,6 +323,13 @@ function ScreenDetailPage() {
                       {screen.status === "disabled" ? "Enable Screen" : "Disable Screen"}
                     </E3Button>
                     <E3Button
+                      variant="outline"
+                      className="w-full justify-start"
+                      onClick={() => setRepairOpen(true)}
+                    >
+                      <Wrench /> Repair
+                    </E3Button>
+                    <E3Button
                       variant="danger"
                       className="w-full justify-start"
                       onClick={() => setUnpairOpen(true)}
@@ -430,6 +439,13 @@ function ScreenDetailPage() {
                 </ol>
               )}
             </E3Modal>
+
+            <RepairScreenDialog
+              open={repairOpen}
+              onOpenChange={setRepairOpen}
+              screenId={screen.id}
+              screenName={screen.name}
+            />
 
             <E3Modal
               open={unpairOpen}

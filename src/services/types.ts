@@ -66,6 +66,7 @@ export type ScreenService = {
   get: (id: string) => Promise<Screen | null>;
   listByLocation: (locationId: string) => Promise<Screen[]>;
   pair: (input: ScreenPairInput) => Promise<Screen>;
+  repair: (id: string, code: string) => Promise<Screen>;
   update: (id: string, patch: Partial<Screen>) => Promise<Screen>;
   syncNow: (id: string) => Promise<Screen>;
   unpair: (id: string) => Promise<boolean>;
