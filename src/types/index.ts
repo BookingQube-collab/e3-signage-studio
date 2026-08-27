@@ -114,6 +114,8 @@ export interface PlaylistItem {
   type: MediaType;
   durationSec: number;
   transition: Transition;
+  thumbnailUrl?: string;
+  previewUrl?: string;
 }
 
 export interface Playlist {

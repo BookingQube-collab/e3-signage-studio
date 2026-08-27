@@ -9,11 +9,13 @@ import {
   type Transition,
 } from "@e3/shared-types";
 
+import { mediaKeysToSign } from "@/lib/media-sign";
 import { isUuid } from "@/services/inventory-map";
 import type { PlaylistItemRecord, PlaylistRecord } from "@/services/playlist-map";
 import { requireCmsPermission } from "./auth.server";
 import { assertCanMutateOwnedContent, contentVisibleToProfile } from "@/lib/location-scope";
 import { loadScopedContentUsage } from "./scoped-content.server";
+import { createObjectDownloadUrls } from "./storage.server";
 import { getUserClient } from "./supabase.server";
 
 const PLAYLIST_SELECT = "id, organization_id, name, status, archived_at, created_at, updated_at, created_by";
@@ -64,9 +66,63 @@ function dateLabel(iso: string): string {
   return iso.slice(0, 10);
 }
 
+type MediaPreviewUrls = {
+  thumbnailUrl: string | null;
+  previewUrl: string | null;
+};
+
+async function loadSignedMediaUrls(
+  client: ReturnType<typeof getUserClient>,
+  mediaRows: Array<Record<string, unknown>>,
+): Promise<Map<string, MediaPreviewUrls>> {
+  const out = new Map<string, MediaPreviewUrls>();
+  const versionIds = mediaRows
+    .map((row) => asNullableString(row["current_version_id"]))
+    .filter((id): id is string => Boolean(id));
+  if (versionIds.length === 0) return out;
+
+  const { data: versionRows, error } = await client
+    .from("media_versions")
+    .select("id, storage_key, thumbnail_key, mime_type, status")
+    .in("id", versionIds);
+  throwIfError(error, "Could not load playlist media files.");
+
+  const versionById = new Map<string, Record<string, unknown>>();
+  for (const raw of versionRows ?? []) {
+    const row = raw as Record<string, unknown>;
+    versionById.set(asString(row["id"]), row);
+  }
+
+  const keys: string[] = [];
+  const picked = mediaRows.map((row) => {
+    const id = asString(row["id"]);
+    const current = versionById.get(asString(row["current_version_id"]));
+    const status = current ? asString(current["status"]) : "";
+    const previewKey =
+      current && status === "READY" ? asNullableString(current["storage_key"]) : null;
+    const mime = current ? asString(current["mime_type"]).toLowerCase() : "";
+    const isImage = mime.startsWith("image/");
+    const thumbnailKey =
+      asNullableString(current?.["thumbnail_key"]) ?? (isImage ? previewKey : null);
+    keys.push(...mediaKeysToSign({ previewKey, isImage, signAllPreviews: true }));
+    if (thumbnailKey && thumbnailKey !== previewKey) keys.push(thumbnailKey);
+    return { id, previewKey, thumbnailKey };
+  });
+
+  const urls = await createObjectDownloadUrls(keys);
+  for (const item of picked) {
+    out.set(item.id, {
+      thumbnailUrl: item.thumbnailKey ? (urls.get(item.thumbnailKey) ?? null) : null,
+      previewUrl: item.previewKey ? (urls.get(item.previewKey) ?? null) : null,
+    });
+  }
+  return out;
+}
+
 async function toRecords(
   client: ReturnType<typeof getUserClient>,
   rows: Array<Record<string, unknown>>,
+  signItemPreviews = false,
 ): Promise<PlaylistRecord[]> {
   if (rows.length === 0) return [];
   const ids = rows.map((row) => asString(row["id"]));
@@ -79,17 +135,22 @@ async function toRecords(
     ...new Set((itemRows ?? []).map((row) => asString((row as { media_id: string }).media_id))),
   ].filter(Boolean);
   const { data: mediaRows } = mediaIds.length
-    ? await client.from("media").select("id, name, type").in("id", mediaIds)
-    : { data: [] as Array<{ id: string; name: string; type: string }> };
+    ? await client.from("media").select("id, name, type, current_version_id").in("id", mediaIds)
+    : { data: [] as Array<Record<string, unknown>> };
 
   const mediaMeta = new Map<string, { name: string; type: MediaType }>();
   for (const row of mediaRows ?? []) {
-    const type = asString((row as { type: string }).type);
-    mediaMeta.set(asString((row as { id: string }).id), {
-      name: asString((row as { name: string }).name),
+    const record = row as Record<string, unknown>;
+    const type = asString(record["type"]);
+    mediaMeta.set(asString(record["id"]), {
+      name: asString(record["name"]),
       type: isMediaType(type) ? type : "IMAGE",
     });
   }
+
+  const signedUrls = signItemPreviews
+    ? await loadSignedMediaUrls(client, (mediaRows ?? []) as Array<Record<string, unknown>>)
+    : new Map<string, MediaPreviewUrls>();
 
   const itemsByPlaylist = new Map<string, PlaylistItemRecord[]>();
   for (const raw of itemRows ?? []) {
@@ -97,6 +158,7 @@ async function toRecords(
     const playlistId = asString(row["playlist_id"]);
     const mediaId = asString(row["media_id"]);
     const meta = mediaMeta.get(mediaId);
+    const signed = signedUrls.get(mediaId);
     const transition = asString(row["transition"], "FADE");
     const item: PlaylistItemRecord = {
       id: asString(row["id"]),
@@ -106,6 +168,8 @@ async function toRecords(
       durationSec: Math.max(1, Math.round(asNumber(row["duration_seconds"], 1))),
       transition: isTransition(transition) ? transition : "FADE",
     };
+    if (signed?.thumbnailUrl) item.thumbnailUrl = signed.thumbnailUrl;
+    if (signed?.previewUrl) item.previewUrl = signed.previewUrl;
     const list = itemsByPlaylist.get(playlistId) ?? [];
     list.push(item);
     itemsByPlaylist.set(playlistId, list);
@@ -177,7 +241,7 @@ export async function getPlaylist(accessToken: string, id: string): Promise<Play
   ) {
     return null;
   }
-  const records = await toRecords(client, [row]);
+  const records = await toRecords(client, [row], true);
   return records[0] ?? null;
 }
 

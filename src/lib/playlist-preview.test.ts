@@ -72,5 +72,45 @@ test("bindPreviewClips uses library preview URLs in playlist order", () => {
     clips.map((clip) => clip.previewUrl),
     ["https://cdn.example/rajan.jpeg", "https://cdn.example/wireframe.png"],
   );
+  assert.deepEqual(
+    clips.map((clip) => clip.thumbnailUrl),
+    ["https://cdn.example/rajan.jpeg", "https://cdn.example/wireframe.png"],
+  );
   assert.equal(elapsedOffsetForMedia(clips, "m2"), 10_000);
+});
+
+test("bindPreviewClips ignores storage keys and uses playlist-signed URLs", () => {
+  const clips = bindPreviewClips(
+    [
+      {
+        id: "1",
+        mediaId: "m1",
+        filename: "ninjago-welcome-special-day.jpg",
+        type: "Image",
+        durationSec: 10,
+        transition: "Fade",
+        previewUrl: "https://signed.example/welcome.jpg",
+        thumbnailUrl: "https://signed.example/welcome.jpg",
+      },
+      {
+        id: "2",
+        mediaId: "m2",
+        filename: "clip.mp4",
+        type: "Video",
+        durationSec: 8,
+        transition: "Cut",
+        previewUrl: "https://signed.example/clip.mp4",
+        thumbnailUrl: "https://signed.example/clip-poster.jpg",
+      },
+    ],
+    new Map([
+      ["m1", { previewUrl: "org/media/welcome.jpg", thumbnailUrl: "org/media/welcome.jpg", type: "Image" }],
+      ["m2", { type: "Video" }],
+    ]),
+  );
+  assert.equal(clips[0]?.kind, "image");
+  assert.equal(clips[0]?.previewUrl, "https://signed.example/welcome.jpg");
+  assert.equal(clips[1]?.kind, "video");
+  assert.equal(clips[1]?.previewUrl, "https://signed.example/clip.mp4");
+  assert.equal(clips[1]?.thumbnailUrl, "https://signed.example/clip-poster.jpg");
 });

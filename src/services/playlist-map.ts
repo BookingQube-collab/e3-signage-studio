@@ -13,6 +13,8 @@ export type PlaylistItemRecord = {
   type: MediaType;
   durationSec: number;
   transition: Transition;
+  thumbnailUrl?: string | null;
+  previewUrl?: string | null;
 };
 
 export type PlaylistRecord = {
@@ -50,7 +52,7 @@ export function toUiPlaylist(row: PlaylistRecord): Playlist {
         transitionLabel === "Cut" || transitionLabel === "Fade" || transitionLabel === "Slide"
           ? transitionLabel
           : "Fade";
-      return {
+      const mapped: Playlist["items"][number] = {
         id: typeof item?.id === "string" ? item.id : "",
         mediaId: typeof item?.mediaId === "string" ? item.mediaId : "",
         filename: typeof item?.filename === "string" ? item.filename : "Untitled",
@@ -58,6 +60,9 @@ export function toUiPlaylist(row: PlaylistRecord): Playlist {
         durationSec: Number.isFinite(item?.durationSec) ? Math.max(1, item.durationSec) : 1,
         transition,
       };
+      if (item?.thumbnailUrl) mapped.thumbnailUrl = item.thumbnailUrl;
+      if (item?.previewUrl) mapped.previewUrl = item.previewUrl;
+      return mapped;
     }),
     usedByScreens: Number.isFinite(row?.usedByScreens) ? row.usedByScreens : 0,
     modifiedAt: typeof row?.modifiedAt === "string" ? row.modifiedAt : "",

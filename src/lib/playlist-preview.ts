@@ -1,4 +1,4 @@
-import type { MediaType, PlaylistItem, Transition } from "@/types";
+import type { Media, MediaType, PlaylistItem, Transition } from "@/types";
 
 export const PREVIEW_FADE_MS = 500;
 
@@ -10,6 +10,7 @@ export type PreviewClip = {
   durationSec: number;
   transition: Transition;
   previewUrl: string | null;
+  thumbnailUrl: string | null;
 };
 
 export type PreviewFrame = {
@@ -25,6 +26,11 @@ export type PreviewMediaLookup = {
   type?: string;
 };
 
+type PreviewItem = Pick<PlaylistItem, "id" | "mediaId" | "filename" | "type" | "durationSec" | "transition"> & {
+  previewUrl?: string | null;
+  thumbnailUrl?: string | null;
+};
+
 function asTransition(value: string): Transition {
   if (value === "Cut" || value === "Slide") return value;
   return "Fade";
@@ -34,13 +40,38 @@ export function mediaPreviewKind(type: string): "image" | "video" {
   return type === "Video" || type === "VIDEO" ? "video" : "image";
 }
 
+/** Only pass browser-fetchable URLs to <img>/<video> — storage keys 404 as relative paths. */
+export function httpMediaUrl(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return /^https?:\/\//i.test(trimmed) ? trimmed : null;
+}
+
+export function firstHttpUrl(...values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    const url = httpMediaUrl(value);
+    if (url) return url;
+  }
+  return null;
+}
+
 export function bindPreviewClips(
-  items: Array<Pick<PlaylistItem, "id" | "mediaId" | "filename" | "type" | "durationSec" | "transition">>,
+  items: PreviewItem[],
   mediaById: Map<string, PreviewMediaLookup>,
 ): PreviewClip[] {
   return items.map((item) => {
     const media = mediaById.get(item.mediaId);
     const kind = mediaPreviewKind(media?.type ?? item.type);
+    const thumbnailUrl = firstHttpUrl(
+      media?.thumbnailUrl,
+      item.thumbnailUrl,
+      kind === "image" ? media?.previewUrl : null,
+      kind === "image" ? item.previewUrl : null,
+    );
+    const previewUrl =
+      kind === "video"
+        ? firstHttpUrl(media?.previewUrl, item.previewUrl)
+        : firstHttpUrl(media?.previewUrl, media?.thumbnailUrl, item.previewUrl, item.thumbnailUrl);
     return {
       id: item.id,
       mediaId: item.mediaId,
@@ -48,9 +79,47 @@ export function bindPreviewClips(
       kind,
       durationSec: Math.max(1, item.durationSec),
       transition: asTransition(item.transition),
-      previewUrl: media?.previewUrl || media?.thumbnailUrl || null,
+      previewUrl,
+      thumbnailUrl: thumbnailUrl ?? (kind === "image" ? previewUrl : null),
     };
   });
+}
+
+export function playlistItemThumbMedia(
+  item: PreviewItem,
+  library?: Media | null,
+  clip?: Pick<PreviewClip, "thumbnailUrl" | "previewUrl">,
+): Media {
+  const thumbnailUrl =
+    firstHttpUrl(
+      library?.thumbnailUrl,
+      clip?.thumbnailUrl,
+      item.thumbnailUrl,
+      library?.previewUrl,
+      clip?.previewUrl,
+      item.previewUrl,
+    ) ?? undefined;
+  if (library) {
+    return thumbnailUrl ? { ...library, thumbnailUrl } : library;
+  }
+  const media: Media = {
+    id: item.mediaId,
+    filename: item.filename,
+    type: item.type,
+    dimensions: "",
+    durationSec: item.durationSec,
+    sizeMb: 0,
+    modifiedAt: "",
+    uploadedBy: "",
+    uploadedAt: "",
+    version: "v1",
+    thumbnailHue: 270,
+    folderId: null,
+    folderName: null,
+    usedIn: { playlists: [], campaigns: [], screens: [] },
+  };
+  if (thumbnailUrl) media.thumbnailUrl = thumbnailUrl;
+  return media;
 }
 
 export function elapsedOffsetForMedia(items: Array<{ mediaId: string; durationSec: number }>, mediaId: string | null | undefined): number {

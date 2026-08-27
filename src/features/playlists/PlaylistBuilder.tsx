@@ -13,6 +13,7 @@ import {
   E3Modal,
   E3PageHeader,
   E3StatusBadge,
+  MediaThumb,
 } from "@/components/e3";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,7 +27,7 @@ import {
 import { mediaService, playlistService } from "@/services";
 import { isUuid } from "@/services/inventory-map";
 import type { Playlist, PlaylistItem, Transition } from "@/types";
-import { bindPreviewClips } from "@/lib/playlist-preview";
+import { bindPreviewClips, playlistItemThumbMedia } from "@/lib/playlist-preview";
 import { MediaPicker } from "@/features/media/MediaPicker";
 import { PlaylistLoopPreview } from "./PlaylistLoopPreview";
 
@@ -91,11 +92,9 @@ export function PlaylistBuilder({
   });
 
   const items = Array.isArray(playlist.items) ? playlist.items : [];
+  const mediaById = new Map((mediaQuery.data ?? []).map((m) => [m.id, m]));
   const totalSec = items.reduce((sum, i) => sum + (i.durationSec || 0), 0);
-  const previewClips = bindPreviewClips(
-    items,
-    new Map((mediaQuery.data ?? []).map((m) => [m.id, m])),
-  );
+  const previewClips = bindPreviewClips(items, mediaById);
 
   function move(from: number, to: number) {
     if (!canManage) return;
@@ -237,7 +236,7 @@ export function PlaylistBuilder({
                       if (dragIndex !== null) move(dragIndex, index);
                       setDragIndex(null);
                     }}
-                    className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-xl border border-border bg-background/40 p-3 lg:grid-cols-[auto_minmax(0,1fr)_auto_auto_auto]"
+                    className="grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-3 rounded-xl border border-border bg-background/40 p-3 lg:grid-cols-[auto_auto_minmax(0,1fr)_auto_auto_auto]"
                   >
                     <div className="flex shrink-0 items-center gap-2">
                       <GripVertical className="size-4 text-muted-foreground" aria-hidden />
@@ -245,6 +244,10 @@ export function PlaylistBuilder({
                         {index + 1}
                       </span>
                     </div>
+                    <MediaThumb
+                      item={playlistItemThumbMedia(item, mediaById.get(item.mediaId), previewClips[index])}
+                      className="size-12 shrink-0"
+                    />
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium">{item.filename}</p>
                       <p className="text-xs text-muted-foreground">{item.type}</p>
@@ -401,6 +404,10 @@ export function PlaylistBuilder({
                     type: m.type,
                     durationSec: m.durationSec ?? 10,
                     transition: "Fade",
+                    ...(m.thumbnailUrl ? { thumbnailUrl: m.thumbnailUrl } : {}),
+                    ...(m.previewUrl || m.thumbnailUrl
+                      ? { previewUrl: m.previewUrl || m.thumbnailUrl }
+                      : {}),
                   },
                 ],
               }))

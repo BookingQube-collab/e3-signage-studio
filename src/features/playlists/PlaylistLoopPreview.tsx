@@ -1,15 +1,36 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { cn } from "@/lib/utils";
 import {
   PREVIEW_FADE_MS,
+  firstHttpUrl,
   previewFrameAt,
   type PreviewClip,
   type PreviewFrame,
 } from "@/lib/playlist-preview";
+import { isUuid } from "@/services/inventory-map";
+import { mediaService } from "@/services";
 
 const STAGE_BG =
   "radial-gradient(ellipse at 20% 10%, rgba(141,92,221,.22), transparent 60%), #0f0d11";
+
+function FilenameFallback({
+  filename,
+  className,
+  style,
+}: {
+  filename: string;
+  className?: string;
+  style?: CSSProperties;
+}) {
+  return (
+    <div className={cn("grid size-full place-items-center bg-black/40", className)} style={style}>
+      <p className="max-w-[90%] truncate px-3 text-center text-sm font-medium text-white/80">
+        {filename}
+      </p>
+    </div>
+  );
+}
 
 function PreviewMedia({
   clip,
@@ -20,35 +41,92 @@ function PreviewMedia({
   className?: string;
   style?: CSSProperties;
 }) {
-  if (!clip.previewUrl) {
-    return (
-      <div className={cn("grid size-full place-items-center bg-black/40", className)} style={style}>
-        <p className="max-w-[90%] truncate px-3 text-center text-sm font-medium text-white/80">
-          {clip.filename}
-        </p>
-      </div>
-    );
+  const initialSrc =
+    clip.kind === "video"
+      ? firstHttpUrl(clip.previewUrl)
+      : firstHttpUrl(clip.previewUrl, clip.thumbnailUrl);
+  const [src, setSrc] = useState<string | null>(initialSrc);
+  const [failed, setFailed] = useState(false);
+  const retried = useRef(false);
+
+  useEffect(() => {
+    const next =
+      clip.kind === "video"
+        ? firstHttpUrl(clip.previewUrl)
+        : firstHttpUrl(clip.previewUrl, clip.thumbnailUrl);
+    setSrc(next);
+    setFailed(false);
+    retried.current = false;
+    if (next || !isUuid(clip.mediaId)) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const media = await mediaService.get(clip.mediaId);
+        const url =
+          clip.kind === "video"
+            ? firstHttpUrl(media?.previewUrl)
+            : firstHttpUrl(media?.previewUrl, media?.thumbnailUrl);
+        if (!cancelled && url) {
+          setSrc(url);
+          return;
+        }
+        const fresh = await mediaService.downloadUrl(clip.mediaId);
+        if (!cancelled) setSrc(firstHttpUrl(fresh.url));
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clip.id, clip.mediaId, clip.kind, clip.previewUrl, clip.thumbnailUrl]);
+
+  async function refreshSignedUrl() {
+    if (retried.current || !isUuid(clip.mediaId)) {
+      setFailed(true);
+      return;
+    }
+    retried.current = true;
+    try {
+      const fresh = await mediaService.downloadUrl(clip.mediaId);
+      const url = firstHttpUrl(fresh.url);
+      if (url) setSrc(url);
+      else setFailed(true);
+    } catch {
+      setFailed(true);
+    }
   }
+
+  if (!src || failed) {
+    return <FilenameFallback filename={clip.filename} className={className} style={style} />;
+  }
+
   if (clip.kind === "video") {
     return (
       <video
-        key={clip.id}
-        src={clip.previewUrl}
+        key={`${clip.id}:${src}`}
+        src={src}
+        poster={firstHttpUrl(clip.thumbnailUrl) ?? undefined}
         className={cn("size-full object-contain", className)}
         style={style}
         muted
         playsInline
         autoPlay
         loop={false}
+        referrerPolicy="no-referrer"
+        onError={() => void refreshSignedUrl()}
       />
     );
   }
+
   return (
     <img
-      src={clip.previewUrl}
+      src={src}
       alt=""
       className={cn("size-full object-contain", className)}
       style={style}
+      referrerPolicy="no-referrer"
+      onError={() => void refreshSignedUrl()}
     />
   );
 }
@@ -77,7 +155,10 @@ export function PlaylistLoopPreview({
   }, [clips, startMediaId]);
 
   const clipKey = clips
-    .map((clip) => `${clip.id}:${clip.durationSec}:${clip.transition}:${clip.previewUrl ?? ""}`)
+    .map(
+      (clip) =>
+        `${clip.id}:${clip.durationSec}:${clip.transition}:${clip.previewUrl ?? ""}:${clip.thumbnailUrl ?? ""}`,
+    )
     .join("|");
   const [startedAt, setStartedAt] = useState(() => Date.now() - originMs);
   const [frame, setFrame] = useState<PreviewFrame | null>(() => previewFrameAt(clips, originMs, loop));
