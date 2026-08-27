@@ -53,6 +53,43 @@ export function selectAllIds(orderedIds: string[]): Set<string> {
   return new Set(orderedIds);
 }
 
+export function toggleSelectAll(allSelected: boolean, orderedIds: string[]): Set<string> {
+  return allSelected ? new Set() : selectAllIds(orderedIds);
+}
+
+export function selectAllActionLabel(allSelected: boolean): string {
+  return allSelected ? "Deselect all" : "Select all";
+}
+
+export function unionIds(current: ReadonlySet<string>, ids: Iterable<string>): Set<string> {
+  const next = new Set(current);
+  for (const id of ids) next.add(id);
+  return next;
+}
+
+export function withoutIds(current: ReadonlySet<string>, ids: Iterable<string>): Set<string> {
+  const remove = new Set(ids);
+  const next = new Set<string>();
+  for (const id of current) {
+    if (!remove.has(id)) next.add(id);
+  }
+  return next;
+}
+
+/** Drop IDs that a refetch already omitted so a later stale payload can stay hidden. */
+export function releaseHiddenIfGone<T extends { id: string }>(
+  hidden: ReadonlySet<string>,
+  items: T[],
+  candidateIds: Iterable<string>,
+): Set<string> {
+  const present = new Set(items.map((item) => item.id));
+  const next = new Set(hidden);
+  for (const id of candidateIds) {
+    if (!present.has(id)) next.delete(id);
+  }
+  return next;
+}
+
 export function applyBulkFolderMove<
   T extends { id: string; folderId: string | null; folderName?: string | null },
 >(items: T[], ids: Iterable<string>, folderId: string | null, folderName: string | null): T[] {

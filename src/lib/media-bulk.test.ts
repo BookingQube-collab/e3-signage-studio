@@ -8,8 +8,13 @@ import {
   assertBulkDeleteAllowed,
   inUseDeleteMessage,
   partitionBulkDelete,
+  releaseHiddenIfGone,
+  selectAllActionLabel,
   selectAllIds,
   selectionCountLabel,
+  toggleSelectAll,
+  unionIds,
+  withoutIds,
 } from "./media-bulk.ts";
 
 const unused = {
@@ -53,6 +58,21 @@ test("ctrl-click toggles one file and shift-click selects a range", () => {
   assert.deepEqual([...range.selected], visibleIds);
   assert.equal(selectionCountLabel(3), "3 selected");
   assert.deepEqual([...selectAllIds(visibleIds)], visibleIds);
+  assert.equal(selectAllActionLabel(false), "Select all");
+  assert.equal(selectAllActionLabel(true), "Deselect all");
+  assert.deepEqual([...toggleSelectAll(false, visibleIds)], visibleIds);
+  assert.equal(toggleSelectAll(true, visibleIds).size, 0);
+});
+
+test("hidden ids stay until a refetch omits the deleted files", () => {
+  const hidden = unionIds(new Set(), ["m-wire", "m-ninjago"]);
+  const afterStale = releaseHiddenIfGone(hidden, items, ["m-wire"]);
+  assert.equal(afterStale.has("m-wire"), true);
+  const remaining = applyBulkDelete(items, ["m-wire"]);
+  const afterFresh = releaseHiddenIfGone(hidden, remaining, ["m-wire"]);
+  assert.equal(afterFresh.has("m-wire"), false);
+  assert.equal(afterFresh.has("m-ninjago"), true);
+  assert.deepEqual([...withoutIds(hidden, ["m-ninjago"])], ["m-wire"]);
 });
 
 test("bulk move assigns a folder to every selected file", () => {

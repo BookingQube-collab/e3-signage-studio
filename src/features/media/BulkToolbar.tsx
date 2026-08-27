@@ -1,7 +1,7 @@
-import { FolderInput, Trash2, X } from "lucide-react";
+import { CheckSquare, FolderInput, Trash2, X } from "lucide-react";
 
 import { E3Button } from "@/components/e3";
-import { selectionCountLabel } from "@/lib/media-bulk";
+import { selectAllActionLabel, selectionCountLabel } from "@/lib/media-bulk";
 
 export function BulkToolbar({
   count,
@@ -29,7 +29,10 @@ export function BulkToolbar({
       role="toolbar"
       aria-label="Bulk media actions"
     >
-      <p className="mr-2 text-sm font-medium">{selectionCountLabel(count)}</p>
+      <p className="text-sm font-medium">{selectionCountLabel(count)}</p>
+      <E3Button size="sm" variant="outline" onClick={onSelectAll} disabled={visibleCount === 0 || busy}>
+        <CheckSquare /> {selectAllActionLabel(allSelected)}
+      </E3Button>
       <E3Button size="sm" variant="outline" onClick={onMove} disabled={busy}>
         <FolderInput /> Move to
       </E3Button>
@@ -39,11 +42,6 @@ export function BulkToolbar({
       <E3Button size="sm" variant="ghost" onClick={onClear} disabled={busy}>
         <X /> Clear selection
       </E3Button>
-      <div className="ml-auto">
-        <E3Button size="sm" variant="ghost" onClick={onSelectAll} disabled={visibleCount === 0 || busy}>
-          {allSelected ? "All selected" : "Select all"}
-        </E3Button>
-      </div>
     </div>
   );
 }

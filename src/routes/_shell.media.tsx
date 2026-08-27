@@ -29,14 +29,22 @@ import { BulkToolbar } from "@/features/media/BulkToolbar";
 import { FolderCard } from "@/features/media/FolderCard";
 import { UploadDropzone } from "@/features/media/UploadDropzone";
 import {
+  applyBulkDelete,
   applySelectionClick,
   inUseDeleteMessage,
   partitionBulkDelete,
-  selectAllIds,
+  releaseHiddenIfGone,
+  selectAllActionLabel,
+  toggleSelectAll,
+  unionIds,
+  withoutIds,
 } from "@/lib/media-bulk";
 import { ACCEPT_MEDIA } from "@/lib/media-file";
 import {
+  applyFolderCascadeDelete,
+  countFilesInFolder,
   folderCardLabel,
+  folderDeleteCopy,
   foldersInLibraryView,
   libraryViewFor,
   mediaInLibraryView,
@@ -85,11 +93,20 @@ function MediaPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteFile, setDeleteFile] = useState<Media | null>(null);
   const [deleteFolderTarget, setDeleteFolderTarget] = useState<MediaFolder | null>(null);
+  const [hiddenMediaIds, setHiddenMediaIds] = useState<Set<string>>(new Set());
+  const [hiddenFolderIds, setHiddenFolderIds] = useState<Set<string>>(new Set());
 
   const mediaQuery = useQuery({ queryKey: ["media"], queryFn: mediaService.list });
   const foldersQuery = useQuery({ queryKey: ["media-folders"], queryFn: mediaService.listFolders });
 
-  const folders = foldersQuery.data ?? [];
+  const folders = useMemo(
+    () => (foldersQuery.data ?? []).filter((folder) => !hiddenFolderIds.has(folder.id)),
+    [foldersQuery.data, hiddenFolderIds],
+  );
+  const libraryMedia = useMemo(
+    () => (mediaQuery.data ?? []).filter((item) => !hiddenMediaIds.has(item.id)),
+    [mediaQuery.data, hiddenMediaIds],
+  );
   const currentFolder = folders.find((folder) => folder.id === folderId) ?? null;
   const libraryView = libraryViewFor(search, folderId);
   const searching = libraryView.mode === "search";
@@ -128,15 +145,47 @@ function MediaPage() {
 
   const deleteFolder = useMutation({
     mutationFn: mediaService.deleteFolder,
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["media"] });
-      void qc.invalidateQueries({ queryKey: ["media-folders"] });
-      setFolderId(null);
+    onMutate: async (id) => {
+      const previousMedia = qc.getQueryData<Media[]>(["media"]);
+      const previousFolders = qc.getQueryData<MediaFolder[]>(["media-folders"]);
+      const mediaIds = (previousMedia ?? [])
+        .filter((item) => item.folderId === id)
+        .map((item) => item.id);
+      setHiddenFolderIds((prev) => unionIds(prev, [id]));
+      setHiddenMediaIds((prev) => unionIds(prev, mediaIds));
+      await qc.cancelQueries({ queryKey: ["media"] });
+      await qc.cancelQueries({ queryKey: ["media-folders"] });
+      const cascaded = applyFolderCascadeDelete(previousMedia ?? [], previousFolders ?? [], id);
+      qc.setQueryData(["media"], cascaded.media);
+      qc.setQueryData(["media-folders"], cascaded.folders);
+      setFolderId((prev) => (prev === id ? null : prev));
+      setSelected((prev) => (prev?.folderId === id ? null : prev));
       setDeleteFolderTarget(null);
+      setSelectedIds((prev) => withoutIds(prev, mediaIds));
+      return { previousMedia, previousFolders, mediaIds, folderId: id };
+    },
+    onSuccess: () => {
       toast.success("Folder deleted");
     },
-    onError: (error) => {
+    onError: (error, _id, ctx) => {
+      if (ctx) {
+        setHiddenFolderIds((prev) => withoutIds(prev, [ctx.folderId]));
+        setHiddenMediaIds((prev) => withoutIds(prev, ctx.mediaIds));
+        if (ctx.previousMedia) qc.setQueryData(["media"], ctx.previousMedia);
+        if (ctx.previousFolders) qc.setQueryData(["media-folders"], ctx.previousFolders);
+      }
       toast.error(error instanceof Error ? error.message : "Could not delete folder.");
+    },
+    onSettled: async (_data, _error, _id, ctx) => {
+      await qc.invalidateQueries({ queryKey: ["media"] });
+      await qc.invalidateQueries({ queryKey: ["media-folders"] });
+      if (!ctx) return;
+      setHiddenMediaIds((prev) =>
+        releaseHiddenIfGone(prev, qc.getQueryData<Media[]>(["media"]) ?? [], ctx.mediaIds),
+      );
+      setHiddenFolderIds((prev) =>
+        releaseHiddenIfGone(prev, qc.getQueryData<MediaFolder[]>(["media-folders"]) ?? [], [ctx.folderId]),
+      );
     },
   });
 
@@ -204,30 +253,59 @@ function MediaPage() {
 
   const remove = useMutation({
     mutationFn: mediaService.remove,
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["media"] });
-      void qc.invalidateQueries({ queryKey: ["media-folders"] });
-      setSelected(null);
+    onMutate: async (id) => {
+      const previousMedia = qc.getQueryData<Media[]>(["media"]);
+      setHiddenMediaIds((prev) => unionIds(prev, [id]));
+      await qc.cancelQueries({ queryKey: ["media"] });
+      qc.setQueryData(["media"], applyBulkDelete(previousMedia ?? [], [id]));
+      setSelected((prev) => (prev?.id === id ? null : prev));
       setDeleteFile(null);
+      setSelectedIds((prev) => withoutIds(prev, [id]));
+      return { previousMedia };
+    },
+    onSuccess: () => {
       toast.success("Media deleted");
     },
-    onError: (error) => {
+    onError: (error, id, ctx) => {
+      setHiddenMediaIds((prev) => withoutIds(prev, [id]));
+      if (ctx?.previousMedia) qc.setQueryData(["media"], ctx.previousMedia);
       toast.error(error instanceof Error ? error.message : "Could not delete.");
+    },
+    onSettled: async (_data, _error, id) => {
+      await qc.invalidateQueries({ queryKey: ["media"] });
+      await qc.invalidateQueries({ queryKey: ["media-folders"] });
+      setHiddenMediaIds((prev) =>
+        releaseHiddenIfGone(prev, qc.getQueryData<Media[]>(["media"]) ?? [], [id]),
+      );
     },
   });
 
   const removeMany = useMutation({
     mutationFn: mediaService.removeMany,
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["media"] });
-      void qc.invalidateQueries({ queryKey: ["media-folders"] });
+    onMutate: async (ids) => {
+      const previousMedia = qc.getQueryData<Media[]>(["media"]);
+      setHiddenMediaIds((prev) => unionIds(prev, ids));
+      await qc.cancelQueries({ queryKey: ["media"] });
+      qc.setQueryData(["media"], applyBulkDelete(previousMedia ?? [], ids));
       setDeleteOpen(false);
-      setSelected(null);
-      clearSelection();
+      setSelected((prev) => (prev && ids.includes(prev.id) ? null : prev));
+      setSelectedIds((prev) => withoutIds(prev, ids));
+      return { previousMedia, ids };
+    },
+    onSuccess: () => {
       toast.success("Media deleted");
     },
-    onError: (error) => {
+    onError: (error, ids, ctx) => {
+      setHiddenMediaIds((prev) => withoutIds(prev, ids));
+      if (ctx?.previousMedia) qc.setQueryData(["media"], ctx.previousMedia);
       toast.error(error instanceof Error ? error.message : "Could not delete.");
+    },
+    onSettled: async (_data, _error, ids) => {
+      await qc.invalidateQueries({ queryKey: ["media"] });
+      await qc.invalidateQueries({ queryKey: ["media-folders"] });
+      setHiddenMediaIds((prev) =>
+        releaseHiddenIfGone(prev, qc.getQueryData<Media[]>(["media"]) ?? [], ids),
+      );
     },
   });
 
@@ -254,7 +332,7 @@ function MediaPage() {
   );
 
   const items = useMemo(() => {
-    const scoped = mediaInLibraryView(mediaQuery.data ?? [], libraryView);
+    const scoped = mediaInLibraryView(libraryMedia, libraryView);
     return scoped
       .filter((m) => {
         if (filter === "All" || filter === "Recently Added") return true;
@@ -263,16 +341,33 @@ function MediaPage() {
         return m.type === "QR";
       })
       .slice(0, filter === "Recently Added" ? 8 : undefined);
-  }, [mediaQuery.data, libraryView, filter]);
+  }, [libraryMedia, libraryView, filter]);
 
   const visibleIds = useMemo(() => items.map((item) => item.id), [items]);
   const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
   const overlayOpen = createOpen || moveIds.length > 0 || Boolean(selected) || deleteOpen;
-  const bulkPlan = partitionBulkDelete(mediaQuery.data ?? [], selectedIds);
+  const bulkPlan = partitionBulkDelete(libraryMedia, selectedIds);
+  const folderFiles = deleteFolderTarget
+    ? libraryMedia.filter((item) => item.folderId === deleteFolderTarget.id)
+    : [];
+  const folderPlan = partitionBulkDelete(
+    folderFiles,
+    folderFiles.map((item) => item.id),
+  );
+  const folderFileCount = deleteFolderTarget
+    ? Math.max(deleteFolderTarget.fileCount, countFilesInFolder(libraryMedia, deleteFolderTarget.id))
+    : 0;
+  const folderCopy = folderDeleteCopy(deleteFolderTarget?.name ?? "folder", folderFileCount);
 
   function clearSelection() {
     setSelectedIds(new Set());
     setAnchorId(null);
+  }
+
+  function applySelectAllToggle() {
+    const next = toggleSelectAll(allSelected, visibleIds);
+    setSelectedIds(next);
+    setAnchorId(next.size > 0 ? (visibleIds[0] ?? null) : null);
   }
 
   function openMove(item: Media) {
@@ -407,13 +502,10 @@ function MediaPage() {
             {items.length > 0 ? (
               <button
                 type="button"
-                onClick={() => {
-                  setSelectedIds(selectAllIds(visibleIds));
-                  setAnchorId(visibleIds[0] ?? null);
-                }}
+                onClick={applySelectAllToggle}
                 className="rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
-                {allSelected ? "All selected" : "Select all"}
+                {selectAllActionLabel(allSelected)}
               </button>
             ) : null}
             <div className="flex overflow-hidden rounded-xl border border-border">
@@ -444,10 +536,7 @@ function MediaPage() {
         count={selectedIds.size}
         visibleCount={visibleIds.length}
         allSelected={allSelected}
-        onSelectAll={() => {
-          setSelectedIds(selectAllIds(visibleIds));
-          setAnchorId(visibleIds[0] ?? null);
-        }}
+        onSelectAll={applySelectAllToggle}
         onClear={clearSelection}
         onMove={() => {
           setMoveIds([...selectedIds]);
@@ -834,8 +923,12 @@ function MediaPage() {
           if (!open && deleteFolder.isPending) return;
           if (!open) setDeleteFolderTarget(null);
         }}
-        title={deleteFolderTarget ? `Delete ${deleteFolderTarget.name}?` : "Delete folder?"}
-        description="Move files out of this folder first. Empty folders can be removed."
+        title={deleteFolderTarget ? folderCopy.title : "Delete folder?"}
+        description={
+          folderPlan.blocked.length > 0
+            ? "Files in live playlists are never deleted silently."
+            : folderCopy.description
+        }
         footer={
           <>
             <E3Button
@@ -843,19 +936,41 @@ function MediaPage() {
               disabled={deleteFolder.isPending}
               onClick={() => setDeleteFolderTarget(null)}
             >
-              Cancel
+              {folderPlan.blocked.length > 0 && folderPlan.deletable.length === 0 ? "Close" : "Cancel"}
             </E3Button>
-            <E3Button
-              variant="danger"
-              loading={deleteFolder.isPending}
-              disabled={!deleteFolderTarget}
-              onClick={() => deleteFolderTarget && deleteFolder.mutate(deleteFolderTarget.id)}
-            >
-              Delete folder
-            </E3Button>
+            {folderPlan.blocked.length === 0 ? (
+              <E3Button
+                variant="danger"
+                loading={deleteFolder.isPending}
+                disabled={!deleteFolderTarget}
+                onClick={() => deleteFolderTarget && deleteFolder.mutate(deleteFolderTarget.id)}
+              >
+                {folderCopy.confirmLabel}
+              </E3Button>
+            ) : null}
           </>
         }
-      />
+      >
+        <div className="space-y-3">
+          {folderPlan.blocked.length > 0 ? (
+            <E3Alert
+              severity="critical"
+              title="Used in live playlists"
+              detail={inUseDeleteMessage(folderPlan.blocked)}
+            />
+          ) : folderCopy.detail ? (
+            <E3Alert severity="warning" title="Folder is not empty" detail={folderCopy.detail} />
+          ) : (
+            <p className="text-sm text-muted-foreground">Remove this empty folder from the library.</p>
+          )}
+          {folderPlan.blocked.length > 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Remove {folderPlan.blocked.length === 1 ? "that file" : "those files"} from live playlists
+              first, then delete the folder. The folder and its other files stay so the live TV keeps playing.
+            </p>
+          ) : null}
+        </div>
+      </E3Modal>
     </div>
   );
 }

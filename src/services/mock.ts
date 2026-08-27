@@ -256,9 +256,18 @@ export const mockServices: AppServices = {
       return delay(folder, 200);
     },
     deleteFolder: (id: string) => {
-      if (store.media.some((m) => m.folderId === id)) {
-        return Promise.reject(new Error("This folder still has files. Move them to another folder or Unfiled first."));
+      const inFolder = store.media.filter((m) => m.folderId === id);
+      const { blocked } = partitionBulkDelete(
+        inFolder,
+        inFolder.map((item) => item.id),
+      );
+      try {
+        assertBulkDeleteAllowed(blocked);
+      } catch (error) {
+        return Promise.reject(error);
       }
+      const removed = new Set(inFolder.map((item) => item.id));
+      store.media = store.media.filter((m) => !removed.has(m.id));
       store.folders = store.folders.filter((f) => f.id !== id);
       return delay(true, 200);
     },

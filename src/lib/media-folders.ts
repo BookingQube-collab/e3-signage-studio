@@ -1,8 +1,5 @@
 export const MAX_FOLDER_NAME = 80;
 
-export const FOLDER_NOT_EMPTY_MESSAGE =
-  "This folder still has files. Move them to another folder or Unfiled first.";
-
 export const FOLDER_DUPLICATE_MESSAGE = "A folder with that name already exists.";
 
 export type LibraryView =
@@ -29,8 +26,40 @@ export function isDuplicateFolderName(existingNames: string[], name: string): bo
   return existingNames.some((value) => normalizeFolderName(value).toLowerCase() === needle);
 }
 
-export function assertFolderDeletable(visibleFileCount: number): void {
-  if (visibleFileCount > 0) throw new Error(FOLDER_NOT_EMPTY_MESSAGE);
+export function folderDeleteCopy(
+  folderName: string,
+  fileCount: number,
+): { title: string; description: string; detail: string | null; confirmLabel: string } {
+  const title = `Delete ${folderName}?`;
+  if (fileCount <= 0) {
+    return {
+      title,
+      description: "This cannot be undone.",
+      detail: null,
+      confirmLabel: "Delete folder",
+    };
+  }
+  const files = fileCount === 1 ? "1 file" : `${fileCount} files`;
+  return {
+    title,
+    description: `This deletes the folder and ${files} inside. This cannot be undone.`,
+    detail: `${folderName} has ${files}. They will be removed from the library with the folder.`,
+    confirmLabel: `Delete folder and ${files}`,
+  };
+}
+
+export function applyFolderCascadeDelete<
+  TMedia extends { id: string; folderId: string | null },
+  TFolder extends { id: string },
+>(
+  media: TMedia[],
+  folders: TFolder[],
+  folderId: string,
+): { media: TMedia[]; folders: TFolder[] } {
+  return {
+    media: media.filter((item) => item.folderId !== folderId),
+    folders: folders.filter((folder) => folder.id !== folderId),
+  };
 }
 
 export function resolveUploadFolderId(currentFolderId: string | null | undefined): string | null {

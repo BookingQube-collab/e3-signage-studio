@@ -3,13 +3,13 @@ import test from "node:test";
 
 import {
   FOLDER_DUPLICATE_MESSAGE,
-  FOLDER_NOT_EMPTY_MESSAGE,
+  applyFolderCascadeDelete,
   applyFolderMove,
-  assertFolderDeletable,
   assertFolderName,
   countFilesInFolder,
   createFolderRecord,
   folderCardLabel,
+  folderDeleteCopy,
   isDuplicateFolderName,
   foldersInLibraryView,
   libraryViewFor,
@@ -75,11 +75,27 @@ test("uploads land in the current folder, or unfiled at root", () => {
   assert.equal(resolveUploadFolderId(undefined), null);
 });
 
-test("delete is allowed only when the folder has no visible files", () => {
+test("folder delete warns and removes files in that folder", () => {
   assert.equal(countFilesInFolder(items, "f-office"), 1);
-  assert.throws(
-    () => assertFolderDeletable(1),
-    (err: Error) => err.message === FOLDER_NOT_EMPTY_MESSAGE,
+  const empty = folderDeleteCopy("Unfiled extras", 0);
+  assert.equal(empty.confirmLabel, "Delete folder");
+  assert.match(empty.description, /cannot be undone/i);
+  const filled = folderDeleteCopy("InflataPark", 6);
+  assert.equal(filled.confirmLabel, "Delete folder and 6 files");
+  assert.match(filled.description, /folder and 6 files inside/i);
+  assert.match(filled.detail ?? "", /InflataPark has 6 files/);
+  const folders = [
+    { id: "f-inflata", name: "InflataPark" },
+    { id: "f-office", name: "Rajan Office" },
+  ];
+  const cascaded = applyFolderCascadeDelete(items, folders, "f-inflata");
+  assert.equal(
+    cascaded.media.some((item) => item.folderId === "f-inflata"),
+    false,
   );
-  assert.doesNotThrow(() => assertFolderDeletable(0));
+  assert.equal(
+    cascaded.folders.some((folder) => folder.id === "f-inflata"),
+    false,
+  );
+  assert.equal(cascaded.media.some((item) => item.id === "m2"), true);
 });

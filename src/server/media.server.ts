@@ -25,7 +25,6 @@ import {
 import { mediaKeysToSign } from "../lib/media-sign";
 import {
   FOLDER_DUPLICATE_MESSAGE,
-  assertFolderDeletable,
   assertFolderName,
   isDuplicateFolderName,
 } from "../lib/media-folders";
@@ -1085,12 +1084,36 @@ export async function createFolder(accessToken: string, name: string): Promise<M
   return toFolderRecord(client, mapFolder(data as Record<string, unknown>));
 }
 
+async function mediaRowsInFolder(
+  client: ReturnType<typeof getUserClient>,
+  folderId: string,
+  organizationId: string,
+): Promise<MediaRow[]> {
+  const { data, error } = await client
+    .from("media")
+    .select(MEDIA_SELECT)
+    .eq("folder_id", folderId)
+    .eq("organization_id", organizationId);
+  throwIfError(error, "Could not load folder files.");
+  return (data ?? []).map((row) => mapMedia(row as Record<string, unknown>));
+}
+
 export async function deleteFolder(accessToken: string, id: string): Promise<boolean> {
   const auth = await requireCmsPermission(accessToken, "media.manage");
   const client = getUserClient(accessToken);
   const existing = await getFolderRow(client, id, auth.profile.organizationId);
   if (!existing) throw new Error("Folder not found.");
-  assertFolderDeletable(await visibleFileCount(client, id));
+  const rows = await mediaRowsInFolder(client, id, auth.profile.organizationId);
+  for (const row of rows) {
+    assertCanMutateOwnedContent(auth.profile, row.created_by);
+  }
+  const visible = rows.filter((row) => !row.archived_at && isVisibleLibraryStatus(row.status));
+  if (visible.length > 0) {
+    await assertIdsDeletable(client, visible);
+  }
+  for (const row of rows) {
+    await purgeMediaRow(client, row.id);
+  }
   const { error } = await client.from("media_folders").delete().eq("id", id);
   throwIfError(error, "Could not delete folder.");
   return true;
