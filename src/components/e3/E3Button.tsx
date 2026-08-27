@@ -1,5 +1,6 @@
 import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
+import { Loader2 } from "lucide-react";
 import type { ButtonHTMLAttributes } from "react";
 
 import { cn } from "@/lib/utils";
@@ -30,11 +31,31 @@ export interface E3ButtonProps
   extends ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof e3ButtonVariants> {
   asChild?: boolean;
+  loading?: boolean;
 }
 
-export function E3Button({ className, variant, size, asChild, ...props }: E3ButtonProps) {
-  const Comp = asChild ? Slot : "button";
-  return <Comp className={cn(e3ButtonVariants({ variant, size }), className)} {...props} />;
+export function E3Button({
+  className,
+  variant,
+  size,
+  asChild,
+  loading = false,
+  disabled,
+  children,
+  ...props
+}: E3ButtonProps) {
+  const Comp = asChild && !loading ? Slot : "button";
+  return (
+    <Comp
+      className={cn(e3ButtonVariants({ variant, size }), className)}
+      disabled={disabled || loading}
+      aria-busy={loading || undefined}
+      {...props}
+    >
+      {loading ? <Loader2 className="animate-spin" aria-hidden /> : null}
+      {children}
+    </Comp>
+  );
 }
 
 export { e3ButtonVariants };

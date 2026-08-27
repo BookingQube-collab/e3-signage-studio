@@ -77,6 +77,7 @@ export function UploadDropzone({
           className="mt-5"
           variant="primary"
           disabled={busy}
+          loading={busy}
           onClick={() => inputRef.current?.click()}
         >
           Browse Files

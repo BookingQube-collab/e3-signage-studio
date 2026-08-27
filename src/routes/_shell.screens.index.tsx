@@ -303,10 +303,11 @@ function ScreensPage() {
               />
               <E3Button
                 variant="primary"
-                disabled={!newGroup.trim() || createGroup.isPending}
+                disabled={!newGroup.trim()}
+                loading={createGroup.isPending}
                 onClick={() => createGroup.mutate()}
               >
-                {createGroup.isPending ? "Saving…" : "Create"}
+                Create
               </E3Button>
             </div>
           </div>

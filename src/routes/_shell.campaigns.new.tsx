@@ -464,6 +464,7 @@ function NewCampaignPage() {
       <div className="mt-6 flex flex-wrap justify-between gap-3">
         <E3Button
           variant="outline"
+          disabled={save.isPending || publishMut.isPending || publishing}
           onClick={() => (step === 0 ? void navigate({ to: "/campaigns" }) : setStep(step - 1))}
         >
           {step === 0 ? "Cancel" : "Back"}
@@ -472,7 +473,8 @@ function NewCampaignPage() {
           {liveEdit ? null : (
             <E3Button
               variant="ghost"
-              disabled={save.isPending || publishMut.isPending}
+              loading={save.isPending}
+              disabled={publishMut.isPending || publishing}
               onClick={() => save.mutate(draft)}
             >
               Save draft
@@ -490,7 +492,8 @@ function NewCampaignPage() {
             <E3Button
               variant="primary"
               size="lg"
-              disabled={publishing || publishMut.isPending}
+              loading={publishing || publishMut.isPending}
+              disabled={save.isPending}
               onClick={publish}
             >
               {mode === "edit" ? "Save changes" : "PUBLISH CAMPAIGN"}

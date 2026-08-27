@@ -160,7 +160,8 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
             <E3Button
               variant="primary"
               onClick={() => save.mutate(layout)}
-              disabled={save.isPending || !layout.name}
+              loading={save.isPending}
+              disabled={!layout.name}
             >
               Save Template
             </E3Button>

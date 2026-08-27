@@ -72,10 +72,12 @@ function LoginPage() {
   const [email, setEmail] = useState("rajan@e3.qa");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submitting) return;
     if (!email || !password) {
       setError("Enter your email and password to continue.");
       return;
@@ -126,6 +128,7 @@ function LoginPage() {
   }
 
   async function onForgotPassword() {
+    if (resetting || submitting) return;
     if (!email) {
       setError("Enter your email to reset your password.");
       return;
@@ -136,6 +139,7 @@ function LoginPage() {
       return;
     }
     setError(null);
+    setResetting(true);
     try {
       const limited = await fetch("/api/auth/login-attempt", {
         method: "POST",
@@ -156,6 +160,8 @@ function LoginPage() {
       toast.success("Password reset link sent to your email");
     } catch {
       setError("Network error. Check your connection.");
+    } finally {
+      setResetting(false);
     }
   }
 
@@ -227,18 +233,19 @@ function LoginPage() {
               variant="primary"
               size="lg"
               className="w-full"
-              disabled={submitting}
+              loading={submitting}
             >
-              {submitting ? "Signing in…" : "Sign In"}
+              Sign In
             </E3Button>
 
             <div className="text-center">
               <button
                 type="button"
+                disabled={submitting || resetting}
                 onClick={() => void onForgotPassword()}
-                className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline disabled:pointer-events-none disabled:opacity-50"
               >
-                Forgot password?
+                {resetting ? "Sending…" : "Forgot password?"}
               </button>
             </div>
           </form>

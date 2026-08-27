@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Copy, MoreHorizontal, Pause, Pencil, Play, Trash2 } from "lucide-react";
+import { Copy, Loader2, MoreHorizontal, Pause, Pencil, Play, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -80,9 +80,10 @@ export function CampaignRowMenu({ campaign }: { campaign: Campaign }) {
             type="button"
             aria-label={`Actions for ${campaign.name}`}
             disabled={busy}
+            aria-busy={busy || undefined}
             className="grid size-8 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
           >
-            <MoreHorizontal className="size-4" />
+            {busy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <MoreHorizontal className="size-4" />}
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">
@@ -102,13 +103,13 @@ export function CampaignRowMenu({ campaign }: { campaign: Campaign }) {
           </DropdownMenuItem>
           {canStop ? (
             <DropdownMenuItem disabled={busy} onSelect={() => stop.mutate()}>
-              <Pause />
+              {stop.isPending ? <Loader2 className="animate-spin" /> : <Pause />}
               Stop
             </DropdownMenuItem>
           ) : null}
           {canResume ? (
             <DropdownMenuItem disabled={busy} onSelect={() => resume.mutate()}>
-              <Play />
+              {resume.isPending ? <Loader2 className="animate-spin" /> : <Play />}
               Resume
             </DropdownMenuItem>
           ) : null}
@@ -125,17 +126,20 @@ export function CampaignRowMenu({ campaign }: { campaign: Campaign }) {
 
       <E3Modal
         open={confirmDelete}
-        onOpenChange={setConfirmDelete}
+        onOpenChange={(open) => {
+          if (!open && remove.isPending) return;
+          setConfirmDelete(open);
+        }}
         title={`Delete ${campaign.name}?`}
         description="This removes the campaign from the CMS. Screens stay paired. If this campaign was on a screen, it will be taken off."
         footer={
           <>
-            <E3Button variant="outline" onClick={() => setConfirmDelete(false)}>
+            <E3Button variant="outline" disabled={remove.isPending} onClick={() => setConfirmDelete(false)}>
               Cancel
             </E3Button>
             <E3Button
               variant="danger"
-              disabled={remove.isPending}
+              loading={remove.isPending}
               onClick={() => remove.mutate()}
             >
               Delete campaign

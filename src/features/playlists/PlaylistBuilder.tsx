@@ -91,6 +91,7 @@ export function PlaylistBuilder({ initial }: { initial: Playlist }) {
           <>
             <E3Button
               variant="outline"
+              loading={save.isPending && save.variables?.status === "Draft"}
               disabled={save.isPending}
               onClick={() => save.mutate({ ...playlist, status: "Draft" })}
             >
@@ -110,6 +111,7 @@ export function PlaylistBuilder({ initial }: { initial: Playlist }) {
             <E3Button
               variant="primary"
               onClick={() => save.mutate({ ...playlist, status: "Active" })}
+              loading={save.isPending && save.variables?.status === "Active"}
               disabled={save.isPending || playlist.items.length === 0}
             >
               Publish

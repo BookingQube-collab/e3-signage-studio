@@ -315,6 +315,8 @@ function MediaPage() {
   const errored = mediaQuery.isError || foldersQuery.isError;
   const empty = visibleFolders.length === 0 && items.length === 0;
   const selectionActive = selectedIds.size > 0;
+  const mediaBusy =
+    rename.isPending || replace.isPending || download.isPending || archive.isPending || remove.isPending;
 
   return (
     <div>
@@ -341,7 +343,7 @@ function MediaPage() {
             {currentFolder && !searching ? (
               <E3Button
                 variant="outline"
-                disabled={deleteFolder.isPending}
+                loading={deleteFolder.isPending}
                 onClick={() => deleteFolder.mutate(currentFolder.id)}
               >
                 Delete folder
@@ -526,17 +528,21 @@ function MediaPage() {
 
       <E3Modal
         open={createOpen}
-        onOpenChange={setCreateOpen}
+        onOpenChange={(open) => {
+          if (!open && createFolder.isPending) return;
+          setCreateOpen(open);
+        }}
         title="Create folder"
         description="One level — name it after a venue, campaign, or event."
         footer={
           <>
-            <E3Button variant="outline" onClick={() => setCreateOpen(false)}>
+            <E3Button variant="outline" disabled={createFolder.isPending} onClick={() => setCreateOpen(false)}>
               Cancel
             </E3Button>
             <E3Button
               variant="primary"
-              disabled={createFolder.isPending || !newFolderName.trim()}
+              loading={createFolder.isPending}
+              disabled={!newFolderName.trim()}
               onClick={() => createFolder.mutate(newFolderName)}
             >
               Create folder
@@ -552,7 +558,9 @@ function MediaPage() {
             onChange={(e) => setNewFolderName(e.target.value)}
             placeholder="e.g. InflataPark, Rajan Office, Birthday - Poppy"
             onKeyDown={(e) => {
-              if (e.key === "Enter" && newFolderName.trim()) createFolder.mutate(newFolderName);
+              if (e.key === "Enter" && newFolderName.trim() && !createFolder.isPending) {
+                createFolder.mutate(newFolderName);
+              }
             }}
           />
         </div>
@@ -560,17 +568,21 @@ function MediaPage() {
 
       <E3Modal
         open={moveIds.length > 0}
-        onOpenChange={(o) => !o && setMoveIds([])}
+        onOpenChange={(o) => {
+          if (!o && moveToFolder.isPending) return;
+          if (!o) setMoveIds([]);
+        }}
         title={moveIds.length > 1 ? `Move ${moveIds.length} files` : "Move to folder"}
         description="Organization only — playlists keep using these files."
         footer={
           <>
-            <E3Button variant="outline" onClick={() => setMoveIds([])}>
+            <E3Button variant="outline" disabled={moveToFolder.isPending} onClick={() => setMoveIds([])}>
               Cancel
             </E3Button>
             <E3Button
               variant="primary"
-              disabled={moveIds.length === 0 || moveToFolder.isPending}
+              loading={moveToFolder.isPending}
+              disabled={moveIds.length === 0}
               onClick={() =>
                 moveToFolder.mutate({
                   ids: moveIds,
@@ -603,7 +615,10 @@ function MediaPage() {
 
       <E3Modal
         open={deleteOpen}
-        onOpenChange={setDeleteOpen}
+        onOpenChange={(open) => {
+          if (!open && removeMany.isPending) return;
+          setDeleteOpen(open);
+        }}
         title={bulkPlan.deletable.length > 0 ? "Delete files?" : "These files stay on the live screens"}
         description={
           bulkPlan.blocked.length > 0
@@ -612,13 +627,13 @@ function MediaPage() {
         }
         footer={
           <>
-            <E3Button variant="outline" onClick={() => setDeleteOpen(false)}>
+            <E3Button variant="outline" disabled={removeMany.isPending} onClick={() => setDeleteOpen(false)}>
               {bulkPlan.deletable.length > 0 ? "Cancel" : "Close"}
             </E3Button>
             {bulkPlan.deletable.length > 0 ? (
               <E3Button
                 variant="danger"
-                disabled={removeMany.isPending}
+                loading={removeMany.isPending}
                 onClick={() => removeMany.mutate(bulkPlan.deletable.map((item) => item.id))}
               >
                 {bulkPlan.blocked.length > 0
@@ -652,39 +667,46 @@ function MediaPage() {
 
       <E3Modal
         open={Boolean(selected)}
-        onOpenChange={(o) => !o && setSelected(null)}
+        onOpenChange={(o) => {
+          if (!o && mediaBusy) return;
+          if (!o) setSelected(null);
+        }}
         title={selected?.filename ?? "Media"}
         description="Preview and metadata"
         className="sm:max-w-2xl"
         footer={
           <>
-            <E3Button variant="outline" disabled={!selected} onClick={() => selected && openMove(selected)}>
+            <E3Button variant="outline" disabled={!selected || mediaBusy} onClick={() => selected && openMove(selected)}>
               Move to folder…
             </E3Button>
             <E3Button
               variant="outline"
-              disabled={!selected || replace.isPending}
+              disabled={!selected || mediaBusy}
+              loading={replace.isPending}
               onClick={() => replaceInputRef.current?.click()}
             >
-              {replace.isPending ? "Replacing…" : "Replace"}
+              Replace
             </E3Button>
             <E3Button
               variant="outline"
-              disabled={!selected || download.isPending}
+              disabled={!selected || mediaBusy}
+              loading={download.isPending}
               onClick={() => selected && download.mutate(selected.id)}
             >
               Download
             </E3Button>
             <E3Button
               variant="outline"
-              disabled={!selected || archive.isPending}
+              disabled={!selected || mediaBusy}
+              loading={archive.isPending}
               onClick={() => selected && archive.mutate(selected.id)}
             >
               Archive
             </E3Button>
             <E3Button
               variant="danger"
-              disabled={!selected || remove.isPending}
+              disabled={!selected || mediaBusy}
+              loading={remove.isPending}
               onClick={() => selected && remove.mutate(selected.id)}
             >
               Delete
@@ -720,6 +742,8 @@ function MediaPage() {
               <E3Button
                 variant="secondary"
                 className="self-end"
+                loading={rename.isPending}
+                disabled={mediaBusy}
                 onClick={() => rename.mutate({ id: selected.id, filename: renaming })}
               >
                 Rename

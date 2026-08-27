@@ -78,6 +78,7 @@ export function PairScreenDialog({
     <E3Modal
       open={open}
       onOpenChange={(o) => {
+        if (!o && pair.isPending) return;
         if (!o) reset();
         onOpenChange(o);
       }}
@@ -99,15 +100,16 @@ export function PairScreenDialog({
           </>
         ) : (
           <>
-            <E3Button variant="outline" onClick={() => setStep(1)}>
+            <E3Button variant="outline" disabled={pair.isPending} onClick={() => setStep(1)}>
               Back
             </E3Button>
             <E3Button
               variant="primary"
-              disabled={!form.name || !form.locationId || pair.isPending}
+              disabled={!form.name || !form.locationId}
+              loading={pair.isPending}
               onClick={() => pair.mutate({ code: codeDigits, ...form })}
             >
-              {pair.isPending ? "Pairing…" : "PAIR SCREEN"}
+              PAIR SCREEN
             </E3Button>
           </>
         )
