@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { MonitorPlay, PowerOff, RefreshCw, ScrollText, Unlink, Wrench } from "lucide-react";
+import { MonitorPlay, Pencil, PowerOff, RefreshCw, ScrollText, Trash2, Unlink, Wrench } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -29,7 +29,9 @@ import { ADMIN_MONITORING_REFETCH_MS } from "@/lib/monitoring";
 import { bindPreviewClips } from "@/lib/playlist-preview";
 import { useLiveMonitoring } from "@/lib/use-live-monitoring";
 import { PlaylistLoopPreview } from "@/features/playlists/PlaylistLoopPreview";
+import { EditScreenDialog } from "@/features/screens/EditScreenDialog";
 import { RepairScreenDialog } from "@/features/screens/RepairScreenDialog";
+import { hasPermission } from "@/lib/rbac";
 
 export const Route = createFileRoute("/_shell/screens/$id")({
   head: () => ({
@@ -51,12 +53,15 @@ export const Route = createFileRoute("/_shell/screens/$id")({
 
 function ScreenDetailPage() {
   const { id } = Route.useParams();
+  const { auth } = Route.useRouteContext();
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const canManageScreens = Boolean(auth?.ok && hasPermission(auth.profile.role, "screens.manage"));
   const [logsOpen, setLogsOpen] = useState(false);
   const [playlistOpen, setPlaylistOpen] = useState(false);
   const [unpairOpen, setUnpairOpen] = useState(false);
   const [repairOpen, setRepairOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [nextPlaylist, setNextPlaylist] = useState("");
 
   const screenQuery = useQuery({
@@ -195,13 +200,23 @@ function ScreenDetailPage() {
               actions={
                 <>
                   <E3StatusBadge status={screen.status} className="self-center" />
-                  <E3Button
-                    variant="primary"
-                    onClick={() => sync.mutate()}
-                    loading={sync.isPending}
-                  >
-                    <RefreshCw /> Sync Now
-                  </E3Button>
+                  {canManageScreens ? (
+                    <>
+                      <E3Button variant="outline" onClick={() => setEditOpen(true)}>
+                        <Pencil /> Edit
+                      </E3Button>
+                      <E3Button variant="danger" onClick={() => setUnpairOpen(true)}>
+                        <Trash2 /> Delete
+                      </E3Button>
+                      <E3Button
+                        variant="primary"
+                        onClick={() => sync.mutate()}
+                        loading={sync.isPending}
+                      >
+                        <RefreshCw /> Sync Now
+                      </E3Button>
+                    </>
+                  ) : null}
                 </>
               }
             />
@@ -291,21 +306,34 @@ function ScreenDetailPage() {
                 <E3Card>
                   <E3CardHeader title="Actions" />
                   <E3CardBody className="space-y-2">
-                    <E3Button
-                      variant="outline"
-                      className="w-full justify-start"
-                      loading={sync.isPending}
-                      onClick={() => sync.mutate()}
-                    >
-                      <RefreshCw /> Sync Now
-                    </E3Button>
-                    <E3Button
-                      variant="outline"
-                      className="w-full justify-start"
-                      onClick={() => setPlaylistOpen(true)}
-                    >
-                      <MonitorPlay /> Change Playlist
-                    </E3Button>
+                    {canManageScreens ? (
+                      <E3Button
+                        variant="outline"
+                        className="w-full justify-start"
+                        onClick={() => setEditOpen(true)}
+                      >
+                        <Pencil /> Edit
+                      </E3Button>
+                    ) : null}
+                    {canManageScreens ? (
+                      <E3Button
+                        variant="outline"
+                        className="w-full justify-start"
+                        loading={sync.isPending}
+                        onClick={() => sync.mutate()}
+                      >
+                        <RefreshCw /> Sync Now
+                      </E3Button>
+                    ) : null}
+                    {canManageScreens ? (
+                      <E3Button
+                        variant="outline"
+                        className="w-full justify-start"
+                        onClick={() => setPlaylistOpen(true)}
+                      >
+                        <MonitorPlay /> Change Playlist
+                      </E3Button>
+                    ) : null}
                     <E3Button
                       variant="outline"
                       className="w-full justify-start"
@@ -313,29 +341,33 @@ function ScreenDetailPage() {
                     >
                       <ScrollText /> View Logs
                     </E3Button>
-                    <E3Button
-                      variant="outline"
-                      className="w-full justify-start"
-                      loading={disable.isPending}
-                      onClick={() => disable.mutate()}
-                    >
-                      <PowerOff />{" "}
-                      {screen.status === "disabled" ? "Enable Screen" : "Disable Screen"}
-                    </E3Button>
-                    <E3Button
-                      variant="outline"
-                      className="w-full justify-start"
-                      onClick={() => setRepairOpen(true)}
-                    >
-                      <Wrench /> Repair
-                    </E3Button>
-                    <E3Button
-                      variant="danger"
-                      className="w-full justify-start"
-                      onClick={() => setUnpairOpen(true)}
-                    >
-                      <Unlink /> Unpair
-                    </E3Button>
+                    {canManageScreens ? (
+                      <>
+                        <E3Button
+                          variant="outline"
+                          className="w-full justify-start"
+                          loading={disable.isPending}
+                          onClick={() => disable.mutate()}
+                        >
+                          <PowerOff />{" "}
+                          {screen.status === "disabled" ? "Enable Screen" : "Disable Screen"}
+                        </E3Button>
+                        <E3Button
+                          variant="outline"
+                          className="w-full justify-start"
+                          onClick={() => setRepairOpen(true)}
+                        >
+                          <Wrench /> Repair
+                        </E3Button>
+                        <E3Button
+                          variant="danger"
+                          className="w-full justify-start"
+                          onClick={() => setUnpairOpen(true)}
+                        >
+                          <Unlink /> Unpair
+                        </E3Button>
+                      </>
+                    ) : null}
                   </E3CardBody>
                 </E3Card>
 
@@ -440,6 +472,12 @@ function ScreenDetailPage() {
               )}
             </E3Modal>
 
+            <EditScreenDialog
+              open={editOpen}
+              onOpenChange={setEditOpen}
+              screen={screen}
+            />
+
             <RepairScreenDialog
               open={repairOpen}
               onOpenChange={setRepairOpen}
@@ -453,15 +491,15 @@ function ScreenDetailPage() {
                 if (!open && unpair.isPending) return;
                 setUnpairOpen(open);
               }}
-              title="Unpair this screen?"
-              description="The device will stop receiving content until it is paired again."
+              title="Delete this screen?"
+              description="This unpairs the device. It will stop receiving content until it is paired again."
               footer={
                 <>
                   <E3Button variant="outline" disabled={unpair.isPending} onClick={() => setUnpairOpen(false)}>
                     Cancel
                   </E3Button>
                   <E3Button variant="danger" loading={unpair.isPending} onClick={() => unpair.mutate()}>
-                    Unpair screen
+                    Delete screen
                   </E3Button>
                 </>
               }

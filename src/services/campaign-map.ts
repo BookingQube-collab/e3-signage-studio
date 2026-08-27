@@ -29,20 +29,42 @@ export type CampaignRecord = {
   modifiedAt: string;
 };
 
+const FALLBACK_SCHEDULE: Campaign["schedule"] = {
+  startDate: "",
+  endDate: "",
+  startTime: "00:00",
+  endTime: "23:59",
+  days: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+  timezone: "Asia/Qatar",
+  priority: 6,
+};
+
+function toUiSchedule(schedule: CampaignRecord["schedule"] | undefined): Campaign["schedule"] {
+  return {
+    startDate: typeof schedule?.startDate === "string" ? schedule.startDate : "",
+    endDate: typeof schedule?.endDate === "string" ? schedule.endDate : "",
+    startTime: typeof schedule?.startTime === "string" ? schedule.startTime : FALLBACK_SCHEDULE.startTime,
+    endTime: typeof schedule?.endTime === "string" ? schedule.endTime : FALLBACK_SCHEDULE.endTime,
+    days: Array.isArray(schedule?.days) ? schedule.days : [...FALLBACK_SCHEDULE.days],
+    timezone: schedule?.timezone || FALLBACK_SCHEDULE.timezone,
+    priority: typeof schedule?.priority === "number" ? schedule.priority : FALLBACK_SCHEDULE.priority,
+  };
+}
+
 export function toUiCampaign(row: CampaignRecord): Campaign {
   return {
     id: row.id,
     name: row.name,
     description: row.description,
-    status: UI_LABELS.campaignStatus[row.status],
-    contentType: row.contentType,
+    status: UI_LABELS.campaignStatus[row.status] ?? "Draft",
+    contentType: row.contentType === "Layout" ? "Layout" : "Playlist",
     contentId: row.contentId,
     contentName: row.contentName,
-    locationIds: row.locationIds,
-    screenIds: row.screenIds,
-    schedule: row.schedule,
-    syncReady: row.syncReady,
-    syncTotal: row.syncTotal,
+    locationIds: Array.isArray(row.locationIds) ? row.locationIds : [],
+    screenIds: Array.isArray(row.screenIds) ? row.screenIds : [],
+    schedule: toUiSchedule(row.schedule),
+    syncReady: row.syncReady ?? 0,
+    syncTotal: row.syncTotal ?? 0,
     modifiedAt: row.modifiedAt,
   };
 }

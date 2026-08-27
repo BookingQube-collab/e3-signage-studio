@@ -9,6 +9,7 @@ import {
   E3QueryBoundary,
 } from "@/components/e3";
 import { layoutService } from "@/services";
+import type { Layout } from "@/types";
 
 export const Route = createFileRoute("/_shell/layouts/")({
   head: () => ({
@@ -28,11 +29,18 @@ export const Route = createFileRoute("/_shell/layouts/")({
   component: LayoutsPage,
 });
 
+function layoutZones(layout: Layout) {
+  return Array.isArray(layout.zones) ? layout.zones : [];
+}
+
 function LayoutsPage() {
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isPending, isError, refetch } = useQuery({
     queryKey: ["layouts"],
     queryFn: layoutService.list,
+    throwOnError: false,
   });
+
+  const layouts = Array.isArray(data) ? data : [];
 
   return (
     <div>
@@ -48,8 +56,8 @@ function LayoutsPage() {
         }
       />
 
-      <E3QueryBoundary isLoading={isLoading} isError={isError} refetch={() => void refetch()}>
-        {(data ?? []).length === 0 ? (
+      <E3QueryBoundary isLoading={isPending} isError={isError} refetch={() => void refetch()}>
+        {layouts.length === 0 ? (
           <E3EmptyState
             icon={LayoutTemplate}
             title="No layouts yet"
@@ -64,42 +72,45 @@ function LayoutsPage() {
           />
         ) : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {(data ?? []).map((l) => (
-              <Link
-                key={l.id}
-                to="/layouts/$id"
-                params={{ id: l.id }}
-                className="rounded-2xl border border-border bg-card p-4 transition-all hover:-translate-y-0.5 hover:border-e3-purple/40"
-              >
-                <div
-                  className="relative w-full overflow-hidden rounded-xl border border-border"
-                  style={{
-                    aspectRatio: l.orientation === "Portrait" ? "9 / 16" : "16 / 9",
-                    background: l.background,
-                  }}
+            {layouts.map((l) => {
+              const zones = layoutZones(l);
+              return (
+                <Link
+                  key={l.id}
+                  to="/layouts/$id"
+                  params={{ id: l.id }}
+                  className="rounded-2xl border border-border bg-card p-4 transition-all hover:-translate-y-0.5 hover:border-e3-purple/40"
                 >
-                  {l.zones.map((z) => (
-                    <div
-                      key={z.id}
-                      className="absolute grid place-items-center border border-white/10 text-[10px] uppercase tracking-widest text-muted-foreground"
-                      style={{
-                        left: `${z.x}%`,
-                        top: `${z.y}%`,
-                        width: `${z.width}%`,
-                        height: `${z.height}%`,
-                        background: z.background,
-                      }}
-                    >
-                      <span className="truncate px-1">{z.contentType}</span>
-                    </div>
-                  ))}
-                </div>
-                <h3 className="font-display mt-3 truncate text-base font-semibold">{l.name}</h3>
-                <p className="truncate text-xs text-muted-foreground">
-                  {l.preset} · {l.resolution} · {l.zones.length} zones · {l.usedByScreens} screens
-                </p>
-              </Link>
-            ))}
+                  <div
+                    className="relative w-full overflow-hidden rounded-xl border border-border"
+                    style={{
+                      aspectRatio: l.orientation === "Portrait" ? "9 / 16" : "16 / 9",
+                      background: l.background || "#19161A",
+                    }}
+                  >
+                    {zones.map((z, index) => (
+                      <div
+                        key={z.id || `zone-${index}`}
+                        className="absolute grid place-items-center border border-white/10 text-[10px] uppercase tracking-widest text-muted-foreground"
+                        style={{
+                          left: `${z.x ?? 0}%`,
+                          top: `${z.y ?? 0}%`,
+                          width: `${z.width ?? 100}%`,
+                          height: `${z.height ?? 100}%`,
+                          background: z.background,
+                        }}
+                      >
+                        <span className="truncate px-1">{z.contentType}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <h3 className="font-display mt-3 truncate text-base font-semibold">{l.name || "Untitled"}</h3>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {l.preset} · {l.resolution} · {zones.length} zones · {l.usedByScreens ?? 0} screens
+                  </p>
+                </Link>
+              );
+            })}
           </div>
         )}
       </E3QueryBoundary>

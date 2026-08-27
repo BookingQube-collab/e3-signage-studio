@@ -10,8 +10,8 @@ import java.time.Instant
 
 class ScheduleEngineTest {
     private fun schedule(
-        startAt: String = "2026-08-01T00:00:00Z",
-        endAt: String = "2026-09-30T20:59:00Z",
+        startAt: String? = "2026-08-01T00:00:00Z",
+        endAt: String? = "2026-09-30T20:59:00Z",
         startTime: String = "12:00",
         endTime: String = "22:00",
         days: List<Int> = listOf(0, 1, 2, 3, 4, 5, 6),
@@ -83,5 +83,19 @@ class ScheduleEngineTest {
         assertFalse(ScheduleEngine.isWindowOpen(schedule(days = listOf(0, 6)), tue))
         assertNull(ScheduleEngine.selectActive(listOf(schedule(days = listOf(0))), tue))
         assertNotNull(ScheduleEngine.selectActive(listOf(schedule(days = listOf(2))), tue))
+    }
+
+    @Test
+    fun nullDatesStayInWindow() {
+        val noon = Instant.parse("2026-08-25T09:00:00Z")
+        val morning = Instant.parse("2026-08-25T07:00:00Z")
+        val farFuture = Instant.parse("2028-01-01T09:00:00Z")
+        val evergreen = schedule(startAt = null, endAt = null, campaignId = "loop")
+        val blank = schedule(startAt = "", endAt = "", campaignId = "blank")
+        assertTrue(ScheduleEngine.isWindowOpen(evergreen, noon))
+        assertTrue(ScheduleEngine.isWindowOpen(evergreen, farFuture))
+        assertTrue(ScheduleEngine.isWindowOpen(blank, noon))
+        assertFalse(ScheduleEngine.isWindowOpen(evergreen, morning))
+        assertEquals("loop", ScheduleEngine.selectActive(listOf(evergreen), noon)?.campaignId)
     }
 }

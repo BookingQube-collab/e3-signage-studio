@@ -5,6 +5,9 @@ import {
   campaignLifecycleStatus,
   effectiveCampaignStatus,
   formatCampaignDateTime,
+  formatCampaignWindowLabel,
+  isDatedSchedule,
+  isEvergreenSchedule,
 } from "./campaign-window.ts";
 import { wallTimeToUtcMs } from "./zoned-time.ts";
 
@@ -62,4 +65,55 @@ test("formats start/end with hours and minutes in the campaign timezone", () => 
   assert.match(label, /Aug/);
   assert.match(label, /2026/);
   assert.match(label, /12:00/);
+});
+
+const evergreen = {
+  startDate: "",
+  endDate: "",
+  startTime: "12:00",
+  endTime: "22:00",
+  timezone: "Asia/Qatar",
+};
+
+test("null or empty dates are evergreen and in window", () => {
+  assert.equal(isEvergreenSchedule({ startDate: "", endDate: "" }), true);
+  assert.equal(isEvergreenSchedule({ startDate: "2026-08-26", endDate: "2026-08-26" }), false);
+  assert.equal(isDatedSchedule(window), true);
+  assert.equal(isDatedSchedule(evergreen), false);
+  assert.equal(campaignLifecycleStatus(evergreen, at("11:59")), "Active");
+  assert.equal(campaignLifecycleStatus(evergreen, at("23:00")), "Active");
+  assert.equal(
+    campaignLifecycleStatus(
+      { ...evergreen, startDate: null as unknown as string, endDate: null as unknown as string },
+      at("03:00"),
+    ),
+    "Active",
+  );
+  assert.equal(effectiveCampaignStatus("Active", evergreen, at("03:00")), "Active");
+  assert.equal(effectiveCampaignStatus("Scheduled", evergreen, at("03:00")), "Active");
+  assert.equal(formatCampaignWindowLabel(evergreen), "Ongoing");
+});
+
+test("missing dates are not expired or not-yet-started", () => {
+  assert.notEqual(campaignLifecycleStatus(evergreen, at("23:00")), "Ended");
+  assert.notEqual(campaignLifecycleStatus(evergreen, at("00:01")), "Scheduled");
+});
+
+test("start-only is open-ended after the start datetime", () => {
+  const openEnded = { ...window, endDate: "" };
+  assert.equal(campaignLifecycleStatus(openEnded, at("11:59")), "Scheduled");
+  assert.equal(campaignLifecycleStatus(openEnded, at("12:00")), "Active");
+  assert.equal(campaignLifecycleStatus(openEnded, wallTimeToUtcMs("2027-01-01", "00:00", "Asia/Qatar")), "Active");
+});
+
+test("listing helpers do not throw on missing schedule or bad timezone", () => {
+  assert.equal(isDatedSchedule(undefined), false);
+  assert.equal(isEvergreenSchedule(undefined), false);
+  assert.equal(campaignLifecycleStatus(undefined, at("12:00")), "Scheduled");
+  assert.equal(effectiveCampaignStatus("Active", undefined, at("12:00")), "Scheduled");
+  assert.equal(formatCampaignWindowLabel(undefined), "—");
+  assert.equal(Number.isFinite(wallTimeToUtcMs("2026-08-26", "12:00", "Qatar")), false);
+  assert.equal(Number.isFinite(wallTimeToUtcMs("not-a-date", "12:00", "Asia/Qatar")), false);
+  assert.equal(effectiveCampaignStatus("Active", { ...window, timezone: "Qatar" }, at("15:00")), "Scheduled");
+  assert.equal(formatCampaignDateTime("2026-08-26", "12:00", "Qatar"), "2026-08-26 12:00");
 });

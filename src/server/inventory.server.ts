@@ -526,6 +526,78 @@ export async function createLocation(
   return row;
 }
 
+export async function updateLocation(
+  accessToken: string,
+  id: string,
+  input: {
+    name: string;
+    shortName: string;
+    city: string;
+    type: LocationType;
+    status: LocationStatus;
+  },
+): Promise<LocationRecord> {
+  const auth = await requireCmsPermission(accessToken, "locations.view");
+  if (auth.profile.role !== "SUPER_ADMIN") {
+    throw new Error("Only a Super Admin can edit locations.");
+  }
+  const existing = await getLocation(accessToken, id);
+  if (!existing) throw new Error("Location not found.");
+  const client = getUserClient(accessToken);
+  const shortName = input.shortName.trim() || input.name.trim();
+  const { data, error } = await client
+    .from("locations")
+    .update({
+      name: input.name.trim(),
+      short_name: shortName.slice(0, 80),
+      city: input.city.trim() || "Doha",
+      type: input.type,
+      status: input.status,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("organization_id", auth.profile.organizationId)
+    .select("id, name, short_name, type, status, city, created_at")
+    .single();
+  throwIfError(error, "Could not update the location.");
+  const rows = await loadLocationRecords(client, auth.profile.organizationId, [data as LocRow]);
+  const row = rows[0];
+  if (!row) throw new Error("Location was updated but could not be loaded.");
+  return row;
+}
+
+export async function deleteLocation(accessToken: string, id: string): Promise<boolean> {
+  const auth = await requireCmsPermission(accessToken, "locations.view");
+  if (auth.profile.role !== "SUPER_ADMIN") {
+    throw new Error("Only a Super Admin can delete locations.");
+  }
+  const existing = await getLocation(accessToken, id);
+  if (!existing) throw new Error("Location not found.");
+  const client = getUserClient(accessToken);
+  const { count, error: countError } = await client
+    .from("screens")
+    .select("id", { count: "exact", head: true })
+    .eq("location_id", id)
+    .is("archived_at", null);
+  throwIfError(countError, "Could not check screens at this location.");
+  if ((count ?? 0) > 0) {
+    throw new Error("Unpair all screens at this location before deleting it.");
+  }
+  const { error: archivedError } = await client
+    .from("screens")
+    .delete()
+    .eq("location_id", id)
+    .not("archived_at", "is", null);
+  throwIfError(archivedError, "Could not remove unpaired screens at this location.");
+  const { error } = await client
+    .from("locations")
+    .delete()
+    .eq("id", id)
+    .eq("organization_id", auth.profile.organizationId);
+  throwIfError(error, "Could not delete the location.");
+  return true;
+}
+
 async function listScreenRows(accessToken: string, locationId?: string): Promise<ScreenRecord[]> {
   const auth = await requireCmsPermission(accessToken, "screens.view");
   await maybeSeed(auth);

@@ -1,4 +1,4 @@
-import { getLayoutFn, listLayoutsFn, saveLayoutFn } from "@/lib/content-functions";
+import { archiveLayoutFn, getLayoutFn, listLayoutsFn, saveLayoutFn } from "@/lib/content-functions";
 import { getBrowserAccessToken } from "@/lib/supabase";
 import type { Layout } from "@/types";
 import {
@@ -16,21 +16,32 @@ async function accessToken(): Promise<string> {
   return token;
 }
 
+function safeToUiLayout(row: Parameters<typeof toUiLayout>[0]) {
+  try {
+    return toUiLayout(row);
+  } catch {
+    return null;
+  }
+}
+
 export const liveLayoutService: LayoutService = {
   list: async () => {
     const rows = await listLayoutsFn({ data: { accessToken: await accessToken() } });
-    return rows.map(toUiLayout);
+    return (Array.isArray(rows) ? rows : []).flatMap((row) => {
+      const layout = safeToUiLayout(row);
+      return layout ? [layout] : [];
+    });
   },
   get: async (id) => {
     const row = await getLayoutFn({ data: { accessToken: await accessToken(), id } });
-    return row ? toUiLayout(row) : null;
+    return row ? safeToUiLayout(row) : null;
   },
   save: async (layout: Layout) => {
     const preset = LAYOUT_PRESET_FROM_UI[layout.preset];
     const orientation = ORIENTATION_FROM_UI[layout.orientation];
     if (!preset) throw new Error("Invalid layout preset.");
     if (!orientation) throw new Error("Invalid orientation.");
-    const zones = layout.zones.map((zone) => {
+    const zones = (Array.isArray(layout.zones) ? layout.zones : []).map((zone) => {
       const type = ZONE_TYPE_FROM_UI[zone.contentType];
       const fit = FIT_FROM_UI[zone.fit];
       if (!type) throw new Error(`Unsupported zone type: ${zone.contentType}`);
@@ -61,6 +72,9 @@ export const liveLayoutService: LayoutService = {
         zones,
       },
     });
-    return toUiLayout(row);
+    const saved = safeToUiLayout(row);
+    if (!saved) throw new Error("Could not read the saved layout.");
+    return saved;
   },
+  remove: async (id) => archiveLayoutFn({ data: { accessToken: await accessToken(), id } }),
 };

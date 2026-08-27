@@ -1,4 +1,4 @@
-import { getPlaylistFn, listPlaylistsFn, savePlaylistFn } from "@/lib/content-functions";
+import { archivePlaylistFn, getPlaylistFn, listPlaylistsFn, savePlaylistFn } from "@/lib/content-functions";
 import { getBrowserAccessToken } from "@/lib/supabase";
 import type { Playlist } from "@/types";
 import { PLAYLIST_STATUS_FROM_UI, TRANSITION_FROM_UI, toUiPlaylist } from "./playlist-map";
@@ -13,7 +13,7 @@ async function accessToken(): Promise<string> {
 export const livePlaylistService: PlaylistService = {
   list: async () => {
     const rows = await listPlaylistsFn({ data: { accessToken: await accessToken() } });
-    return rows.map(toUiPlaylist);
+    return (Array.isArray(rows) ? rows : []).map((row) => toUiPlaylist(row));
   },
   get: async (id) => {
     const row = await getPlaylistFn({ data: { accessToken: await accessToken(), id } });
@@ -22,7 +22,7 @@ export const livePlaylistService: PlaylistService = {
   save: async (playlist: Playlist) => {
     const status = PLAYLIST_STATUS_FROM_UI[playlist.status];
     if (!status) throw new Error("Invalid playlist status.");
-    const items = playlist.items.map((item) => {
+    const items = (playlist.items ?? []).map((item) => {
       const transition = TRANSITION_FROM_UI[item.transition];
       if (!transition) throw new Error(`Unsupported transition: ${item.transition}`);
       return {
@@ -43,4 +43,5 @@ export const livePlaylistService: PlaylistService = {
     });
     return toUiPlaylist(row);
   },
+  remove: async (id) => archivePlaylistFn({ data: { accessToken: await accessToken(), id } }),
 };

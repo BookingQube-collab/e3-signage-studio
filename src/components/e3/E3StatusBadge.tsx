@@ -35,10 +35,12 @@ const statusToneMap: Record<string, StatusTone> = {
   archived: "neutral",
   expired: "neutral",
   ended: "neutral",
+  ongoing: "brand",
 };
 
 export function statusTone(status: string): StatusTone {
-  return statusToneMap[status.toLowerCase()] ?? "neutral";
+  if (!status) return "neutral";
+  return statusToneMap[String(status).toLowerCase()] ?? "neutral";
 }
 
 export function E3StatusBadge({

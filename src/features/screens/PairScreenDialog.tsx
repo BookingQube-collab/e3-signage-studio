@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -19,16 +20,19 @@ import type { Orientation } from "@/types";
 export function PairScreenDialog({
   open,
   onOpenChange,
+  defaultLocationId,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  defaultLocationId?: string;
 }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [step, setStep] = useState<1 | 2>(1);
   const [code, setCode] = useState("");
   const [form, setForm] = useState({
     name: "",
-    locationId: "",
+    locationId: defaultLocationId ?? "",
     screenType: "Smart TV",
     orientation: "Landscape" as Orientation,
     resolution: "1920 × 1080",
@@ -46,12 +50,18 @@ export function PairScreenDialog({
   const pair = useMutation({
     mutationFn: screenService.pair,
     onSuccess: (screen) => {
+      qc.setQueryData(["screen", screen.id], screen);
+      void qc.invalidateQueries({ queryKey: ["screen", screen.id] });
       void qc.invalidateQueries({ queryKey: ["screens"] });
+      void qc.invalidateQueries({ queryKey: ["location", screen.locationId] });
       void qc.invalidateQueries({ queryKey: ["locations"] });
       void qc.invalidateQueries({ queryKey: ["dashboard"] });
       toast.success(`${screen.name} paired`);
       reset();
       onOpenChange(false);
+      if (!defaultLocationId) {
+        void navigate({ to: "/screens/$id", params: { id: screen.id } });
+      }
     },
     onError: (err: Error) => {
       toast.error(err.message || "Could not pair screen");
@@ -63,13 +73,23 @@ export function PairScreenDialog({
     setCode("");
     setForm({
       name: "",
-      locationId: "",
+      locationId: defaultLocationId ?? "",
       screenType: "Smart TV",
       orientation: "Landscape",
       resolution: "1920 × 1080",
       groupIds: [],
     });
   }
+
+  useEffect(() => {
+    if (open && defaultLocationId) {
+      setForm((current) =>
+        current.locationId === defaultLocationId
+          ? current
+          : { ...current, locationId: defaultLocationId },
+      );
+    }
+  }, [open, defaultLocationId]);
 
   const codeDigits = code.replace(/\D/g, "").slice(0, 6);
   const codeValid = codeDigits.length === 6;
@@ -134,8 +154,8 @@ export function PairScreenDialog({
               className="h-12 text-center text-lg tracking-[0.3em]"
             />
             <p className="text-xs text-muted-foreground">
-              Install the E3 player pointed at {publicCmsUrl}, then enter the 6-digit code
-              shown on the TV.
+              Install the E3 player pointed at {publicCmsUrl}, then enter the 6-digit code shown on
+              the TV.
             </p>
           </div>
         </div>
@@ -155,6 +175,7 @@ export function PairScreenDialog({
             <Select
               value={form.locationId}
               onValueChange={(v) => setForm({ ...form, locationId: v })}
+              disabled={Boolean(defaultLocationId)}
             >
               <SelectTrigger id="scr-loc">
                 <SelectValue placeholder="Select a location" />

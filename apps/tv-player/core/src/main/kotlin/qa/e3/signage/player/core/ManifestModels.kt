@@ -84,8 +84,8 @@ data class ManifestPlaylist(
 @Serializable
 data class ManifestSchedule(
     val campaignId: String,
-    val startAt: String,
-    val endAt: String,
+    val startAt: String? = null,
+    val endAt: String? = null,
     val startTime: String,
     val endTime: String,
     val daysOfWeek: List<Int> = emptyList(),

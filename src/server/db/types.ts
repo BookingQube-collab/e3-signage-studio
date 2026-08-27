@@ -222,8 +222,8 @@ export type CampaignTargetRow = {
 export type ScheduleRow = {
   id: string;
   campaign_id: string;
-  start_date: string;
-  end_date: string;
+  start_date: string | null;
+  end_date: string | null;
   start_time: string;
   end_time: string;
   days_of_week: number[];

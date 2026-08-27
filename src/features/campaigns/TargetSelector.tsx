@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { E3Button, E3Card, E3CardBody, E3CardHeader } from "@/components/e3";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -10,14 +10,25 @@ import { locationService, screenGroupService, screenService } from "@/services";
 export function TargetSelector({
   selected,
   onChange,
+  focusLocationId,
 }: {
   selected: string[];
   onChange: (screenIds: string[]) => void;
+  focusLocationId?: string;
 }) {
   const locations = useQuery({ queryKey: ["locations"], queryFn: locationService.list });
   const screens = useQuery({ queryKey: ["screens"], queryFn: screenService.list });
   const groups = useQuery({ queryKey: ["screen-groups"], queryFn: screenGroupService.list });
-  const [expanded, setExpanded] = useState<string[]>([]);
+  const [expanded, setExpanded] = useState<string[]>(() =>
+    focusLocationId ? [focusLocationId] : [],
+  );
+
+  useEffect(() => {
+    if (!focusLocationId) return;
+    setExpanded((current) =>
+      current.includes(focusLocationId) ? current : [...current, focusLocationId],
+    );
+  }, [focusLocationId]);
 
   const allScreens = screens.data ?? [];
 
@@ -27,7 +38,9 @@ export function TargetSelector({
   const toggleLocation = (locationId: string) => {
     const ids = allScreens.filter((s) => s.locationId === locationId).map((s) => s.id);
     const allOn = ids.every((id) => selected.includes(id));
-    onChange(allOn ? selected.filter((id) => !ids.includes(id)) : [...new Set([...selected, ...ids])]);
+    onChange(
+      allOn ? selected.filter((id) => !ids.includes(id)) : [...new Set([...selected, ...ids])],
+    );
   };
 
   return (
@@ -38,7 +51,11 @@ export function TargetSelector({
           description={`${selected.length} of ${allScreens.length} screens selected`}
           action={
             <div className="flex gap-2">
-              <E3Button size="sm" variant="outline" onClick={() => onChange(allScreens.map((s) => s.id))}>
+              <E3Button
+                size="sm"
+                variant="outline"
+                onClick={() => onChange(allScreens.map((s) => s.id))}
+              >
                 All screens
               </E3Button>
               <E3Button size="sm" variant="ghost" onClick={() => onChange([])}>
@@ -61,7 +78,10 @@ export function TargetSelector({
                     onCheckedChange={() => toggleLocation(loc.id)}
                     aria-label={`Select all screens at ${loc.name}`}
                   />
-                  <label htmlFor={`loc-${loc.id}`} className="min-w-0 flex-1 truncate text-sm font-medium">
+                  <label
+                    htmlFor={`loc-${loc.id}`}
+                    className="min-w-0 flex-1 truncate text-sm font-medium"
+                  >
                     {loc.name}
                   </label>
                   <span className="shrink-0 text-xs text-muted-foreground">
@@ -78,7 +98,9 @@ export function TargetSelector({
                     }
                     className="rounded-lg p-1 text-muted-foreground hover:bg-accent"
                   >
-                    <ChevronDown className={cn("size-4 transition-transform", isOpen && "rotate-180")} />
+                    <ChevronDown
+                      className={cn("size-4 transition-transform", isOpen && "rotate-180")}
+                    />
                   </button>
                 </div>
                 {isOpen ? (

@@ -695,8 +695,8 @@ async function buildManifest(
       const endTime = uiTime(asString(row["end_time"], "23:59"));
       schedules.push({
         campaignId,
-        startAt: wallTimeToIso(startDate, startTime, tz),
-        endAt: wallTimeToIso(endDate, endTime, tz),
+        startAt: startDate ? wallTimeToIso(startDate, startTime, tz) : null,
+        endAt: endDate ? wallTimeToIso(endDate, endTime, tz) : null,
         startTime,
         endTime,
         daysOfWeek: asDayNums(row["days_of_week"]),

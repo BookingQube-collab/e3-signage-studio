@@ -19,6 +19,8 @@ export const apiServices: AppServices = {
     list: () => notConfigured(),
     get: () => notConfigured(),
     create: () => notConfigured(),
+    update: () => notConfigured(),
+    remove: () => notConfigured(),
   },
   screenService: {
     list: () => notConfigured(),
@@ -57,11 +59,13 @@ export const apiServices: AppServices = {
     list: () => notConfigured(),
     get: () => notConfigured(),
     save: () => notConfigured(),
+    remove: () => notConfigured(),
   },
   layoutService: {
     list: () => notConfigured(),
     get: () => notConfigured(),
     save: () => notConfigured(),
+    remove: () => notConfigured(),
   },
   campaignService: {
     list: () => notConfigured(),

@@ -24,7 +24,9 @@ import { loadScopedContentUsage } from "./scoped-content.server";
 import { getUserClient } from "./supabase.server";
 
 const LAYOUT_SELECT =
-  "id, organization_id, name, preset, orientation, width_px, height_px, background, device_json, archived_at, created_at, updated_at, created_by";
+  "id, organization_id, name, preset, orientation, width_px, height_px, background, archived_at, created_at, updated_at, created_by";
+const LAYOUT_SELECT_NO_CREATED_BY =
+  "id, organization_id, name, preset, orientation, width_px, height_px, background, archived_at, created_at, updated_at";
 const ZONE_SELECT =
   "id, layout_id, name, type, x_percent, y_percent, width_percent, height_percent, content_ref, fit, background, duration_seconds, sort_order";
 
@@ -44,6 +46,14 @@ export type LayoutZoneInput = {
 
 function throwIfError(error: { message: string } | null, fallback: string): void {
   if (error) throw new Error(error.message || fallback);
+}
+
+function isUnknownColumn(error: { message: string } | null, column: string): boolean {
+  const msg = (error?.message ?? "").toLowerCase();
+  return (
+    msg.includes(column.toLowerCase()) &&
+    (msg.includes("does not exist") || msg.includes("schema cache") || msg.includes("could not find"))
+  );
 }
 
 function asString(value: unknown, fallback = ""): string {
@@ -123,11 +133,10 @@ async function toRecords(
 ): Promise<LayoutRecord[]> {
   if (rows.length === 0) return [];
   const ids = rows.map((row) => asString(row["id"]));
-  const [{ data: zoneRows, error: zoneError }, { data: itemRows }] = await Promise.all([
+  const [{ data: zoneRows }, { data: itemRows }] = await Promise.all([
     client.from("layout_zones").select(ZONE_SELECT).in("layout_id", ids).order("sort_order"),
     client.from("playlist_items").select("layout_id").in("layout_id", ids),
   ]);
-  throwIfError(zoneError, "Could not load layout zones.");
 
   const refs = (zoneRows ?? []).map((row) => asNullableString((row as { content_ref: string | null }).content_ref));
   const resolved = await resolveContentRefs(client, organizationId, refs);
@@ -195,15 +204,23 @@ async function toRecords(
 export async function listLayouts(accessToken: string): Promise<LayoutRecord[]> {
   const auth = await requireCmsPermission(accessToken, "layouts.view");
   const client = getUserClient(accessToken);
-  const { data, error } = await client
+  const first = await client
     .from("layouts")
     .select(LAYOUT_SELECT)
     .eq("organization_id", auth.profile.organizationId)
     .is("archived_at", null)
     .order("updated_at", { ascending: false });
-  throwIfError(error, "Could not load layouts.");
+  const retry = isUnknownColumn(first.error, "created_by")
+    ? await client
+        .from("layouts")
+        .select(LAYOUT_SELECT_NO_CREATED_BY)
+        .eq("organization_id", auth.profile.organizationId)
+        .is("archived_at", null)
+        .order("updated_at", { ascending: false })
+    : first;
+  throwIfError(retry.error, "Could not load layouts.");
   const usage = await loadScopedContentUsage(client, auth.profile);
-  const rows = ((data ?? []) as Array<Record<string, unknown>>).filter((row) =>
+  const rows = ((retry.data ?? []) as Array<Record<string, unknown>>).filter((row) =>
     contentVisibleToProfile(
       auth.profile,
       asNullableString(row["created_by"]),
@@ -217,16 +234,26 @@ export async function getLayout(accessToken: string, id: string): Promise<Layout
   const auth = await requireCmsPermission(accessToken, "layouts.view");
   if (!isUuid(id)) return null;
   const client = getUserClient(accessToken);
-  const { data, error } = await client
+  const first = await client
     .from("layouts")
     .select(LAYOUT_SELECT)
     .eq("id", id)
     .eq("organization_id", auth.profile.organizationId)
+    .is("archived_at", null)
     .maybeSingle();
-  throwIfError(error, "Could not load layout.");
-  if (!data) return null;
+  const retry = isUnknownColumn(first.error, "created_by")
+    ? await client
+        .from("layouts")
+        .select(LAYOUT_SELECT_NO_CREATED_BY)
+        .eq("id", id)
+        .eq("organization_id", auth.profile.organizationId)
+        .is("archived_at", null)
+        .maybeSingle()
+    : first;
+  throwIfError(retry.error, "Could not load layout.");
+  if (!retry.data) return null;
   const usage = await loadScopedContentUsage(client, auth.profile);
-  const row = data as Record<string, unknown>;
+  const row = retry.data as Record<string, unknown>;
   if (
     !contentVisibleToProfile(
       auth.profile,
@@ -351,9 +378,54 @@ export async function saveLayout(
     })),
   });
   const { error: jsonError } = await client.from("layouts").update({ device_json: deviceJson }).eq("id", layoutId);
-  throwIfError(jsonError, "Could not save layout pixel JSON.");
+  if (jsonError && !isUnknownColumn(jsonError, "device_json")) {
+    throwIfError(jsonError, "Could not save layout pixel JSON.");
+  }
 
   const saved = await getLayout(accessToken, layoutId);
   if (!saved) throw new Error("Layout not found.");
   return saved;
+}
+
+export async function archiveLayout(accessToken: string, id: string): Promise<boolean> {
+  if (!isUuid(id)) throw new Error("Layout not found.");
+  const existing = await getLayout(accessToken, id);
+  if (!existing) throw new Error("Layout not found.");
+  const auth = await requireCmsPermission(accessToken, "layouts.manage");
+  const client = getUserClient(accessToken);
+  const { data: row, error: loadError } = await client
+    .from("layouts")
+    .select("id, created_by")
+    .eq("id", id)
+    .eq("organization_id", auth.profile.organizationId)
+    .maybeSingle();
+  throwIfError(loadError, "Could not load layout.");
+  if (!row) throw new Error("Layout not found.");
+  assertCanMutateOwnedContent(
+    auth.profile,
+    asNullableString((row as { created_by: string | null }).created_by),
+  );
+
+  const [{ count: campaignCount, error: campaignError }, { count: itemCount, error: itemError }] =
+    await Promise.all([
+      client
+        .from("campaigns")
+        .select("id", { count: "exact", head: true })
+        .eq("layout_id", id)
+        .is("archived_at", null),
+      client.from("playlist_items").select("id", { count: "exact", head: true }).eq("layout_id", id),
+    ]);
+  throwIfError(campaignError, "Could not check campaigns using this layout.");
+  throwIfError(itemError, "Could not check playlists using this layout.");
+  if ((campaignCount ?? 0) > 0 || (itemCount ?? 0) > 0) {
+    throw new Error("Remove this layout from campaigns and playlists before deleting it.");
+  }
+
+  const { error } = await client
+    .from("layouts")
+    .update({ archived_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("organization_id", auth.profile.organizationId);
+  throwIfError(error, "Could not delete layout.");
+  return true;
 }

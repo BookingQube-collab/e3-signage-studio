@@ -115,3 +115,17 @@ export const saveLayoutFn = createServerFn({ method: "POST" })
     const { accessToken, ...input } = data;
     return saveLayout(accessToken, input);
   });
+
+export const archivePlaylistFn = createServerFn({ method: "POST" })
+  .validator(accessTokenSchema.extend({ id: z.string().uuid() }))
+  .handler(async ({ data }): Promise<boolean> => {
+    const { archivePlaylist } = await import("@/server/playlists.server");
+    return archivePlaylist(data.accessToken, data.id);
+  });
+
+export const archiveLayoutFn = createServerFn({ method: "POST" })
+  .validator(accessTokenSchema.extend({ id: z.string().uuid() }))
+  .handler(async ({ data }): Promise<boolean> => {
+    const { archiveLayout } = await import("@/server/layouts.server");
+    return archiveLayout(data.accessToken, data.id);
+  });

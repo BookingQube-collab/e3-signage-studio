@@ -35,7 +35,7 @@ function toWriteInput(campaign: Campaign) {
 export const liveCampaignService: CampaignService = {
   list: async () => {
     const rows = await listCampaignsFn({ data: { accessToken: await accessToken() } });
-    return rows.map(toUiCampaign);
+    return (Array.isArray(rows) ? rows : []).map(toUiCampaign);
   },
   get: async (id) => {
     const row = await getCampaignFn({ data: { accessToken: await accessToken(), id } });

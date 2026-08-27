@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, getRouteApi } from "@tanstack/react-router";
 import { Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -9,6 +9,7 @@ import {
   E3Card,
   E3CardBody,
   E3CardHeader,
+  E3Modal,
   E3PageHeader,
 } from "@/components/e3";
 import { Input } from "@/components/ui/input";
@@ -21,6 +22,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { hasPermission } from "@/lib/rbac";
+import { isUuid } from "@/services/inventory-map";
 import { layoutService, mediaService } from "@/services";
 import { MediaPicker } from "@/features/media/MediaPicker";
 import type { FitMode, Layout, LayoutPreset, LayoutZone, Orientation, ZoneContentType } from "@/types";
@@ -117,11 +120,26 @@ export function presetZones(preset: LayoutPreset): LayoutZone[] {
   }
 }
 
+function selectValue<T extends string>(value: string | null | undefined, allowed: readonly T[], fallback: T): T {
+  return allowed.includes(value as T) ? (value as T) : fallback;
+}
+
+const shellRoute = getRouteApi("/_shell");
+
 export function LayoutBuilder({ initial }: { initial: Layout }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const [layout, setLayout] = useState<Layout>(initial);
-  const [selectedId, setSelectedId] = useState<string | null>(initial.zones[0]?.id ?? null);
+  const { auth } = shellRoute.useRouteContext();
+  const canManage = Boolean(auth?.ok && hasPermission(auth.profile.role, "layouts.manage"));
+  const [layout, setLayout] = useState<Layout>({
+    ...initial,
+    zones: Array.isArray(initial.zones) ? initial.zones : [],
+  });
+  const [selectedId, setSelectedId] = useState<string | null>(
+    Array.isArray(initial.zones) ? (initial.zones[0]?.id ?? null) : null,
+  );
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const savedLayout = isUuid(initial.id);
 
   const mediaQuery = useQuery({ queryKey: ["media"], queryFn: mediaService.list });
   const foldersQuery = useQuery({ queryKey: ["media-folders"], queryFn: mediaService.listFolders });
@@ -139,10 +157,25 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
     },
   });
 
-  const selected = layout.zones.find((z) => z.id === selectedId) ?? null;
+  const remove = useMutation({
+    mutationFn: () => layoutService.remove(layout.id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["layouts"] });
+      void qc.invalidateQueries({ queryKey: ["layout"] });
+      toast.success(`${layout.name || "Layout"} deleted`);
+      setDeleteOpen(false);
+      void navigate({ to: "/layouts" });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Could not delete layout.");
+    },
+  });
+
+  const zones = Array.isArray(layout.zones) ? layout.zones : [];
+  const selected = zones.find((z) => z.id === selectedId) ?? null;
 
   function patchZone(id: string, patch: Partial<LayoutZone>) {
-    setLayout({ ...layout, zones: layout.zones.map((z) => (z.id === id ? { ...z, ...patch } : z)) });
+    setLayout({ ...layout, zones: zones.map((z) => (z.id === id ? { ...z, ...patch } : z)) });
   }
 
   const portrait = layout.orientation === "Portrait";
@@ -154,6 +187,11 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
         description={`${layout.preset} · ${layout.orientation} · ${layout.resolution}`}
         actions={
           <>
+            {savedLayout && canManage ? (
+              <E3Button variant="outline" disabled={save.isPending || remove.isPending} onClick={() => setDeleteOpen(true)}>
+                <Trash2 /> Delete
+              </E3Button>
+            ) : null}
             <E3Button variant="outline" onClick={() => toast.info("Preview is UI-only")}>
               Preview
             </E3Button>
@@ -212,8 +250,8 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
                   size="sm"
                   variant="outline"
                   onClick={() => {
-                    const z = zone(`z${Date.now()}`, `Zone ${layout.zones.length + 1}`, 10, 10, 40, 30);
-                    setLayout({ ...layout, preset: "Custom", zones: [...layout.zones, z] });
+                    const z = zone(`z${Date.now()}`, `Zone ${zones.length + 1}`, 10, 10, 40, 30);
+                    setLayout({ ...layout, preset: "Custom", zones: [...zones, z] });
                     setSelectedId(z.id);
                   }}
                 >
@@ -232,7 +270,7 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
                   background: layout.background,
                 }}
               >
-                {layout.zones.map((z) => (
+                {zones.map((z) => (
                   <button
                     key={z.id}
                     type="button"
@@ -391,7 +429,7 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
                   <div className="space-y-2">
                     <Label htmlFor="z-type">Content type</Label>
                     <Select
-                      value={selected.contentType}
+                      value={selectValue(selected.contentType, ZONE_TYPES, "Image")}
                       onValueChange={(v) =>
                         patchZone(selected.id, { contentType: v as ZoneContentType })
                       }
@@ -411,7 +449,7 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
                   <div className="space-y-2">
                     <Label htmlFor="z-content">Content</Label>
                     <Select
-                      value={selected.contentRef ?? "none"}
+                      value={selected.contentRef && selected.contentRef.length > 0 ? selected.contentRef : "none"}
                       onValueChange={(v) =>
                         patchZone(selected.id, { contentRef: v === "none" ? null : v })
                       }
@@ -421,7 +459,9 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">No content</SelectItem>
-                        {(mediaQuery.data ?? []).map((m) => (
+                        {(mediaQuery.data ?? [])
+                          .filter((m) => Boolean(m.filename))
+                          .map((m) => (
                           <SelectItem key={m.id} value={m.filename}>
                             {m.folderName ? `${m.folderName} / ${m.filename}` : m.filename}
                           </SelectItem>
@@ -433,7 +473,7 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
                     <div className="space-y-2">
                       <Label htmlFor="z-fit">Fit mode</Label>
                       <Select
-                        value={selected.fit}
+                        value={selectValue(selected.fit, FIT_MODES, "Contain")}
                         onValueChange={(v) => patchZone(selected.id, { fit: v as FitMode })}
                       >
                         <SelectTrigger id="z-fit">
@@ -478,7 +518,7 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
                       setLayout({
                         ...layout,
                         preset: "Custom",
-                        zones: layout.zones.filter((z) => z.id !== selected.id),
+                        zones: zones.filter((z) => z.id !== selected.id),
                       });
                       setSelectedId(null);
                     }}
@@ -491,6 +531,26 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
           </E3Card>
         </div>
       </div>
+
+      <E3Modal
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          if (!open && remove.isPending) return;
+          setDeleteOpen(open);
+        }}
+        title={`Delete ${layout.name || "this layout"}?`}
+        description="Remove this layout from campaigns and playlists first. This cannot be undone."
+        footer={
+          <>
+            <E3Button variant="outline" disabled={remove.isPending} onClick={() => setDeleteOpen(false)}>
+              Cancel
+            </E3Button>
+            <E3Button variant="danger" loading={remove.isPending} onClick={() => remove.mutate()}>
+              Delete layout
+            </E3Button>
+          </>
+        }
+      />
     </div>
   );
 }

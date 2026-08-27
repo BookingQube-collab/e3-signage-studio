@@ -42,12 +42,15 @@ export const liveUserService: UserService = {
   },
   save: async (user) => {
     const role = ROLE_FROM_UI[user.role];
+    const status =
+      user.status === "Disabled" ? "DISABLED" : user.status === "Invited" ? "INVITED" : "ACTIVE";
     const row = await updateUserFn({
       data: {
         accessToken: await accessToken(),
         userId: user.id,
         role,
         locationIds: uuidLocationIds(user.locationIds),
+        status,
       },
     });
     return toUiUser(row);

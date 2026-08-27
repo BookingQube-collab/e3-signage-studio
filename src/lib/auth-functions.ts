@@ -1,13 +1,16 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-import { USER_ROLES } from "@e3/shared-types";
+import { USER_ROLES, USER_STATUSES } from "@e3/shared-types";
 
 import type { AuthSessionResult, CmsUserRow, LocationOption } from "@/lib/auth-types";
 import { usernameError } from "@/lib/user-credentials";
 
 function roleEnum() {
   return z.enum(USER_ROLES);
+}
+function statusEnum() {
+  return z.enum(USER_STATUSES);
 }
 
 export const persistSessionFn = createServerFn({ method: "POST" })
@@ -104,9 +107,11 @@ export const updateUserFn = createServerFn({ method: "POST" })
       userId: z.string().uuid(),
       role: roleEnum(),
       locationIds: z.array(z.string().uuid()),
+      status: statusEnum().optional(),
     }),
   )
   .handler(async ({ data }) => {
     const { updateCmsUser } = await import("@/server/auth.server");
-    return updateCmsUser(data);
+    const { status, ...rest } = data;
+    return status ? updateCmsUser({ ...rest, status }) : updateCmsUser(rest);
   });

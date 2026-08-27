@@ -28,10 +28,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PairScreenDialog } from "@/features/screens/PairScreenDialog";
+import { ScreenRowMenu } from "@/features/screens/ScreenRowMenu";
 import { cn } from "@/lib/utils";
 import { locationService, screenGroupService, screenService } from "@/services";
 import { ADMIN_MONITORING_REFETCH_MS } from "@/lib/monitoring";
 import { useLiveMonitoring } from "@/lib/use-live-monitoring";
+import { hasPermission } from "@/lib/rbac";
 import type { Screen } from "@/types";
 
 export const Route = createFileRoute("/_shell/screens/")({
@@ -54,7 +56,9 @@ export const Route = createFileRoute("/_shell/screens/")({
 
 function ScreensPage() {
   const navigate = useNavigate();
+  const { auth } = Route.useRouteContext();
   const qc = useQueryClient();
+  const canManageScreens = Boolean(auth?.ok && hasPermission(auth.profile.role, "screens.manage"));
   const [view, setView] = useState<"table" | "grid">("table");
   const [pairOpen, setPairOpen] = useState(false);
   const [groupsOpen, setGroupsOpen] = useState(false);
@@ -137,6 +141,16 @@ function ScreensPage() {
       header: "Last seen",
       cell: (s) => <span className="text-muted-foreground">{s.lastSeen}</span>,
     },
+    ...(canManageScreens
+      ? ([
+          {
+            key: "actions",
+            header: "Actions",
+            className: "w-14 text-right",
+            cell: (s: Screen) => <ScreenRowMenu screen={s} />,
+          },
+        ] as E3Column<Screen>[])
+      : []),
   ];
 
   return (
@@ -271,7 +285,11 @@ function ScreensPage() {
         ) : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {rows.map((s) => (
-              <E3ScreenCard key={s.id} screen={s} />
+              <E3ScreenCard
+                key={s.id}
+                screen={s}
+                overflow={canManageScreens ? <ScreenRowMenu screen={s} /> : undefined}
+              />
             ))}
           </div>
         )}

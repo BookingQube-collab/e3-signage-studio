@@ -11,6 +11,8 @@ import {
   E3Table,
   type E3Column,
 } from "@/components/e3";
+import { PlaylistRowMenu } from "@/features/playlists/PlaylistRowMenu";
+import { hasPermission } from "@/lib/rbac";
 import { playlistService } from "@/services";
 import type { Playlist } from "@/types";
 
@@ -32,31 +34,54 @@ export const Route = createFileRoute("/_shell/playlists/")({
   component: PlaylistsPage,
 });
 
+function playlistItems(playlist: Playlist) {
+  return Array.isArray(playlist.items) ? playlist.items : [];
+}
+
+function playlistDurationLabel(playlist: Playlist) {
+  const total = playlistItems(playlist).reduce((sum, item) => sum + (item.durationSec || 0), 0);
+  return `${Math.floor(total / 60)}m ${total % 60}s`;
+}
+
 function PlaylistsPage() {
   const navigate = useNavigate();
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { auth } = Route.useRouteContext();
+  const canManage = Boolean(auth?.ok && hasPermission(auth.profile.role, "playlists.manage"));
+  const { data, isPending, isError, refetch } = useQuery({
     queryKey: ["playlists"],
     queryFn: playlistService.list,
+    throwOnError: false,
   });
 
   const columns: E3Column<Playlist>[] = [
     {
       key: "name",
       header: "Playlist",
-      cell: (p) => <span className="font-medium">{p.name}</span>,
+      cell: (p) => <span className="font-medium">{p.name || "Untitled"}</span>,
     },
-    { key: "items", header: "Items", cell: (p) => p.items.length },
+    { key: "items", header: "Items", cell: (p) => playlistItems(p).length },
     {
       key: "duration",
       header: "Duration",
-      cell: (p) => {
-        const total = p.items.reduce((s, i) => s + i.durationSec, 0);
-        return `${Math.floor(total / 60)}m ${total % 60}s`;
-      },
+      cell: (p) => playlistDurationLabel(p),
     },
-    { key: "screens", header: "Used by", cell: (p) => `${p.usedByScreens} screens` },
-    { key: "modified", header: "Last modified", cell: (p) => p.modifiedAt },
-    { key: "status", header: "Status", cell: (p) => <E3StatusBadge status={p.status} /> },
+    { key: "screens", header: "Used by", cell: (p) => `${p.usedByScreens ?? 0} screens` },
+    { key: "modified", header: "Last modified", cell: (p) => p.modifiedAt || "—" },
+    {
+      key: "status",
+      header: "Status",
+      cell: (p) => <E3StatusBadge status={p.status || "Draft"} />,
+    },
+    ...(canManage
+      ? [
+          {
+            key: "actions",
+            header: "Actions",
+            className: "w-14 text-right",
+            cell: (p: Playlist) => <PlaylistRowMenu playlist={p} />,
+          } satisfies E3Column<Playlist>,
+        ]
+      : []),
   ];
 
   return (
@@ -65,26 +90,30 @@ function PlaylistsPage() {
         title="Playlists"
         description="Sequenced content loops assigned to screens and campaigns."
         actions={
-          <E3Button variant="primary" asChild>
-            <Link to="/playlists/new">
-              <Plus /> New playlist
-            </Link>
-          </E3Button>
+          canManage ? (
+            <E3Button variant="primary" asChild>
+              <Link to="/playlists/new">
+                <Plus /> New playlist
+              </Link>
+            </E3Button>
+          ) : null
         }
       />
 
-      <E3QueryBoundary isLoading={isLoading} isError={isError} refetch={() => void refetch()}>
+      <E3QueryBoundary isLoading={isPending} isError={isError} refetch={() => void refetch()}>
         {(data ?? []).length === 0 ? (
           <E3EmptyState
             icon={ListVideo}
             title="No playlists yet"
             description="Create a playlist to sequence media for your screens."
             action={
-              <E3Button variant="primary" asChild>
-                <Link to="/playlists/new">
-                  <Plus /> New playlist
-                </Link>
-              </E3Button>
+              canManage ? (
+                <E3Button variant="primary" asChild>
+                  <Link to="/playlists/new">
+                    <Plus /> New playlist
+                  </Link>
+                </E3Button>
+              ) : undefined
             }
           />
         ) : (

@@ -261,8 +261,8 @@ export const layoutDtoSchema = z.object({
 export const scheduleDtoSchema = z.object({
   id: uuidSchema,
   campaignId: uuidSchema,
-  startDate: isoDateSchema,
-  endDate: isoDateSchema,
+  startDate: isoDateSchema.nullable(),
+  endDate: isoDateSchema.nullable(),
   startTime: timeOfDaySchema,
   endTime: timeOfDaySchema,
   daysOfWeek: z.array(z.number().int().min(0).max(6)).min(1),

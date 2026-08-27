@@ -59,6 +59,8 @@ export type LocationService = {
   list: () => Promise<Location[]>;
   get: (id: string) => Promise<Location | null>;
   create: (input: Omit<Location, "id" | "createdAt">) => Promise<Location>;
+  update: (id: string, input: Omit<Location, "id" | "createdAt">) => Promise<Location>;
+  remove: (id: string) => Promise<boolean>;
 };
 
 export type ScreenService = {
@@ -107,12 +109,14 @@ export type PlaylistService = {
   list: () => Promise<Playlist[]>;
   get: (id: string) => Promise<Playlist | null>;
   save: (playlist: Playlist) => Promise<Playlist>;
+  remove: (id: string) => Promise<boolean>;
 };
 
 export type LayoutService = {
   list: () => Promise<Layout[]>;
   get: (id: string) => Promise<Layout | null>;
   save: (layout: Layout) => Promise<Layout>;
+  remove: (id: string) => Promise<boolean>;
 };
 
 export type CampaignService = {

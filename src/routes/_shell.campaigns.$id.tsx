@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Pause, Pencil, Play } from "lucide-react";
+import { Pause, Pencil, Play, Trash2 } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -9,14 +10,16 @@ import {
   E3CardBody,
   E3CardHeader,
   E3EmptyState,
+  E3Modal,
   E3PageHeader,
   E3QueryBoundary,
   E3StatusBadge,
 } from "@/components/e3";
 import { SyncStatusPanel } from "@/features/campaigns/SyncStatusPanel";
-import { effectiveCampaignStatus, formatCampaignDateTime } from "@/lib/campaign-window";
+import { effectiveCampaignStatus, formatCampaignWindowLabel, isEvergreenSchedule } from "@/lib/campaign-window";
 import { campaignService } from "@/services";
 import { NO_LOCATION_ACCESS_MESSAGE } from "@/lib/location-scope";
+import { hasPermission } from "@/lib/rbac";
 
 export const Route = createFileRoute("/_shell/campaigns/$id")({
   head: () => ({
@@ -35,8 +38,11 @@ export const Route = createFileRoute("/_shell/campaigns/$id")({
 
 function CampaignDetailPage() {
   const { id } = Route.useParams();
+  const { auth } = Route.useRouteContext();
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const canManage = Boolean(auth?.ok && hasPermission(auth.profile.role, "campaigns.manage"));
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["campaign", id],
@@ -60,6 +66,21 @@ function CampaignDetailPage() {
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Could not update campaign.");
+    },
+  });
+
+  const remove = useMutation({
+    mutationFn: () => campaignService.remove(id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["campaigns"] });
+      void qc.invalidateQueries({ queryKey: ["schedule"] });
+      void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      toast.success("Campaign deleted. Screens stay paired.");
+      setDeleteOpen(false);
+      void navigate({ to: "/campaigns" });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Could not delete campaign.");
     },
   });
 
@@ -88,6 +109,9 @@ function CampaignDetailPage() {
             actions={
               <>
                 <E3StatusBadge status={effectiveCampaignStatus(data.status, data.schedule)} className="self-center" />
+                {isEvergreenSchedule(data.schedule) ? (
+                  <E3StatusBadge status="Ongoing" className="self-center" />
+                ) : null}
                 <E3Button
                   variant="outline"
                   onClick={() => void navigate({ to: "/campaigns/new", search: { edit: data.id } })}
@@ -95,6 +119,12 @@ function CampaignDetailPage() {
                   <Pencil />
                   Edit
                 </E3Button>
+                {canManage ? (
+                  <E3Button variant="danger" onClick={() => setDeleteOpen(true)}>
+                    <Trash2 />
+                    Delete
+                  </E3Button>
+                ) : null}
                 {data.status === "Paused" || data.status === "Active" || data.status === "Scheduled" ? (
                   <E3Button variant="primary" loading={toggle.isPending} onClick={() => toggle.mutate()}>
                     {data.status === "Paused" ? <Play /> : <Pause />}
@@ -116,7 +146,7 @@ function CampaignDetailPage() {
                       ["Content type", data.contentType],
                       ["Target screens", `${data.screenIds.length}`],
                       ["Locations", `${data.locationIds.length}`],
-                      ["Window", `${formatCampaignDateTime(data.schedule.startDate, data.schedule.startTime, data.schedule.timezone)} → ${formatCampaignDateTime(data.schedule.endDate, data.schedule.endTime, data.schedule.timezone)}`],
+                      ["Window", formatCampaignWindowLabel(data.schedule)],
                       ["Days", data.schedule.days.join(" ")],
                       ["Time zone", data.schedule.timezone],
                       ["Priority", `${data.schedule.priority}`],
@@ -134,6 +164,26 @@ function CampaignDetailPage() {
 
             <SyncStatusPanel campaignId={data.id} />
           </div>
+
+          <E3Modal
+            open={deleteOpen}
+            onOpenChange={(open) => {
+              if (!open && remove.isPending) return;
+              setDeleteOpen(open);
+            }}
+            title={`Delete ${data.name}?`}
+            description="This removes the campaign from the CMS. Screens stay paired. If this campaign was on a screen, it will be taken off."
+            footer={
+              <>
+                <E3Button variant="outline" disabled={remove.isPending} onClick={() => setDeleteOpen(false)}>
+                  Cancel
+                </E3Button>
+                <E3Button variant="danger" loading={remove.isPending} onClick={() => remove.mutate()}>
+                  Delete campaign
+                </E3Button>
+              </>
+            }
+          />
         </div>
       )}
     </E3QueryBoundary>

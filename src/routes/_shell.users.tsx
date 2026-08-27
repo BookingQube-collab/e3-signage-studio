@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CreateUserDialog } from "@/features/users/CreateUserDialog";
+import { UserRowMenu } from "@/features/users/UserRowMenu";
 import { listLocationOptionsFn } from "@/lib/auth-functions";
 import { isProtectedSuperAdminEmail, requiresLocationAssignment } from "@/lib/location-scope";
 import { getBrowserAccessToken } from "@/lib/supabase";
@@ -67,7 +68,9 @@ const ROLES: { role: UserRole; permissions: string }[] = [
 const ROLE_FROM_UI = invert(UI_ROLE);
 
 function UsersPage() {
+  const { auth } = Route.useRouteContext();
   const qc = useQueryClient();
+  const currentUserId = auth?.ok ? auth.userId : undefined;
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
   const [form, setForm] = useState({
@@ -199,6 +202,26 @@ function UsersPage() {
     },
     { key: "last", header: "Last active", cell: (u) => u.lastActive },
     { key: "status", header: "Status", cell: (u) => <E3StatusBadge status={u.status} /> },
+    {
+      key: "actions",
+      header: "Actions",
+      className: "w-14 text-right",
+      cell: (u) => (
+        <UserRowMenu
+          user={u}
+          currentUserId={currentUserId}
+          onEdit={() => {
+            setEditing(u);
+            setForm({
+              name: u.name,
+              email: u.email,
+              role: u.role,
+              locationIds: u.locationIds,
+            });
+          }}
+        />
+      ),
+    },
   ];
 
   function locationToggle(id: string, checked: boolean) {
@@ -257,7 +280,7 @@ function UsersPage() {
           if (!next) setEditing(null);
         }}
         title="Assign locations"
-        description="Site Supervisors and Event Managers are limited to the locations you assign."
+        description="Change this user's role and which locations they can access."
         footer={
           <>
             <E3Button variant="ghost" disabled={saveUser.isPending} onClick={() => setEditing(null)}>

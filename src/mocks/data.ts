@@ -517,8 +517,8 @@ export const campaigns: Campaign[] = [
       .filter((s) => ["loc-kds", "loc-cb-vendome", "loc-cb-dar"].includes(s.locationId))
       .map((s) => s.id),
     schedule: {
-      startDate: "2026-01-01",
-      endDate: "2026-12-31",
+      startDate: "",
+      endDate: "",
       startTime: "10:00",
       endTime: "23:00",
       days: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],

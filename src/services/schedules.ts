@@ -12,6 +12,6 @@ async function accessToken(): Promise<string> {
 export const liveScheduleService: ScheduleService = {
   list: async () => {
     const rows = await listScheduledCampaignsFn({ data: { accessToken: await accessToken() } });
-    return rows.map(toUiCampaign);
+    return (Array.isArray(rows) ? rows : []).map(toUiCampaign);
   },
 };

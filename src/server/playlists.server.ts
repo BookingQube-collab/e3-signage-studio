@@ -70,11 +70,10 @@ async function toRecords(
 ): Promise<PlaylistRecord[]> {
   if (rows.length === 0) return [];
   const ids = rows.map((row) => asString(row["id"]));
-  const [{ data: itemRows, error: itemError }, { data: screens }] = await Promise.all([
+  const [{ data: itemRows }, { data: screens }] = await Promise.all([
     client.from("playlist_items").select(ITEM_SELECT).in("playlist_id", ids).order("position"),
     client.from("screens").select("current_playlist_id").in("current_playlist_id", ids),
   ]);
-  throwIfError(itemError, "Could not load playlist items.");
 
   const mediaIds = [
     ...new Set((itemRows ?? []).map((row) => asString((row as { media_id: string }).media_id))),
@@ -163,6 +162,7 @@ export async function getPlaylist(accessToken: string, id: string): Promise<Play
     .select(PLAYLIST_SELECT)
     .eq("id", id)
     .eq("organization_id", auth.profile.organizationId)
+    .is("archived_at", null)
     .maybeSingle();
   throwIfError(error, "Could not load playlist.");
   if (!data) return null;
@@ -290,4 +290,39 @@ export async function savePlaylist(
     }
   }
   return saved;
+}
+
+export async function archivePlaylist(accessToken: string, id: string): Promise<boolean> {
+  if (!isUuid(id)) throw new Error("Playlist not found.");
+  const existing = await getPlaylist(accessToken, id);
+  if (!existing) throw new Error("Playlist not found.");
+  const auth = await requireCmsPermission(accessToken, "playlists.manage");
+  const client = getUserClient(accessToken);
+  const { data: row, error: loadError } = await client
+    .from("playlists")
+    .select("id, created_by")
+    .eq("id", id)
+    .eq("organization_id", auth.profile.organizationId)
+    .maybeSingle();
+  throwIfError(loadError, "Could not load playlist.");
+  if (!row) throw new Error("Playlist not found.");
+  assertCanMutateOwnedContent(
+    auth.profile,
+    asNullableString((row as { created_by: string | null }).created_by),
+  );
+
+  const { error: screenError } = await client
+    .from("screens")
+    .update({ current_playlist_id: null })
+    .eq("current_playlist_id", id)
+    .eq("organization_id", auth.profile.organizationId);
+  throwIfError(screenError, "Could not unassign this playlist from screens.");
+
+  const { error } = await client
+    .from("playlists")
+    .update({ status: "ARCHIVED", archived_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("organization_id", auth.profile.organizationId);
+  throwIfError(error, "Could not delete playlist.");
+  return true;
 }

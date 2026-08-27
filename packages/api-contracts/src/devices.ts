@@ -99,8 +99,8 @@ export const manifestPlaylistSchema = z.object({
 
 export const manifestScheduleSchema = z.object({
   campaignId: uuidSchema,
-  startAt: isoDateTimeSchema,
-  endAt: isoDateTimeSchema,
+  startAt: isoDateTimeSchema.nullable(),
+  endAt: isoDateTimeSchema.nullable(),
   startTime: z.string(),
   endTime: z.string(),
   daysOfWeek: z.array(z.number().int().min(0).max(6)),

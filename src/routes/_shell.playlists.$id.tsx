@@ -3,6 +3,7 @@ import { Link, createFileRoute } from "@tanstack/react-router";
 
 import { E3Button, E3EmptyState, E3QueryBoundary } from "@/components/e3";
 import { PlaylistBuilder } from "@/features/playlists/PlaylistBuilder";
+import { hasPermission } from "@/lib/rbac";
 import { playlistService } from "@/services";
 
 export const Route = createFileRoute("/_shell/playlists/$id")({
@@ -19,15 +20,18 @@ export const Route = createFileRoute("/_shell/playlists/$id")({
 
 function EditPlaylistPage() {
   const { id } = Route.useParams();
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { auth } = Route.useRouteContext();
+  const canManage = Boolean(auth?.ok && hasPermission(auth.profile.role, "playlists.manage"));
+  const { data, isPending, isError, refetch } = useQuery({
     queryKey: ["playlist", id],
     queryFn: () => playlistService.get(id),
+    throwOnError: false,
   });
 
   return (
-    <E3QueryBoundary isLoading={isLoading} isError={isError} refetch={() => void refetch()}>
+    <E3QueryBoundary isLoading={isPending} isError={isError} refetch={() => void refetch()}>
       {data ? (
-        <PlaylistBuilder key={data.id} initial={data} />
+        <PlaylistBuilder key={data.id} initial={data} canManage={canManage} />
       ) : (
         <E3EmptyState
           title="Playlist not found"

@@ -23,6 +23,18 @@ export async function loadScopedContentUsage(
     layoutIds: new Set<string>(),
     mediaIds: new Set<string>(),
   };
+  try {
+    return await loadScopedContentUsageUnsafe(client, profile, usage);
+  } catch {
+    return usage;
+  }
+}
+
+async function loadScopedContentUsageUnsafe(
+  client: UserClient,
+  profile: CmsProfile,
+  usage: ScopedContentUsage,
+): Promise<ScopedContentUsage> {
   if (isOrgWideRole(profile.role)) return usage;
 
   const { data: screens } = await client
@@ -39,7 +51,7 @@ export async function loadScopedContentUsage(
     if (playlistId) usage.playlistIds.add(playlistId);
   }
 
-  const targetIds = [...new Set([...screenIds, ...profile.locationIds])];
+  const targetIds = [...new Set([...screenIds, ...(profile.locationIds ?? [])])];
   let campaignIds: string[] = [];
   if (targetIds.length > 0) {
     const { data: targets } = await client

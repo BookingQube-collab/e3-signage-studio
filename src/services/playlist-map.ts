@@ -24,27 +24,42 @@ export type PlaylistRecord = {
   modifiedAt: string;
 };
 
+function playlistStatusLabel(status: PlaylistStatus | undefined): Playlist["status"] {
+  const label = status ? UI_LABELS.playlistStatus[status] : undefined;
+  return label === "Draft" || label === "Active" || label === "Scheduled" || label === "Archived"
+    ? label
+    : "Draft";
+}
+
+function mediaTypeLabel(type: MediaType | undefined): Playlist["items"][number]["type"] {
+  const label = type ? UI_LABELS.mediaType[type] : undefined;
+  return label === "Video" || label === "Image" || label === "QR" || label === "Logo"
+    ? label
+    : "Image";
+}
+
 export function toUiPlaylist(row: PlaylistRecord): Playlist {
+  const items = Array.isArray(row?.items) ? row.items : [];
   return {
-    id: row.id,
-    name: row.name,
-    status: UI_LABELS.playlistStatus[row.status],
-    items: row.items.map((item) => {
-      const transitionLabel = UI_LABELS.transition[item.transition];
+    id: typeof row?.id === "string" ? row.id : "",
+    name: typeof row?.name === "string" ? row.name : "",
+    status: playlistStatusLabel(row?.status),
+    items: items.map((item) => {
+      const transitionLabel = item?.transition ? UI_LABELS.transition[item.transition] : undefined;
       const transition =
         transitionLabel === "Cut" || transitionLabel === "Fade" || transitionLabel === "Slide"
           ? transitionLabel
           : "Fade";
       return {
-        id: item.id,
-        mediaId: item.mediaId,
-        filename: item.filename,
-        type: UI_LABELS.mediaType[item.type],
-        durationSec: item.durationSec,
+        id: typeof item?.id === "string" ? item.id : "",
+        mediaId: typeof item?.mediaId === "string" ? item.mediaId : "",
+        filename: typeof item?.filename === "string" ? item.filename : "Untitled",
+        type: mediaTypeLabel(item?.type),
+        durationSec: Number.isFinite(item?.durationSec) ? Math.max(1, item.durationSec) : 1,
         transition,
       };
     }),
-    usedByScreens: row.usedByScreens,
-    modifiedAt: row.modifiedAt,
+    usedByScreens: Number.isFinite(row?.usedByScreens) ? row.usedByScreens : 0,
+    modifiedAt: typeof row?.modifiedAt === "string" ? row.modifiedAt : "",
   };
 }

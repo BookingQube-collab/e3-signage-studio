@@ -53,6 +53,31 @@ export const createLocationFn = createServerFn({ method: "POST" })
     return createLocation(data.accessToken, data);
   });
 
+export const updateLocationFn = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      accessToken: z.string(),
+      id: z.string().uuid(),
+      name: z.string().trim().min(1).max(200),
+      shortName: z.string().trim().min(1).max(80),
+      city: z.string().max(120),
+      type: locationTypeEnum(),
+      status: locationStatusEnum(),
+    }),
+  )
+  .handler(async ({ data }): Promise<LocationRecord> => {
+    const { updateLocation } = await import("@/server/inventory.server");
+    const { accessToken, id, ...input } = data;
+    return updateLocation(accessToken, id, input);
+  });
+
+export const deleteLocationFn = createServerFn({ method: "POST" })
+  .validator(z.object({ accessToken: z.string(), id: z.string().uuid() }))
+  .handler(async ({ data }): Promise<boolean> => {
+    const { deleteLocation } = await import("@/server/inventory.server");
+    return deleteLocation(data.accessToken, data.id);
+  });
+
 export const listScreensFn = createServerFn({ method: "POST" })
   .validator(z.object({ accessToken: z.string() }))
   .handler(async ({ data }): Promise<ScreenRecord[]> => {

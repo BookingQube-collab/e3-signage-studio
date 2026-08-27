@@ -22,15 +22,22 @@ export const Route = createFileRoute("/_shell/layouts/$id")({
 
 function EditLayoutPage() {
   const { id } = Route.useParams();
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isPending, isError, refetch } = useQuery({
     queryKey: ["layout", id],
     queryFn: () => layoutService.get(id),
+    throwOnError: false,
   });
 
   return (
-    <E3QueryBoundary isLoading={isLoading} isError={isError} refetch={() => void refetch()}>
+    <E3QueryBoundary isLoading={isPending} isError={isError} refetch={() => void refetch()}>
       {data ? (
-        <LayoutBuilder key={data.id} initial={data} />
+        <LayoutBuilder
+          key={data.id}
+          initial={{
+            ...data,
+            zones: Array.isArray(data.zones) ? data.zones : [],
+          }}
+        />
       ) : (
         <E3EmptyState
           title="Layout not found"

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { MapPin, Plus } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -8,23 +8,15 @@ import {
   E3Button,
   E3EmptyState,
   E3LocationCard,
-  E3Modal,
   E3PageHeader,
   E3QueryBoundary,
 } from "@/components/e3";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { LocationFormDialog } from "@/features/locations/LocationFormDialog";
+import { LocationRowMenu } from "@/features/locations/LocationRowMenu";
 import { NO_LOCATION_ACCESS_MESSAGE } from "@/lib/location-scope";
 import { cn } from "@/lib/utils";
 import { locationService } from "@/services";
-import type { LocationStatus, LocationType } from "@/types";
+import type { Location } from "@/types";
 
 export const Route = createFileRoute("/_shell/locations/")({
   head: () => ({
@@ -46,30 +38,14 @@ export const Route = createFileRoute("/_shell/locations/")({
 
 const FILTERS = ["All", "Permanent FEC", "Event", "Exhibition", "Archived"] as const;
 
-const LOCATION_TYPES: LocationType[] = [
-  "Permanent FEC",
-  "Temporary Event",
-  "Exhibition",
-  "Pop-up",
-  "Outdoor Event",
-  "Activation",
-  "Other",
-];
-
-const LOCATION_STATUSES: LocationStatus[] = ["Active", "Upcoming", "Inactive", "Archived"];
-
 function LocationsPage() {
   const { auth } = Route.useRouteContext();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const canManageLocations = Boolean(auth?.ok && auth.profile.role === "SUPER_ADMIN");
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("All");
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({
-    name: "",
-    city: "",
-    type: "Permanent FEC" as LocationType,
-    status: "Active" as LocationStatus,
-  });
+  const [editing, setEditing] = useState<Location | null>(null);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["locations"],
@@ -82,10 +58,26 @@ function LocationsPage() {
       void qc.invalidateQueries({ queryKey: ["locations"] });
       toast.success(`${loc.name} added`);
       setOpen(false);
-      setForm({ name: "", city: "", type: "Permanent FEC", status: "Active" });
+      void navigate({ to: "/locations/$id", params: { id: loc.id } });
     },
     onError: (err: Error) => {
       toast.error(err.message || "Could not add location");
+    },
+  });
+
+  const update = useMutation({
+    mutationFn: (input: Parameters<typeof locationService.update>[1]) => {
+      if (!editing) throw new Error("Location not found.");
+      return locationService.update(editing.id, input);
+    },
+    onSuccess: (loc) => {
+      void qc.invalidateQueries({ queryKey: ["locations"] });
+      void qc.invalidateQueries({ queryKey: ["location", loc.id] });
+      toast.success(`${loc.name} updated`);
+      setEditing(null);
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || "Could not update location");
     },
   });
 
@@ -151,106 +143,66 @@ function LocationsPage() {
         ) : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {filtered.map((l) => (
-              <E3LocationCard key={l.id} location={l} />
+              <E3LocationCard
+                key={l.id}
+                location={l}
+                overflow={
+                  canManageLocations ? (
+                    <LocationRowMenu location={l} onEdit={() => setEditing(l)} />
+                  ) : undefined
+                }
+              />
             ))}
           </div>
         )}
       </E3QueryBoundary>
 
-      <E3Modal
+      <LocationFormDialog
         open={open}
-        onOpenChange={(open) => {
-          if (!open && create.isPending) return;
-          setOpen(open);
-        }}
+        onOpenChange={setOpen}
         title="Add location"
         description="Locations group the screens installed at one venue or event."
-        footer={
-          <>
-            <E3Button variant="outline" disabled={create.isPending} onClick={() => setOpen(false)}>
-              Cancel
-            </E3Button>
-            <E3Button
-              variant="primary"
-              disabled={!form.name}
-              loading={create.isPending}
-              onClick={() =>
-                create.mutate({
-                  name: form.name,
-                  shortName: form.name,
-                  type: form.type,
-                  status: form.status,
-                  city: form.city || "Doha",
-                  screenCount: 0,
-                  onlineCount: 0,
-                  activeCampaigns: 0,
-                })
-              }
-            >
-              Add Location
-            </E3Button>
-          </>
+        submitLabel="Add Location"
+        pending={create.isPending}
+        onSubmit={(form) =>
+          create.mutate({
+            name: form.name,
+            shortName: form.name,
+            type: form.type,
+            status: form.status,
+            city: form.city || "Doha",
+            screenCount: 0,
+            onlineCount: 0,
+            activeCampaigns: 0,
+          })
         }
-      >
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="loc-name">Location name</Label>
-            <Input
-              id="loc-name"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder="e.g. Urban Arena Msheireb"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="loc-city">City / venue</Label>
-            <Input
-              id="loc-city"
-              value={form.city}
-              onChange={(e) => setForm({ ...form, city: e.target.value })}
-              placeholder="Doha"
-            />
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="loc-type">Type</Label>
-              <Select
-                value={form.type}
-                onValueChange={(v) => setForm({ ...form, type: v as LocationType })}
-              >
-                <SelectTrigger id="loc-type">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {LOCATION_TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>
-                      {t}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="loc-status">Status</Label>
-              <Select
-                value={form.status}
-                onValueChange={(v) => setForm({ ...form, status: v as LocationStatus })}
-              >
-                <SelectTrigger id="loc-status">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {LOCATION_STATUSES.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {s}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </div>
-      </E3Modal>
+      />
+
+      <LocationFormDialog
+        open={editing !== null}
+        onOpenChange={(next) => {
+          if (!next && update.isPending) return;
+          if (!next) setEditing(null);
+        }}
+        title="Edit location"
+        description="Update the venue name, type or status."
+        submitLabel="Save changes"
+        location={editing}
+        pending={update.isPending}
+        onSubmit={(form) => {
+          if (!editing) return;
+          update.mutate({
+            name: form.name,
+            shortName: editing.shortName === editing.name ? form.name : editing.shortName,
+            type: form.type,
+            status: form.status,
+            city: form.city || "Doha",
+            screenCount: editing.screenCount,
+            onlineCount: editing.onlineCount,
+            activeCampaigns: editing.activeCampaigns,
+          });
+        }}
+      />
     </div>
   );
 }

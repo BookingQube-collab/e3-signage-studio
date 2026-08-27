@@ -13,7 +13,7 @@ import {
   E3StatusBadge,
 } from "@/components/e3";
 import { cn } from "@/lib/utils";
-import { effectiveCampaignStatus, formatCampaignDateTime } from "@/lib/campaign-window";
+import { effectiveCampaignStatus, formatCampaignDateTime, isDatedSchedule } from "@/lib/campaign-window";
 import { scheduleService } from "@/services";
 
 export const Route = createFileRoute("/_shell/schedule")({
@@ -53,7 +53,7 @@ function SchedulePage() {
     queryFn: scheduleService.list,
   });
 
-  const campaigns = data ?? [];
+  const campaigns = (data ?? []).filter((c) => isDatedSchedule(c.schedule));
   const month = monthMeta();
 
   function campaignsOnDay(day: number) {
@@ -65,7 +65,7 @@ function SchedulePage() {
     <div>
       <E3PageHeader
         title="Schedule"
-        description="Every campaign window currently planned or running."
+        description="Dated campaign windows only. Ongoing / always-on campaigns are listed on the Campaigns page."
         actions={
           <div className="flex overflow-hidden rounded-xl border border-border">
             {(["calendar", "list"] as const).map((v) => (
@@ -88,7 +88,12 @@ function SchedulePage() {
           <E3EmptyState
             icon={CalendarClock}
             title="Nothing scheduled"
-            description="Publish a campaign with a date range to populate the calendar."
+            description="Publish a campaign with start and end dates to populate the calendar. Ongoing campaigns live under Campaigns → Ongoing."
+            action={
+              <Link to="/campaigns" className="text-sm font-medium text-foreground hover:underline">
+                View ongoing campaigns
+              </Link>
+            }
           />
         ) : view === "calendar" ? (
           <E3Card>

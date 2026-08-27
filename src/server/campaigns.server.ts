@@ -9,7 +9,7 @@ import {
   type MediaType,
 } from "@e3/shared-types";
 
-import { campaignLifecycleStatus } from "@/lib/campaign-window";
+import { campaignLifecycleStatus, campaignTieBreakStart, isDatedSchedule } from "@/lib/campaign-window";
 import { daysToNumbers, numbersToDays, uiTime } from "@/lib/schedule-days";
 import { toManifestAssets } from "@/lib/manifest-assets";
 import { isPlaylistSnapshotStale } from "@/lib/playlist-snapshot";
@@ -579,10 +579,12 @@ async function persistCampaign(
     if (input.screenIds.filter(isUuid).length === 0) {
       throw new Error("Select at least one screen.");
     }
-    if (!input.schedule.startDate || !input.schedule.endDate) {
-      throw new Error("Set a start and end date.");
+    const startDate = (input.schedule.startDate ?? "").trim();
+    const endDate = (input.schedule.endDate ?? "").trim();
+    if (Boolean(startDate) !== Boolean(endDate)) {
+      throw new Error("Set both start and end dates, or choose Ongoing with no dates.");
     }
-    if (input.schedule.endDate < input.schedule.startDate) {
+    if (startDate && endDate && endDate < startDate) {
       throw new Error("End date must be on or after the start date.");
     }
     if (daysToNumbers(input.schedule.days).length === 0) {
@@ -701,19 +703,20 @@ async function persistCampaign(
 
   const { error: deleteSchedules } = await client.from("schedules").delete().eq("campaign_id", campaignId);
   throwIfError(deleteSchedules, "Could not update schedule.");
-  if (input.schedule.startDate && input.schedule.endDate) {
-    const { error: insertSchedule } = await client.from("schedules").insert({
-      campaign_id: campaignId,
-      start_date: input.schedule.startDate,
-      end_date: input.schedule.endDate,
-      start_time: uiTime(input.schedule.startTime || "00:00"),
-      end_time: uiTime(input.schedule.endTime || "23:59"),
-      days_of_week: daysToNumbers(input.schedule.days),
-      timezone: input.schedule.timezone || "Asia/Qatar",
-      priority: uiPriorityToCanonical(input.schedule.priority || 1),
-    });
-    throwIfError(insertSchedule, "Could not save schedule.");
-  }
+  const startDate = (input.schedule.startDate ?? "").trim();
+  const endDate = (input.schedule.endDate ?? "").trim();
+  const dated = Boolean(startDate && endDate);
+  const { error: insertSchedule } = await client.from("schedules").insert({
+    campaign_id: campaignId,
+    start_date: dated ? startDate : null,
+    end_date: dated ? endDate : null,
+    start_time: uiTime(input.schedule.startTime || "00:00"),
+    end_time: uiTime(input.schedule.endTime || "23:59"),
+    days_of_week: daysToNumbers(input.schedule.days),
+    timezone: input.schedule.timezone || "Asia/Qatar",
+    priority: uiPriorityToCanonical(input.schedule.priority || 1),
+  });
+  throwIfError(insertSchedule, "Could not save schedule.");
 
   return campaignId;
 }
@@ -779,7 +782,10 @@ async function loadContest(client: UserClient, organizationId: string): Promise<
     const schedule = scheduleByCampaign.get(row.id);
     if (!schedule) return [];
     const startDate = dateLabel(asString(schedule["start_date"]));
+    const endDate = dateLabel(asString(schedule["end_date"]));
     const startTime = uiTime(asString(schedule["start_time"], "00:00"));
+    const endTime = uiTime(asString(schedule["end_time"], "23:59"));
+    const timezone = asString(schedule["timezone"], "Asia/Qatar");
     return [
       {
         id: row.id,
@@ -791,13 +797,19 @@ async function loadContest(client: UserClient, organizationId: string): Promise<
         status: row.status,
         schedule: {
           startDate,
-          endDate: dateLabel(asString(schedule["end_date"])),
+          endDate,
           startTime,
-          endTime: uiTime(asString(schedule["end_time"], "23:59")),
+          endTime,
           days: asDayNums(schedule["days_of_week"]),
-          timezone: asString(schedule["timezone"], "Asia/Qatar"),
+          timezone,
           priority: asNumber(schedule["priority"], 50),
-          startAt: new Date(`${startDate}T${startTime}:00`),
+          startAt: campaignTieBreakStart({
+            startDate,
+            endDate,
+            startTime,
+            endTime,
+            timezone,
+          }),
         },
         targets: targetsByCampaign.get(row.id) ?? [],
       },
@@ -1200,7 +1212,12 @@ export async function listScheduledCampaigns(accessToken: string): Promise<Campa
     .order("updated_at", { ascending: false });
   throwIfError(error, "Could not load schedule.");
   const rows = await toRecords(client, auth.profile, (data ?? []) as DbCampaign[]);
-  return rows.filter((row) => row.status !== "DRAFT" && row.status !== "ARCHIVED");
+  return rows.filter(
+    (row) =>
+      row.status !== "DRAFT" &&
+      row.status !== "ARCHIVED" &&
+      isDatedSchedule(row.schedule),
+  );
 }
 
 export async function getCampaign(accessToken: string, id: string): Promise<CampaignRecord | null> {

@@ -7,13 +7,16 @@ import java.time.format.DateTimeParseException
 
 /**
  * Local schedule evaluation. Higher numeric priority wins. On a tie: emergency,
- * then later startAt, then campaign id. Expired windows drop out with no cloud call.
+ * then later startAt, then campaign id. Null start/end means always in the date
+ * window (still respects day-of-week and daily play hours). Expired dated
+ * windows drop out with no cloud call.
  */
 object ScheduleEngine {
     fun isWindowOpen(schedule: ManifestSchedule, now: Instant = Instant.now()): Boolean {
-        val start = parseInstant(schedule.startAt) ?: return false
-        val end = parseInstant(schedule.endAt) ?: return false
-        if (now.isBefore(start) || now.isAfter(end)) return false
+        val start = parseInstant(schedule.startAt)
+        val end = parseInstant(schedule.endAt)
+        if (start != null && now.isBefore(start)) return false
+        if (end != null && now.isAfter(end)) return false
         val zone = zoneId(schedule.timezone)
         val local = ZonedDateTime.ofInstant(now, zone)
         val days = schedule.daysOfWeek.ifEmpty { listOf(0, 1, 2, 3, 4, 5, 6) }
@@ -37,7 +40,7 @@ object ScheduleEngine {
             .maxWithOrNull(
                 compareBy<ManifestSchedule> { it.priority }
                     .thenBy { it.emergency }
-                    .thenBy { it.startAt }
+                    .thenBy { it.startAt ?: "" }
                     .thenBy { it.campaignId },
             )
     }
@@ -50,7 +53,8 @@ object ScheduleEngine {
     private fun zoneId(name: String): ZoneId =
         runCatching { ZoneId.of(name) }.getOrElse { ZoneId.of("UTC") }
 
-    private fun parseInstant(raw: String): Instant? {
+    private fun parseInstant(raw: String?): Instant? {
+        if (raw.isNullOrBlank()) return null
         return try {
             Instant.parse(raw)
         } catch (_: DateTimeParseException) {

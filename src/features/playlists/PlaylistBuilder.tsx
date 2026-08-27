@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { Copy, GripVertical, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { mediaService, playlistService } from "@/services";
+import { isUuid } from "@/services/inventory-map";
 import type { Playlist, PlaylistItem, Transition } from "@/types";
 import { bindPreviewClips } from "@/lib/playlist-preview";
 import { MediaPicker } from "@/features/media/MediaPicker";
@@ -31,11 +32,22 @@ import { PlaylistLoopPreview } from "./PlaylistLoopPreview";
 
 const TRANSITIONS: Transition[] = ["Cut", "Fade", "Slide"];
 
-export function PlaylistBuilder({ initial }: { initial: Playlist }) {
+export function PlaylistBuilder({
+  initial,
+  canManage = true,
+}: {
+  initial: Playlist;
+  canManage?: boolean;
+}) {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const [playlist, setPlaylist] = useState<Playlist>(initial);
+  const savedPlaylist = isUuid(initial.id);
+  const [playlist, setPlaylist] = useState<Playlist>({
+    ...initial,
+    items: Array.isArray(initial.items) ? initial.items : [],
+  });
   const [addOpen, setAddOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
 
   const mediaQuery = useQuery({ queryKey: ["media"], queryFn: mediaService.list });
@@ -53,50 +65,91 @@ export function PlaylistBuilder({ initial }: { initial: Playlist }) {
           ? `${p.name} saved · live screens will download the updated loop`
           : `${p.name} saved`,
       );
-      void navigate({ to: "/playlists" });
+      setPlaylist({ ...p, items: Array.isArray(p.items) ? p.items : [] });
+      if (!savedPlaylist) {
+        void navigate({ to: "/playlists/$id", params: { id: p.id } });
+      }
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Could not save playlist.");
     },
   });
 
-  const totalSec = playlist.items.reduce((sum, i) => sum + i.durationSec, 0);
+  const remove = useMutation({
+    mutationFn: () => playlistService.remove(playlist.id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["playlists"] });
+      void qc.invalidateQueries({ queryKey: ["playlist"] });
+      void qc.invalidateQueries({ queryKey: ["screens"] });
+      toast.success(`${playlist.name || "Playlist"} deleted`);
+      setDeleteOpen(false);
+      void navigate({ to: "/playlists" });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Could not delete playlist.");
+    },
+  });
+
+  const items = Array.isArray(playlist.items) ? playlist.items : [];
+  const totalSec = items.reduce((sum, i) => sum + (i.durationSec || 0), 0);
   const previewClips = bindPreviewClips(
-    playlist.items,
+    items,
     new Map((mediaQuery.data ?? []).map((m) => [m.id, m])),
   );
 
   function move(from: number, to: number) {
-    if (to < 0 || to >= playlist.items.length) return;
-    const items = [...playlist.items];
-    const [moved] = items.splice(from, 1);
+    if (!canManage) return;
+    if (to < 0 || to >= items.length) return;
+    const next = [...items];
+    const [moved] = next.splice(from, 1);
     if (!moved) return;
-    items.splice(to, 0, moved);
-    setPlaylist({ ...playlist, items });
+    next.splice(to, 0, moved);
+    setPlaylist({ ...playlist, items: next });
   }
 
   function patchItem(id: string, patch: Partial<PlaylistItem>) {
+    if (!canManage) return;
     setPlaylist({
       ...playlist,
-      items: playlist.items.map((i) => (i.id === id ? { ...i, ...patch } : i)),
+      items: items.map((i) => (i.id === id ? { ...i, ...patch } : i)),
     });
   }
 
   return (
     <div>
       <E3PageHeader
-        title={playlist.name || "New playlist"}
-        description={`${playlist.items.length} items · ${Math.floor(totalSec / 60)}m ${totalSec % 60}s total`}
+        breadcrumb={
+          <Link to="/playlists" className="hover:text-foreground">
+            ← All playlists
+          </Link>
+        }
+        title={playlist.name || (savedPlaylist ? "Edit playlist" : "New playlist")}
+        description={
+          savedPlaylist
+            ? `Edit name, items, timing and loop · ${items.length} items · ${Math.floor(totalSec / 60)}m ${totalSec % 60}s total`
+            : `${items.length} items · ${Math.floor(totalSec / 60)}m ${totalSec % 60}s total`
+        }
         actions={
           <>
-            <E3Button
-              variant="outline"
-              loading={save.isPending && save.variables?.status === "Draft"}
-              disabled={save.isPending}
-              onClick={() => save.mutate({ ...playlist, status: "Draft" })}
-            >
-              Save Draft
-            </E3Button>
+            {canManage && savedPlaylist ? (
+              <E3Button
+                variant="outline"
+                disabled={save.isPending || remove.isPending}
+                onClick={() => setDeleteOpen(true)}
+              >
+                <Trash2 /> Delete
+              </E3Button>
+            ) : null}
+            {canManage ? (
+              <E3Button
+                variant="outline"
+                loading={save.isPending && save.variables?.status === "Draft"}
+                disabled={save.isPending}
+                onClick={() => save.mutate({ ...playlist, items, status: "Draft" })}
+              >
+                Save Draft
+              </E3Button>
+            ) : null}
             <E3Button
               variant="outline"
               onClick={() =>
@@ -108,14 +161,16 @@ export function PlaylistBuilder({ initial }: { initial: Playlist }) {
             >
               Preview
             </E3Button>
-            <E3Button
-              variant="primary"
-              onClick={() => save.mutate({ ...playlist, status: "Active" })}
-              loading={save.isPending && save.variables?.status === "Active"}
-              disabled={save.isPending || playlist.items.length === 0}
-            >
-              Publish
-            </E3Button>
+            {canManage ? (
+              <E3Button
+                variant="primary"
+                onClick={() => save.mutate({ ...playlist, items, status: "Active" })}
+                loading={save.isPending && save.variables?.status === "Active"}
+                disabled={save.isPending || items.length === 0}
+              >
+                Publish
+              </E3Button>
+            ) : null}
           </>
         }
       />
@@ -132,12 +187,13 @@ export function PlaylistBuilder({ initial }: { initial: Playlist }) {
                   value={playlist.name}
                   onChange={(e) => setPlaylist({ ...playlist, name: e.target.value })}
                   placeholder="e.g. KDS Main Playlist"
+                  disabled={!canManage}
                 />
               </div>
               <div className="space-y-2">
                 <Label>Status</Label>
                 <div className="flex h-10 items-center">
-                  <E3StatusBadge status={playlist.status} />
+                  <E3StatusBadge status={playlist.status || "Draft"} />
                 </div>
               </div>
             </E3CardBody>
@@ -148,28 +204,34 @@ export function PlaylistBuilder({ initial }: { initial: Playlist }) {
               title="Items"
               description="Drag to reorder"
               action={
-                <E3Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>
-                  <Plus /> Add media
-                </E3Button>
+                canManage ? (
+                  <E3Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>
+                    <Plus /> Add media
+                  </E3Button>
+                ) : undefined
               }
             />
             <E3CardBody className="space-y-3">
-              {playlist.items.length === 0 ? (
+              {items.length === 0 ? (
                 <E3EmptyState
                   title="Playlist is empty"
                   description="Add media from the library to build the loop."
                   action={
-                    <E3Button variant="primary" onClick={() => setAddOpen(true)}>
-                      <Plus /> Add media
-                    </E3Button>
+                    canManage ? (
+                      <E3Button variant="primary" onClick={() => setAddOpen(true)}>
+                        <Plus /> Add media
+                      </E3Button>
+                    ) : undefined
                   }
                 />
               ) : (
-                playlist.items.map((item, index) => (
+                items.map((item, index) => (
                   <div
                     key={item.id}
-                    draggable
-                    onDragStart={() => setDragIndex(index)}
+                    draggable={canManage}
+                    onDragStart={() => {
+                      if (canManage) setDragIndex(index);
+                    }}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={() => {
                       if (dragIndex !== null) move(dragIndex, index);
@@ -200,12 +262,14 @@ export function PlaylistBuilder({ initial }: { initial: Playlist }) {
                           patchItem(item.id, { durationSec: Number(e.target.value) || 1 })
                         }
                         className="h-9 w-20"
+                        disabled={!canManage}
                       />
                       <span className="text-xs text-muted-foreground">sec</span>
                     </div>
                     <Select
                       value={item.transition}
                       onValueChange={(v) => patchItem(item.id, { transition: v as Transition })}
+                      disabled={!canManage}
                     >
                       <SelectTrigger className="h-9 w-28" aria-label="Transition">
                         <SelectValue />
@@ -218,54 +282,56 @@ export function PlaylistBuilder({ initial }: { initial: Playlist }) {
                         ))}
                       </SelectContent>
                     </Select>
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        aria-label={`Move ${item.filename} up`}
-                        onClick={() => move(index, index - 1)}
-                        className="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
-                      >
-                        ↑
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`Move ${item.filename} down`}
-                        onClick={() => move(index, index + 1)}
-                        className="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
-                      >
-                        ↓
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`Duplicate ${item.filename}`}
-                        onClick={() =>
-                          setPlaylist({
-                            ...playlist,
-                            items: [
-                              ...playlist.items.slice(0, index + 1),
-                              { ...item, id: `${item.id}-copy-${Date.now()}` },
-                              ...playlist.items.slice(index + 1),
-                            ],
-                          })
-                        }
-                        className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent"
-                      >
-                        <Copy className="size-4" />
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`Remove ${item.filename}`}
-                        onClick={() =>
-                          setPlaylist({
-                            ...playlist,
-                            items: playlist.items.filter((i) => i.id !== item.id),
-                          })
-                        }
-                        className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
-                      >
-                        <Trash2 className="size-4" />
-                      </button>
-                    </div>
+                    {canManage ? (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          aria-label={`Move ${item.filename} up`}
+                          onClick={() => move(index, index - 1)}
+                          className="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Move ${item.filename} down`}
+                          onClick={() => move(index, index + 1)}
+                          className="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+                        >
+                          ↓
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Duplicate ${item.filename}`}
+                          onClick={() =>
+                            setPlaylist({
+                              ...playlist,
+                              items: [
+                                ...items.slice(0, index + 1),
+                                { ...item, id: `${item.id}-copy-${Date.now()}` },
+                                ...items.slice(index + 1),
+                              ],
+                            })
+                          }
+                          className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent"
+                        >
+                          <Copy className="size-4" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Remove ${item.filename}`}
+                          onClick={() =>
+                            setPlaylist({
+                              ...playlist,
+                              items: items.filter((i) => i.id !== item.id),
+                            })
+                          }
+                          className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
+                        >
+                          <Trash2 className="size-4" />
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 ))
               )}
@@ -285,7 +351,7 @@ export function PlaylistBuilder({ initial }: { initial: Playlist }) {
           <E3CardBody className="space-y-4">
             <PlaylistLoopPreview clips={previewClips} />
             <ol className="space-y-2 text-sm">
-              {playlist.items.map((i, idx) => (
+              {items.map((i, idx) => (
                 <li key={i.id} className="flex justify-between gap-3">
                   <span className="min-w-0 truncate">
                     {idx + 1}. {i.filename}
@@ -322,12 +388,12 @@ export function PlaylistBuilder({ initial }: { initial: Playlist }) {
           <MediaPicker
             media={mediaQuery.data ?? []}
             folders={foldersQuery.data ?? []}
-            selectedIds={new Set(playlist.items.map((item) => item.mediaId))}
+            selectedIds={new Set(items.map((item) => item.mediaId))}
             onPick={(m) =>
               setPlaylist((p) => ({
                 ...p,
                 items: [
-                  ...p.items,
+                  ...(Array.isArray(p.items) ? p.items : []),
                   {
                     id: `pli-${m.id}-${Date.now()}`,
                     mediaId: m.id,
@@ -342,6 +408,34 @@ export function PlaylistBuilder({ initial }: { initial: Playlist }) {
           />
         </div>
       </E3Modal>
+
+      <E3Modal
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          if (!open && remove.isPending) return;
+          setDeleteOpen(open);
+        }}
+        title={`Delete ${playlist.name || "this playlist"}?`}
+        description={
+          playlist.usedByScreens > 0
+            ? `This playlist is assigned to ${playlist.usedByScreens} screen${playlist.usedByScreens === 1 ? "" : "s"}. Those screens will be unassigned.`
+            : "This removes the playlist from the CMS."
+        }
+        footer={
+          <>
+            <E3Button
+              variant="outline"
+              disabled={remove.isPending}
+              onClick={() => setDeleteOpen(false)}
+            >
+              Cancel
+            </E3Button>
+            <E3Button variant="danger" loading={remove.isPending} onClick={() => remove.mutate()}>
+              Delete playlist
+            </E3Button>
+          </>
+        }
+      />
     </div>
   );
 }

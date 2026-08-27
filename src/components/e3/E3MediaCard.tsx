@@ -1,10 +1,11 @@
-import { Check, FileImage, FolderInput, MoreVertical, PlayCircle, QrCode, Sparkles } from "lucide-react";
+import { Check, FileImage, FolderInput, MoreVertical, Pencil, PlayCircle, QrCode, Sparkles, Trash2 } from "lucide-react";
 import type { MouseEvent } from "react";
 
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
@@ -49,6 +50,8 @@ export function E3MediaCard({
   view = "grid",
   size = "default",
   onOpen,
+  onEdit,
+  onDelete,
   selected,
   folderLabel,
   onMove,
@@ -61,6 +64,8 @@ export function E3MediaCard({
   view?: "grid" | "list";
   size?: "default" | "picker";
   onOpen?: (item: Media, event: MouseEvent<HTMLButtonElement>) => void;
+  onEdit?: (item: Media) => void;
+  onDelete?: (item: Media) => void;
   selected?: boolean;
   folderLabel?: string | null;
   onMove?: (item: Media) => void;
@@ -109,7 +114,9 @@ export function E3MediaCard({
             {item.modifiedAt}
           </span>
         </button>
-        {onMove ? <MoveMenu item={item} onMove={onMove} /> : null}
+        {onMove || onEdit || onDelete ? (
+          <MediaActionsMenu item={item} onEdit={onEdit} onMove={onMove} onDelete={onDelete} />
+        ) : null}
       </div>
     );
   }
@@ -147,9 +154,9 @@ export function E3MediaCard({
           {picker ? item.type : `${item.type} · ${meta}`}
         </p>
       </button>
-      {onMove ? (
+      {onMove || onEdit || onDelete ? (
         <div className="absolute right-2 top-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-          <MoveMenu item={item} onMove={onMove} />
+          <MediaActionsMenu item={item} onEdit={onEdit} onMove={onMove} onDelete={onDelete} />
         </div>
       ) : null}
     </div>
@@ -165,7 +172,7 @@ function SelectCheckbox({
   item: Media;
   checked: boolean;
   alwaysVisible: boolean;
-  onToggle?: (item: Media, event: MouseEvent<HTMLButtonElement>) => void;
+  onToggle?: ((item: Media, event: MouseEvent<HTMLButtonElement>) => void) | undefined;
 }) {
   return (
     <button
@@ -191,7 +198,17 @@ function SelectCheckbox({
   );
 }
 
-function MoveMenu({ item, onMove }: { item: Media; onMove: (item: Media) => void }) {
+function MediaActionsMenu({
+  item,
+  onEdit,
+  onMove,
+  onDelete,
+}: {
+  item: Media;
+  onEdit?: ((item: Media) => void) | undefined;
+  onMove?: ((item: Media) => void) | undefined;
+  onDelete?: ((item: Media) => void) | undefined;
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -204,10 +221,30 @@ function MoveMenu({ item, onMove }: { item: Media; onMove: (item: Media) => void
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44">
-        <DropdownMenuItem onSelect={() => onMove(item)}>
-          <FolderInput />
-          Move to folder…
-        </DropdownMenuItem>
+        {onEdit ? (
+          <DropdownMenuItem onSelect={() => onEdit(item)}>
+            <Pencil />
+            Edit
+          </DropdownMenuItem>
+        ) : null}
+        {onMove ? (
+          <DropdownMenuItem onSelect={() => onMove(item)}>
+            <FolderInput />
+            Move to folder…
+          </DropdownMenuItem>
+        ) : null}
+        {onDelete ? (
+          <>
+            {onEdit || onMove ? <DropdownMenuSeparator /> : null}
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              onSelect={() => onDelete(item)}
+            >
+              <Trash2 />
+              Delete
+            </DropdownMenuItem>
+          </>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );

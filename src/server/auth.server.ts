@@ -497,8 +497,9 @@ export async function updateCmsUser(input: {
   userId: string;
   role: UserRole;
   locationIds: string[];
+  status?: UserStatus;
 }): Promise<CmsUserRow> {
-  await requireCmsPermission(input.accessToken, "users.manage");
+  const auth = await requireCmsPermission(input.accessToken, "users.manage");
   assertLocationAssignment(input.role, input.locationIds);
   if (input.role === "EVENT_MANAGER") {
     await assertEventLocations(input.locationIds);
@@ -516,10 +517,21 @@ export async function updateCmsUser(input: {
   if (isProtectedSuperAdminEmail(existingEmail) && input.role !== "SUPER_ADMIN") {
     throw new Error("This Super Admin account cannot be changed to another role.");
   }
+  if (input.status === "DISABLED") {
+    if (isProtectedSuperAdminEmail(existingEmail)) {
+      throw new Error("This Super Admin account cannot be disabled.");
+    }
+    if (auth.userId === input.userId) {
+      throw new Error("You cannot disable your own account.");
+    }
+  }
+
+  const patch: { role: UserRole; status?: UserStatus } = { role: input.role };
+  if (input.status) patch.status = input.status;
 
   const { data: updated, error } = await admin
     .from("users")
-    .update({ role: input.role })
+    .update(patch)
     .eq("id", input.userId)
     .select("id, organization_id, name, email, username, role, status, last_active_at, created_at")
     .single();

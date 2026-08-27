@@ -51,6 +51,21 @@ export const mockServices: AppServices = {
       store.locations = [loc, ...store.locations];
       return delay(loc, 200);
     },
+    update: (id: string, input: Omit<Location, "id" | "createdAt">) => {
+      const current = store.locations.find((l) => l.id === id);
+      if (!current) return Promise.reject(new Error("Location not found."));
+      const loc: Location = { ...current, ...input };
+      store.locations = store.locations.map((l) => (l.id === id ? loc : l));
+      return delay(loc, 200);
+    },
+    remove: (id: string) => {
+      const screens = store.screens.filter((s) => s.locationId === id);
+      if (screens.length > 0) {
+        return Promise.reject(new Error("Unpair all screens at this location before deleting it."));
+      }
+      store.locations = store.locations.filter((l) => l.id !== id);
+      return delay(true, 200);
+    },
   },
 
   screenService: {
@@ -283,6 +298,13 @@ export const mockServices: AppServices = {
         : [playlist, ...store.playlists];
       return delay(playlist, 350);
     },
+    remove: (id: string) => {
+      store.playlists = store.playlists.filter((p) => p.id !== id);
+      store.screens = store.screens.map((s) =>
+        s.playlistId === id ? { ...s, playlistId: null, playlistName: null } : s,
+      );
+      return delay(true, 200);
+    },
   },
 
   layoutService: {
@@ -294,6 +316,14 @@ export const mockServices: AppServices = {
         ? store.layouts.map((l) => (l.id === layout.id ? layout : l))
         : [layout, ...store.layouts];
       return delay(layout, 350);
+    },
+    remove: (id: string) => {
+      const used = store.playlists.some((p) => p.items.some((item) => "layoutId" in item && item.layoutId === id));
+      if (used) {
+        return Promise.reject(new Error("Remove this layout from campaigns and playlists before deleting it."));
+      }
+      store.layouts = store.layouts.filter((l) => l.id !== id);
+      return delay(true, 200);
     },
   },
 
@@ -345,7 +375,15 @@ export const mockServices: AppServices = {
 
   scheduleService: {
     list: () =>
-      delay(store.campaigns.filter((c) => c.status !== "Draft" && c.status !== "Archived")),
+      delay(
+        store.campaigns.filter(
+          (c) =>
+            c.status !== "Draft" &&
+            c.status !== "Archived" &&
+            Boolean(c.schedule.startDate) &&
+            Boolean(c.schedule.endDate),
+        ),
+      ),
   },
 
   userService: {

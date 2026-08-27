@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Check } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { E3Button, E3Card, E3CardBody, E3CardHeader, E3PageHeader, E3Progress, E3QueryBoundary } from "@/components/e3";
@@ -17,15 +17,26 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { TargetSelector } from "@/features/campaigns/TargetSelector";
 import { cn } from "@/lib/utils";
+import { isEvergreenSchedule } from "@/lib/campaign-window";
 import { addDaysIso, localIsoDate } from "@/lib/schedule-days";
 import { campaignService, layoutService, locationService, playlistService, screenService } from "@/services";
 import type { Campaign } from "@/types";
 
 export const Route = createFileRoute("/_shell/campaigns/new")({
-  validateSearch: (search: Record<string, unknown>): { edit?: string; duplicate?: string } => ({
-    edit: typeof search.edit === "string" && search.edit.length > 0 ? search.edit : undefined,
-    duplicate: typeof search.duplicate === "string" && search.duplicate.length > 0 ? search.duplicate : undefined,
-  }),
+  validateSearch: (search: Record<string, unknown>): {
+    edit?: string;
+    duplicate?: string;
+    locationId?: string;
+  } => {
+    const edit = search["edit"];
+    const duplicate = search["duplicate"];
+    const locationId = search["locationId"];
+    return {
+      ...(typeof edit === "string" && edit.length > 0 ? { edit } : {}),
+      ...(typeof duplicate === "string" && duplicate.length > 0 ? { duplicate } : {}),
+      ...(typeof locationId === "string" && locationId.length > 0 ? { locationId } : {}),
+    };
+  },
   head: () => ({
     meta: [
       { title: "New campaign — E3 Digital Signage" },
@@ -80,12 +91,13 @@ function blankCampaign(): Campaign {
 function NewCampaignPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const { edit, duplicate } = Route.useSearch();
+  const { edit, duplicate, locationId: presetLocationId } = Route.useSearch();
   const sourceId = edit ?? duplicate;
   const mode = edit ? "edit" : duplicate ? "duplicate" : "create";
   const [step, setStep] = useState(0);
   const [publishing, setPublishing] = useState(false);
   const [progress, setProgress] = useState(0);
+  const presetApplied = useRef(false);
 
   const [draft, setDraft] = useState<Campaign>(blankCampaign);
 
@@ -125,6 +137,17 @@ function NewCampaignPage() {
   const layouts = useQuery({ queryKey: ["layouts"], queryFn: layoutService.list });
   const locations = useQuery({ queryKey: ["locations"], queryFn: locationService.list });
   const screens = useQuery({ queryKey: ["screens"], queryFn: screenService.list });
+
+  useEffect(() => {
+    if (presetApplied.current || mode !== "create" || !presetLocationId || !screens.data) return;
+    const ids = screens.data.filter((s) => s.locationId === presetLocationId).map((s) => s.id);
+    setDraft((current) => ({
+      ...current,
+      locationIds: [presetLocationId],
+      screenIds: ids,
+    }));
+    presetApplied.current = true;
+  }, [mode, presetLocationId, screens.data]);
 
   const save = useMutation({
     mutationFn: campaignService.save,
@@ -171,12 +194,37 @@ function NewCampaignPage() {
       ? (playlists.data ?? []).map((p) => ({ id: p.id, name: p.name }))
       : (layouts.data ?? []).map((l) => ({ id: l.id, name: l.name }));
 
+  const ongoing = isEvergreenSchedule(draft.schedule);
+  const datedReady =
+    Boolean(draft.schedule.startDate) &&
+    Boolean(draft.schedule.endDate) &&
+    draft.schedule.endDate >= draft.schedule.startDate;
   const canContinue =
     (step === 0 && draft.name.trim().length > 0) ||
     (step === 1 && draft.contentId !== "") ||
     (step === 2 && draft.screenIds.length > 0) ||
-    step === 3 ||
+    (step === 3 && (ongoing || datedReady)) ||
     step === 4;
+
+  function setScheduleMode(next: "ongoing" | "dated") {
+    if (next === "ongoing") {
+      setDraft({
+        ...draft,
+        schedule: { ...draft.schedule, startDate: "", endDate: "" },
+      });
+      return;
+    }
+    if (ongoing) {
+      setDraft({
+        ...draft,
+        schedule: {
+          ...draft.schedule,
+          startDate: localIsoDate(),
+          endDate: addDaysIso(localIsoDate(), 16),
+        },
+      });
+    }
+  }
 
   function publish() {
     publishMut.mutate({
@@ -312,11 +360,49 @@ function NewCampaignPage() {
             <TargetSelector
               selected={draft.screenIds}
               onChange={(screenIds) => setDraft({ ...draft, screenIds })}
+              {...(presetLocationId ? { focusLocationId: presetLocationId } : {})}
             />
           ) : null}
 
           {step === 3 ? (
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-5">
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    { id: "dated" as const, label: "Scheduled", hint: "Has start and end dates" },
+                    { id: "ongoing" as const, label: "Ongoing", hint: "No dates — always on" },
+                  ] as const
+                ).map((opt) => {
+                  const selected = opt.id === "ongoing" ? ongoing : !ongoing;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => setScheduleMode(opt.id)}
+                      className={cn(
+                        "rounded-xl border px-4 py-2 text-left text-sm",
+                        selected
+                          ? "e3-gradient border-transparent text-white"
+                          : "border-border text-muted-foreground hover:bg-accent",
+                      )}
+                    >
+                      <span className="block font-medium">{opt.label}</span>
+                      <span className={cn("text-xs", selected ? "text-white/80" : "text-muted-foreground")}>
+                        {opt.hint}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              {ongoing ? (
+                <p className="text-sm text-muted-foreground">
+                  This campaign stays eligible until you pause or archive it. Daily play hours and days of week still apply.
+                </p>
+              ) : null}
+              <div className="grid gap-4 sm:grid-cols-2">
+              {ongoing ? null : (
+                <>
               <div className="space-y-2">
                 <Label htmlFor="s-start">Start date</Label>
                 <Input
@@ -339,6 +425,8 @@ function NewCampaignPage() {
                   }
                 />
               </div>
+                </>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="s-stime">Start time</Label>
                 <Input
@@ -415,6 +503,7 @@ function NewCampaignPage() {
                   </SelectContent>
                 </Select>
               </div>
+              </div>
             </div>
           ) : null}
 
@@ -446,8 +535,9 @@ function NewCampaignPage() {
                       Schedule
                     </dt>
                     <dd className="mt-1 text-sm font-medium">
-                      {draft.schedule.startDate} → {draft.schedule.endDate} ·{" "}
-                      {draft.schedule.startTime}–{draft.schedule.endTime}
+                      {ongoing
+                        ? `Ongoing · ${draft.schedule.startTime}–${draft.schedule.endTime}`
+                        : `${draft.schedule.startDate} → ${draft.schedule.endDate} · ${draft.schedule.startTime}–${draft.schedule.endTime}`}
                     </dd>
                   </div>
                 </dl>

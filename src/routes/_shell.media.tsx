@@ -83,6 +83,8 @@ function MediaPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [anchorId, setAnchorId] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteFile, setDeleteFile] = useState<Media | null>(null);
+  const [deleteFolderTarget, setDeleteFolderTarget] = useState<MediaFolder | null>(null);
 
   const mediaQuery = useQuery({ queryKey: ["media"], queryFn: mediaService.list });
   const foldersQuery = useQuery({ queryKey: ["media-folders"], queryFn: mediaService.listFolders });
@@ -130,6 +132,7 @@ function MediaPage() {
       void qc.invalidateQueries({ queryKey: ["media"] });
       void qc.invalidateQueries({ queryKey: ["media-folders"] });
       setFolderId(null);
+      setDeleteFolderTarget(null);
       toast.success("Folder deleted");
     },
     onError: (error) => {
@@ -205,6 +208,7 @@ function MediaPage() {
       void qc.invalidateQueries({ queryKey: ["media"] });
       void qc.invalidateQueries({ queryKey: ["media-folders"] });
       setSelected(null);
+      setDeleteFile(null);
       toast.success("Media deleted");
     },
     onError: (error) => {
@@ -343,8 +347,7 @@ function MediaPage() {
             {currentFolder && !searching ? (
               <E3Button
                 variant="outline"
-                loading={deleteFolder.isPending}
-                onClick={() => deleteFolder.mutate(currentFolder.id)}
+                onClick={() => setDeleteFolderTarget(currentFolder)}
               >
                 Delete folder
               </E3Button>
@@ -499,6 +502,12 @@ function MediaPage() {
               applyClick(item.id, { toggle: true, range: event.shiftKey })
             }
             onMove={openMove}
+            onEdit={(item) => {
+              setSelected(item);
+              setRenaming(item.filename);
+            }}
+            onDelete={setDeleteFile}
+            onDeleteFolder={setDeleteFolderTarget}
           />
         ) : (
           <div
@@ -520,6 +529,11 @@ function MediaPage() {
                 onMove={openMove}
                 onToggle={(item, event) => applyClick(item.id, { toggle: true, range: event.shiftKey })}
                 onOpen={handleOpenMedia}
+                onEdit={(item) => {
+                  setSelected(item);
+                  setRenaming(item.filename);
+                }}
+                onDelete={setDeleteFile}
               />
             ))}
           </div>
@@ -706,8 +720,7 @@ function MediaPage() {
             <E3Button
               variant="danger"
               disabled={!selected || mediaBusy}
-              loading={remove.isPending}
-              onClick={() => selected && remove.mutate(selected.id)}
+              onClick={() => selected && setDeleteFile(selected)}
             >
               Delete
             </E3Button>
@@ -789,6 +802,60 @@ function MediaPage() {
           </div>
         ) : null}
       </E3Modal>
+
+      <E3Modal
+        open={Boolean(deleteFile)}
+        onOpenChange={(open) => {
+          if (!open && remove.isPending) return;
+          if (!open) setDeleteFile(null);
+        }}
+        title={deleteFile ? `Delete ${deleteFile.filename}?` : "Delete file?"}
+        description="This removes the file from the library. Files used in live playlists cannot be deleted."
+        footer={
+          <>
+            <E3Button variant="outline" disabled={remove.isPending} onClick={() => setDeleteFile(null)}>
+              Cancel
+            </E3Button>
+            <E3Button
+              variant="danger"
+              loading={remove.isPending}
+              disabled={!deleteFile}
+              onClick={() => deleteFile && remove.mutate(deleteFile.id)}
+            >
+              Delete file
+            </E3Button>
+          </>
+        }
+      />
+
+      <E3Modal
+        open={Boolean(deleteFolderTarget)}
+        onOpenChange={(open) => {
+          if (!open && deleteFolder.isPending) return;
+          if (!open) setDeleteFolderTarget(null);
+        }}
+        title={deleteFolderTarget ? `Delete ${deleteFolderTarget.name}?` : "Delete folder?"}
+        description="Move files out of this folder first. Empty folders can be removed."
+        footer={
+          <>
+            <E3Button
+              variant="outline"
+              disabled={deleteFolder.isPending}
+              onClick={() => setDeleteFolderTarget(null)}
+            >
+              Cancel
+            </E3Button>
+            <E3Button
+              variant="danger"
+              loading={deleteFolder.isPending}
+              disabled={!deleteFolderTarget}
+              onClick={() => deleteFolderTarget && deleteFolder.mutate(deleteFolderTarget.id)}
+            >
+              Delete folder
+            </E3Button>
+          </>
+        }
+      />
     </div>
   );
 }
@@ -805,6 +872,9 @@ function LibraryGrid({
   onOpenMedia,
   onToggle,
   onMove,
+  onEdit,
+  onDelete,
+  onDeleteFolder,
 }: {
   folders: MediaFolder[];
   items: Media[];
@@ -817,6 +887,9 @@ function LibraryGrid({
   onOpenMedia: (item: Media, event?: MouseEvent<HTMLButtonElement>) => void;
   onToggle: (item: Media, event: MouseEvent<HTMLButtonElement>) => void;
   onMove: (item: Media) => void;
+  onEdit: (item: Media) => void;
+  onDelete: (item: Media) => void;
+  onDeleteFolder: (folder: MediaFolder) => void;
 }) {
   function handleBackground(event: MouseEvent<HTMLDivElement>) {
     if (!(event.target instanceof Element)) return;
@@ -829,7 +902,12 @@ function LibraryGrid({
       {folders.length > 0 ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {folders.map((folder) => (
-            <FolderCard key={folder.id} folder={folder} onOpen={onOpenFolder} />
+            <FolderCard
+              key={folder.id}
+              folder={folder}
+              onOpen={onOpenFolder}
+              onDelete={onDeleteFolder}
+            />
           ))}
         </div>
       ) : null}
@@ -851,6 +929,8 @@ function LibraryGrid({
               onOpen={onOpenMedia}
               onToggle={onToggle}
               onMove={onMove}
+              onEdit={onEdit}
+              onDelete={onDelete}
             />
           ))}
         </div>
