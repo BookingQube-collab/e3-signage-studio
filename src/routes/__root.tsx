@@ -12,6 +12,7 @@ import { useEffect, type ReactNode } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthSessionSync } from "@/lib/auth-sync";
 import type { AuthSessionResult } from "@/lib/auth-types";
+import { useIsClient } from "@/lib/use-is-client";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 
@@ -130,13 +131,14 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const isClient = useIsClient();
 
   return (
     <QueryClientProvider client={queryClient}>
       <AuthSessionSync>
         {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
         <Outlet />
-        <Toaster position="top-right" richColors />
+        {isClient ? <Toaster position="top-right" richColors /> : null}
       </AuthSessionSync>
     </QueryClientProvider>
   );

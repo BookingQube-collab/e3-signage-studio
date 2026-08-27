@@ -1,4 +1,19 @@
 import {
+  CAMPAIGN_STATUSES,
+  DEVICE_SYNC_STATES,
+  LOCATION_STATUSES,
+  SCREEN_OPERATIONAL_STATUSES,
+  UI_LABELS,
+  UI_LOCATION_STATUS,
+  type CampaignStatus as CanonicalCampaignStatus,
+  type DeviceSyncState,
+  type LocationStatus as CanonicalLocationStatus,
+  type ScreenOperationalStatus,
+} from "@e3/shared-types";
+
+import { effectiveCampaignStatus } from "@/lib/campaign-window";
+import { connectivityFromHeartbeat, DEFAULT_OFFLINE_AFTER_SECONDS } from "@/lib/connectivity";
+import {
   activityFromMonitoring,
   aggregateCampaignPerformance,
   aggregateProofOfPlay,
@@ -7,20 +22,28 @@ import {
   mergeDeviceLogLines,
   REPORT_WINDOW_DAYS,
   reportWindowStartMs,
+  summarizeDashboardFleet,
   type DeviceLogEvent,
   type HeartbeatCoverage,
   type PlaybackEvent,
   type SyncEventLite,
 } from "@/lib/monitoring";
+import { formatLastActive } from "@/lib/relative-time";
+import { uiTime } from "@/lib/schedule-days";
+import { toUiScreenStatus } from "@/services/inventory-map";
+import type { DashboardSummary } from "@/services/types";
 import type {
   ActivityItem,
   AvailabilityRow,
   CampaignPerformanceRow,
+  CampaignStatus,
   DeviceLogLine,
   ProofOfPlayRow,
+  SyncState,
 } from "@/types";
 
 import { requireCmsPermission } from "./auth.server";
+import { ensureSeedLocations } from "./location-seed.server";
 import { getServiceRoleClient, getUserClient, isServiceRoleConfigured } from "./supabase.server";
 
 function throwIfError(error: { message: string } | null, fallback: string): void {
@@ -38,6 +61,10 @@ function asNumber(value: unknown, fallback = 0): number {
     if (Number.isFinite(n)) return n;
   }
   return fallback;
+}
+
+function asNullableString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function windowIso(nowMs = Date.now()): string {
@@ -520,4 +547,269 @@ export async function listDeviceLogs(accessToken: string, screenId: string): Pro
     });
   }
   return mergeDeviceLogLines(events);
+}
+
+function bytesToGb(bytes: number | null): number {
+  if (bytes == null || bytes <= 0) return 0;
+  return bytes / 1_000_000_000;
+}
+
+function asOperational(value: string): ScreenOperationalStatus {
+  return (SCREEN_OPERATIONAL_STATUSES as readonly string[]).includes(value)
+    ? (value as ScreenOperationalStatus)
+    : "READY";
+}
+
+function asSyncState(value: string): DeviceSyncState {
+  return (DEVICE_SYNC_STATES as readonly string[]).includes(value)
+    ? (value as DeviceSyncState)
+    : "WAITING";
+}
+
+function asUiCampaignStatus(value: string): CampaignStatus {
+  if ((CAMPAIGN_STATUSES as readonly string[]).includes(value)) {
+    return UI_LABELS.campaignStatus[value as CanonicalCampaignStatus];
+  }
+  return "Draft";
+}
+
+/**
+ * One round-trip dashboard payload: slim location/screen/campaign rows
+ * instead of the full list endpoints used by those tabs.
+ */
+export async function getDashboardSummary(accessToken: string): Promise<DashboardSummary> {
+  const auth = await requireCmsPermission(accessToken, "dashboard.view");
+  try {
+    await ensureSeedLocations(auth.profile.organizationId);
+  } catch {
+    // Listing should still work if seed cannot run.
+  }
+  const client = getUserClient(accessToken);
+  const orgId = auth.profile.organizationId;
+  const nowMs = Date.now();
+
+  const [
+    locRes,
+    screenRes,
+    settingsRes,
+    campaignRes,
+  ] = await Promise.all([
+    client
+      .from("locations")
+      .select("id, short_name, status")
+      .eq("organization_id", orgId),
+    client
+      .from("screens")
+      .select(
+        "id, name, location_id, operational_status, last_heartbeat_at, currently_playing_media_id, total_storage, available_storage, last_error",
+      )
+      .eq("organization_id", orgId)
+      .is("archived_at", null),
+    client
+      .from("organization_settings")
+      .select("offline_after_seconds")
+      .eq("organization_id", orgId)
+      .maybeSingle(),
+    client
+      .from("campaigns")
+      .select("id, status")
+      .eq("organization_id", orgId)
+      .is("archived_at", null),
+  ]);
+  throwIfError(locRes.error, "Could not load locations.");
+  throwIfError(screenRes.error, "Could not load screens.");
+  throwIfError(campaignRes.error, "Could not load campaigns.");
+
+  const locations = (locRes.data ?? []) as Array<{
+    id: string;
+    short_name: string | null;
+    status: string;
+  }>;
+  const screenRows = (screenRes.data ?? []) as Array<{
+    id: string;
+    name: string;
+    location_id: string;
+    operational_status: string;
+    last_heartbeat_at: string | null;
+    currently_playing_media_id: string | null;
+    total_storage: number | null;
+    available_storage: number | null;
+    last_error: string | null;
+  }>;
+  const campaignRows = (campaignRes.data ?? []) as Array<{ id: string; status: string }>;
+  const offlineAfter = asNumber(
+    (settingsRes.data as { offline_after_seconds?: number } | null)?.offline_after_seconds,
+    DEFAULT_OFFLINE_AFTER_SECONDS,
+  );
+  const threshold = offlineAfter > 0 ? offlineAfter : DEFAULT_OFFLINE_AFTER_SECONDS;
+
+  const screenIds = screenRows.map((row) => row.id);
+  const campaignIds = campaignRows.map((row) => row.id);
+  const mediaIds = [
+    ...new Set(
+      screenRows
+        .map((row) => row.currently_playing_media_id)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const locationName = new Map(
+    locations.map((row) => [row.id, asString(row.short_name) || "Location"]),
+  );
+
+  const reader = privilegedClient(client);
+  const since = new Date(nowMs - 24 * 60 * 60 * 1000).toISOString();
+  const [syncRes, scheduleRes, mediaRes, eventRes] = await Promise.all([
+    screenIds.length
+      ? client
+          .from("device_sync_states")
+          .select("screen_id, sync_state, sync_progress")
+          .in("screen_id", screenIds)
+      : Promise.resolve({ data: [] as Array<{ screen_id: string; sync_state: string; sync_progress: number }>, error: null }),
+    campaignIds.length
+      ? client
+          .from("schedules")
+          .select("campaign_id, start_date, end_date, start_time, end_time, timezone")
+          .in("campaign_id", campaignIds)
+      : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
+    mediaIds.length
+      ? client.from("media").select("id, name").in("id", mediaIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; name: string }>, error: null }),
+    screenIds.length
+      ? reader
+          .from("sync_events")
+          .select("id, screen_id, from_state, to_state, detail, created_at")
+          .in("screen_id", screenIds)
+          .gte("created_at", since)
+          .order("created_at", { ascending: false })
+          .limit(40)
+      : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
+  ]);
+  throwIfError(syncRes.error, "Could not load sync state.");
+  throwIfError(scheduleRes.error, "Could not load schedules.");
+  throwIfError(mediaRes.error, "Could not load media.");
+  throwIfError(eventRes.error, "Could not load sync events.");
+
+  const syncByScreen = new Map<string, { state: DeviceSyncState; progress: number }>();
+  for (const raw of syncRes.data ?? []) {
+    const row = raw as { screen_id: string; sync_state: string; sync_progress: number | string };
+    syncByScreen.set(row.screen_id, {
+      state: asSyncState(row.sync_state),
+      progress: asNumber(row.sync_progress, 0),
+    });
+  }
+  const mediaName = new Map(
+    ((mediaRes.data ?? []) as Array<{ id: string; name: string }>).map((row) => [row.id, row.name]),
+  );
+  const scheduleByCampaign = new Map<
+    string,
+    { startDate: string; endDate: string; startTime: string; endTime: string; timezone: string }
+  >();
+  for (const raw of scheduleRes.data ?? []) {
+    const row = raw as Record<string, unknown>;
+    const id = asString(row["campaign_id"]);
+    if (!id) continue;
+    scheduleByCampaign.set(id, {
+      startDate: asString(row["start_date"]).slice(0, 10),
+      endDate: asString(row["end_date"]).slice(0, 10),
+      startTime: uiTime(asString(row["start_time"], "00:00")),
+      endTime: uiTime(asString(row["end_time"], "23:59")),
+      timezone: asString(row["timezone"], "Asia/Qatar"),
+    });
+  }
+
+  const emptySchedule = {
+    startDate: "",
+    endDate: "",
+    startTime: "00:00",
+    endTime: "23:59",
+    timezone: "Asia/Qatar",
+  };
+  let activeCampaigns = 0;
+  let scheduledCampaigns = 0;
+  for (const row of campaignRows) {
+    const status = effectiveCampaignStatus(
+      asUiCampaignStatus(row.status),
+      scheduleByCampaign.get(row.id) ?? emptySchedule,
+      nowMs,
+    );
+    if (status === "Active") activeCampaigns += 1;
+    if (status === "Scheduled") scheduledCampaigns += 1;
+  }
+
+  const screens = screenRows.map((row) => {
+    const operational = asOperational(row.operational_status);
+    const sync = syncByScreen.get(row.id);
+    const syncState = sync?.state ?? "WAITING";
+    const connectivity = connectivityFromHeartbeat(
+      operational,
+      row.last_heartbeat_at,
+      threshold,
+      nowMs,
+    );
+    const usedBytes =
+      row.total_storage != null && row.available_storage != null
+        ? Math.max(0, row.total_storage - row.available_storage)
+        : null;
+    const uiSync = (UI_LABELS.syncState[syncState] ?? "Waiting") as SyncState;
+    return {
+      id: row.id,
+      name: row.name,
+      locationId: row.location_id,
+      locationName: locationName.get(row.location_id) ?? "Unknown",
+      status: toUiScreenStatus(operational, connectivity, syncState),
+      syncState: uiSync,
+      syncProgress: sync?.progress ?? 0,
+      lastSeen: formatLastActive(row.last_heartbeat_at),
+      lastError: asNullableString(row.last_error),
+      storageUsedGb: bytesToGb(usedBytes),
+      storageTotalGb: bytesToGb(row.total_storage),
+      nowPlaying: row.currently_playing_media_id
+        ? (mediaName.get(row.currently_playing_media_id) ?? null)
+        : null,
+    };
+  });
+
+  const names = new Map(screenRows.map((row) => [row.id, row.name]));
+  const syncEvents: SyncEventLite[] = (
+    (eventRes.data ?? []) as Array<{
+      id: string;
+      screen_id: string;
+      from_state: string | null;
+      to_state: string;
+      detail: string | null;
+      created_at: string;
+    }>
+  ).map((row) => ({
+    id: row.id,
+    screenName: names.get(row.screen_id) ?? "Screen",
+    fromState: row.from_state,
+    toState: row.to_state,
+    detail: row.detail,
+    createdAt: row.created_at,
+  }));
+  const fromEvents = activityFromMonitoring(syncEvents, [], nowMs);
+  const fromScreens = activityFromMonitoring([], screens, nowMs);
+  const seen = new Set(fromEvents.map((item) => item.message));
+  const activity = [...fromEvents, ...fromScreens.filter((item) => !seen.has(item.message))].slice(
+    0,
+    8,
+  );
+
+  const fleet = summarizeDashboardFleet({
+    locations: locations.map((row) => ({
+      id: row.id,
+      name: asString(row.short_name) || "Location",
+      status: (LOCATION_STATUSES as readonly string[]).includes(row.status)
+        ? UI_LOCATION_STATUS[row.status as CanonicalLocationStatus]
+        : row.status,
+    })),
+    screens,
+  });
+
+  return {
+    ...fleet,
+    activeCampaigns,
+    scheduledCampaigns,
+    activity,
+  };
 }

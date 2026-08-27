@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   activityFromMonitoring,
+  ADMIN_MONITORING_REFETCH_MS,
+  adminMonitoringRefetchInterval,
   aggregateCampaignPerformance,
   aggregateProofOfPlay,
   availabilityFromHeartbeats,
@@ -12,6 +14,7 @@ import {
   isStorageAlert,
   mergeDeviceLogLines,
   storageAlertCount,
+  summarizeDashboardFleet,
   toCsv,
   type PlaybackEvent,
   type ScreenHealth,
@@ -187,4 +190,36 @@ test("device logs are newest first", () => {
 test("csv escapes commas and quotes", () => {
   const csv = toCsv(["Media", "Plays"], [["Welcome, \"loop\"", "12"]]);
   assert.equal(csv.includes('"Welcome, ""loop"""'), true);
+});
+
+test("dashboard fleet summary ignores archived locations and defers empty now-playing", () => {
+  const summary = summarizeDashboardFleet({
+    locations: [
+      { id: "l1", name: "InflataPark", status: "Active" },
+      { id: "l2", name: "Old hall", status: "Archived" },
+    ],
+    screens: [
+      {
+        ...screen({ id: "s1", name: "Office", status: "online" }),
+        locationId: "l1",
+        nowPlaying: "Welcome loop",
+      },
+      {
+        ...screen({ id: "s2", name: "Lobby", status: "offline", lastSeen: "8 minutes ago" }),
+        locationId: "l1",
+        nowPlaying: null,
+      },
+    ],
+  });
+  assert.equal(summary.locations, 1);
+  assert.equal(summary.screens, 2);
+  assert.equal(summary.online, 1);
+  assert.equal(summary.offline, 1);
+  assert.equal(summary.locationStatus[0]?.online, 1);
+  assert.equal(summary.nowPlaying[0]?.nowPlaying, "Welcome loop");
+  assert.equal(summary.alerts[0]?.title, "Screen offline");
+});
+
+test("monitoring poll interval stays 30s when the document is not hidden", () => {
+  assert.equal(adminMonitoringRefetchInterval(), ADMIN_MONITORING_REFETCH_MS);
 });

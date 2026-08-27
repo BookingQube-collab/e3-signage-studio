@@ -22,6 +22,7 @@ import {
   normalizeChecksum,
   safeMediaFilename,
 } from "../lib/media-file";
+import { mediaKeysToSign } from "../lib/media-sign";
 import {
   FOLDER_DUPLICATE_MESSAGE,
   assertFolderDeletable,
@@ -229,6 +230,7 @@ async function loadUsedIn(
 async function toRecords(
   client: ReturnType<typeof getUserClient>,
   mediaRows: MediaRow[],
+  signAllPreviews = false,
 ): Promise<MediaRecord[]> {
   if (mediaRows.length === 0) return [];
   const ids = mediaRows.map((row) => row.id);
@@ -280,7 +282,13 @@ async function toRecords(
     const previewKey =
       current && current.status === "READY" && current.storage_key ? current.storage_key : null;
     const image = previewKey && current?.mime_type.startsWith("image/") ? previewKey : null;
-    if (previewKey) previewKeys.push(previewKey);
+    previewKeys.push(
+      ...mediaKeysToSign({
+        previewKey,
+        isImage: Boolean(image),
+        signAllPreviews,
+      }),
+    );
     return { row, current, image, previewKey };
   });
 
@@ -306,7 +314,7 @@ async function toRecords(
       version: current ? `v${current.version_number}` : "v1",
       thumbnailHue: hueFromChecksum(checksum),
       thumbnailUrl: image ? (urls.get(image) ?? null) : null,
-      previewUrl: previewKey ? (urls.get(previewKey) ?? null) : null,
+      previewUrl: signAllPreviews && previewKey ? (urls.get(previewKey) ?? null) : image ? (urls.get(image) ?? null) : null,
       folderId: row.folder_id,
       folderName: row.folder_id ? (folderNames.get(row.folder_id) ?? null) : null,
       usedIn: usedIn.get(row.id) ?? { playlists: [], campaigns: [], screens: [] },
@@ -404,7 +412,7 @@ export async function getMedia(accessToken: string, id: string): Promise<MediaRe
   const client = getUserClient(accessToken);
   const row = await getMediaRow(client, id, auth.profile.organizationId);
   if (!row || row.archived_at || !isVisibleLibraryStatus(row.status)) return null;
-  const records = await toRecords(client, [row]);
+  const records = await toRecords(client, [row], true);
   return records[0] ?? null;
 }
 
@@ -744,7 +752,7 @@ export async function completeUpload(
   if (!media) throw new Error("Media not found.");
 
   if (version.status === "READY" && media.current_version_id === version.id) {
-    const records = await toRecords(client, [media]);
+    const records = await toRecords(client, [media], true);
     const ready = records[0];
     if (!ready) throw new Error("Media not found.");
     return ready;
@@ -779,7 +787,7 @@ export async function completeUpload(
 
   const updated = await getMediaRow(client, media.id, auth.profile.organizationId);
   if (!updated) throw new Error("Media not found.");
-  const records = await toRecords(client, [updated]);
+  const records = await toRecords(client, [updated], true);
   const result = records[0];
   if (!result) throw new Error("Media not found.");
   return result;
@@ -825,7 +833,7 @@ export async function renameMedia(
   throwIfError(error, "Could not rename media.");
   const updated = await getMediaRow(client, id, auth.profile.organizationId);
   if (!updated) throw new Error("Media not found.");
-  const records = await toRecords(client, [updated]);
+  const records = await toRecords(client, [updated], true);
   const result = records[0];
   if (!result) throw new Error("Media not found.");
   return result;

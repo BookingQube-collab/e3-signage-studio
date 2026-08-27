@@ -12,6 +12,12 @@ import type {
 /** Admin pages refetch live heartbeats/sync acks about this often. */
 export const ADMIN_MONITORING_REFETCH_MS = 30_000;
 
+/** Pause the 30s poll while the browser tab is in the background. */
+export function adminMonitoringRefetchInterval(): number | false {
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") return false;
+  return ADMIN_MONITORING_REFETCH_MS;
+}
+
 export const REPORT_WINDOW_DAYS = 30;
 export const HEARTBEAT_INTERVAL_SECONDS = 120;
 export const STORAGE_ALERT_RATIO = 0.85;
@@ -154,6 +160,70 @@ export function deriveAlerts(screens: ScreenHealth[], nowLabel = "just now"): Al
 
 export function storageAlertCount(screens: ScreenHealth[]): number {
   return screens.filter((s) => isStorageAlert(s.storageUsedGb, s.storageTotalGb)).length;
+}
+
+export type DashboardNowPlaying = {
+  id: string;
+  name: string;
+  locationName: string;
+  nowPlaying: string | null;
+  status: Screen["status"];
+};
+
+export type DashboardLocationStatus = {
+  id: string;
+  name: string;
+  total: number;
+  online: number;
+};
+
+export type DashboardFleetScreen = ScreenHealth & {
+  locationId: string;
+  nowPlaying: string | null;
+};
+
+/** Counts, alerts, and now-playing from already-loaded screen rows — no extra IO. */
+export function summarizeDashboardFleet(input: {
+  locations: Array<{ id: string; name: string; status: string }>;
+  screens: DashboardFleetScreen[];
+}): {
+  locations: number;
+  screens: number;
+  online: number;
+  offline: number;
+  syncing: number;
+  storageAlerts: number;
+  locationStatus: DashboardLocationStatus[];
+  nowPlaying: DashboardNowPlaying[];
+  alerts: AlertItem[];
+} {
+  const visible = input.locations.filter((location) => location.status !== "Archived");
+  const screens = input.screens;
+  return {
+    locations: visible.length,
+    screens: screens.length,
+    online: screens.filter((s) => s.status === "online").length,
+    offline: screens.filter((s) => s.status === "offline").length,
+    syncing: screens.filter((s) => s.status === "syncing").length,
+    storageAlerts: storageAlertCount(screens),
+    locationStatus: visible.map((location) => ({
+      id: location.id,
+      name: location.name,
+      total: screens.filter((s) => s.locationId === location.id).length,
+      online: screens.filter((s) => s.locationId === location.id && s.status === "online").length,
+    })),
+    nowPlaying: screens
+      .filter((s) => s.nowPlaying)
+      .slice(0, 5)
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        locationName: s.locationName,
+        nowPlaying: s.nowPlaying,
+        status: s.status,
+      })),
+    alerts: deriveAlerts(screens),
+  };
 }
 
 export function activityFromMonitoring(

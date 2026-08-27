@@ -21,9 +21,13 @@ export function useLiveMonitoring(queryKeys: ReadonlyArray<readonly unknown[]>):
     let active = true;
     const invalidate = () => {
       if (!active) return;
+      if (document.visibilityState === "hidden") return;
       for (const key of queryKeys) {
         void qc.invalidateQueries({ queryKey: [...key] });
       }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") invalidate();
     };
     let channel = supabase.channel(`e3-admin-monitoring:${keyFingerprint}`);
     for (const table of TABLES) {
@@ -34,8 +38,10 @@ export function useLiveMonitoring(queryKeys: ReadonlyArray<readonly unknown[]>):
       );
     }
     channel.subscribe();
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       active = false;
+      document.removeEventListener("visibilitychange", onVisibility);
       void supabase.removeChannel(channel);
     };
     // queryKeys is captured via fingerprint so callers can pass inline arrays.

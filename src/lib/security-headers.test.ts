@@ -10,6 +10,7 @@ test("admin responses advertise HSTS, CSP, and clickjacking protections", () => 
   const csp = SECURITY_HEADERS["Content-Security-Policy"] ?? "";
   assert.match(csp, /frame-ancestors 'none'/);
   assert.match(csp, /upgrade-insecure-requests/);
+  assert.match(csp, /https:\/\/vercel\.live/);
   assert.match(csp, /https:\/\/\*\.supabase\.co/);
   assert.match(csp, /https:\/\/\*\.r2\.cloudflarestorage\.com/);
   assert.match(csp, /https:\/\/\*\.eu\.r2\.cloudflarestorage\.com/);

@@ -41,6 +41,7 @@ test("admin list cache outlives a 30s monitoring poll", () => {
   assert.equal(ADMIN_QUERY_STALE_MS > 30_000, true);
 });
 
+
 test("loadShellAuth reuses the query cache within the stale window", async () => {
   const qc = client();
   let calls = 0;

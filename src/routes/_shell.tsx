@@ -2,8 +2,10 @@ import { Outlet, createFileRoute, redirect, useRouterState } from "@tanstack/rea
 
 import { PermissionDenied } from "@/components/auth/PermissionDenied";
 import { AppShell } from "@/components/layout/AppShell";
+import { RoutePending } from "@/components/layout/RoutePending";
 import { AUTH_SESSION_STALE_MS, loadShellAuth } from "@/lib/query-defaults";
 import { canAccessPath } from "@/lib/rbac";
+import { useIsClient } from "@/lib/use-is-client";
 
 export const Route = createFileRoute("/_shell")({
   // Keep sidebar+header mounted; don't re-hit auth on every sidebar click.
@@ -23,13 +25,16 @@ export const Route = createFileRoute("/_shell")({
 function ShellLayout() {
   const { auth } = Route.useRouteContext();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  if (!auth) return null;
-  const profile = auth.ok ? auth.profile : null;
-  const allowed = auth.ok && canAccessPath(auth.profile.role, pathname);
+  const isClient = useIsClient();
+  const profile = auth?.ok ? auth.profile : null;
+  const email = auth?.email ?? null;
+  const allowed = Boolean(auth?.ok && canAccessPath(auth.profile.role, pathname));
 
   return (
-    <AppShell profile={profile} fallbackEmail={auth.email}>
-      {auth.ok ? (
+    <AppShell profile={profile} fallbackEmail={email}>
+      {!auth || !isClient ? (
+        <RoutePending />
+      ) : auth.ok ? (
         allowed ? (
           <Outlet />
         ) : (

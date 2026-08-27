@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { E3Button, E3Modal } from "@/components/e3";
@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { getPublicCmsUrl } from "@/lib/cms-settings";
+import { DEFAULT_PUBLIC_CMS_URL, getPublicCmsUrl } from "@/lib/cms-settings";
 import { locationService, screenGroupService, screenService } from "@/services";
 import type { Orientation } from "@/types";
 
@@ -34,6 +34,11 @@ export function PairScreenDialog({
     resolution: "1920 × 1080",
     groupIds: [] as string[],
   });
+  const [publicCmsUrl, setPublicCmsUrl] = useState(DEFAULT_PUBLIC_CMS_URL);
+
+  useEffect(() => {
+    setPublicCmsUrl(getPublicCmsUrl());
+  }, []);
 
   const locations = useQuery({ queryKey: ["locations"], queryFn: locationService.list });
   const groups = useQuery({ queryKey: ["screen-groups"], queryFn: screenGroupService.list });
@@ -127,7 +132,7 @@ export function PairScreenDialog({
               className="h-12 text-center text-lg tracking-[0.3em]"
             />
             <p className="text-xs text-muted-foreground">
-              Install the E3 player pointed at {getPublicCmsUrl()}, then enter the 6-digit code
+              Install the E3 player pointed at {publicCmsUrl}, then enter the 6-digit code
               shown on the TV.
             </p>
           </div>

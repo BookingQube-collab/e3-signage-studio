@@ -8,6 +8,7 @@ import type {
   DeviceLogLine,
   ProofOfPlayRow,
 } from "@/types";
+import type { DashboardSummary } from "@/services/types";
 
 const accessTokenSchema = z.object({ accessToken: z.string() });
 
@@ -16,6 +17,13 @@ export const dashboardActivityFn = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<ActivityItem[]> => {
     const { listDashboardActivity } = await import("@/server/monitoring.server");
     return listDashboardActivity(data.accessToken);
+  });
+
+export const dashboardSummaryFn = createServerFn({ method: "POST" })
+  .validator(accessTokenSchema)
+  .handler(async ({ data }): Promise<DashboardSummary> => {
+    const { getDashboardSummary } = await import("@/server/monitoring.server");
+    return getDashboardSummary(data.accessToken);
   });
 
 export const proofOfPlayFn = createServerFn({ method: "POST" })

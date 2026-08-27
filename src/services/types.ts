@@ -27,6 +27,14 @@ export type ScreenPairInput = {
   groupIds: string[];
 };
 
+export type DashboardNowPlaying = {
+  id: string;
+  name: string;
+  locationName: string;
+  nowPlaying: string | null;
+  status: Screen["status"];
+};
+
 export type DashboardSummary = {
   locations: number;
   screens: number;
@@ -42,7 +50,7 @@ export type DashboardSummary = {
     total: number;
     online: number;
   }>;
-  nowPlaying: Screen[];
+  nowPlaying: DashboardNowPlaying[];
   activity: ActivityItem[];
   alerts: AlertItem[];
 };
