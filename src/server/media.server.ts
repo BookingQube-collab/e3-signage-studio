@@ -13,7 +13,11 @@ import {
 } from "@e3/validation";
 
 import type { MediaFolderRecord, MediaRecord } from "@/services/media-map";
-import { assertBulkDeleteAllowed, MAX_BULK_MEDIA_IDS } from "../lib/media-bulk";
+import {
+  assertBulkDeleteAllowed,
+  liveUsagePlaylistIds,
+  MAX_BULK_MEDIA_IDS,
+} from "../lib/media-bulk";
 import {
   assertUploadSize,
   buildStorageKey,
@@ -200,17 +204,35 @@ async function loadUsedIn(
 
   const [{ data: playlists }, { data: campaigns }, { data: screens }] = await Promise.all([
     playlistIds.length > 0
-      ? client.from("playlists").select("id, name").in("id", playlistIds)
-      : Promise.resolve({ data: [] as Array<{ id: string; name: string }> }),
+      ? client.from("playlists").select("id, name, status, archived_at").in("id", playlistIds)
+      : Promise.resolve({
+          data: [] as Array<{ id: string; name: string; status: string; archived_at: string | null }>,
+        }),
     playlistIds.length > 0
-      ? client.from("campaigns").select("id, name, playlist_id").in("playlist_id", playlistIds)
-      : Promise.resolve({ data: [] as Array<{ id: string; name: string; playlist_id: string }> }),
+      ? client
+          .from("campaigns")
+          .select("id, name, playlist_id")
+          .in("playlist_id", playlistIds)
+          .is("archived_at", null)
+      : Promise.resolve({
+          data: [] as Array<{ id: string; name: string; playlist_id: string }>,
+        }),
     client.from("screens").select("name, currently_playing_media_id").in("currently_playing_media_id", mediaIds),
   ]);
 
+  const livePlaylistIds = liveUsagePlaylistIds(
+    (playlists ?? []).map((row) => ({
+      id: asString((row as { id: string }).id),
+      name: asString((row as { name: string }).name),
+      status: asString((row as { status: string }).status),
+      archived_at: asNullableString((row as { archived_at: string | null }).archived_at),
+    })),
+  );
   const playlistName = new Map<string, string>();
   for (const row of playlists ?? []) {
-    playlistName.set(asString((row as { id: string }).id), asString((row as { name: string }).name));
+    const id = asString((row as { id: string }).id);
+    if (!livePlaylistIds.has(id)) continue;
+    playlistName.set(id, asString((row as { name: string }).name));
   }
   for (const row of itemRows ?? []) {
     const mediaId = asString((row as { media_id: string }).media_id);
@@ -220,6 +242,7 @@ async function loadUsedIn(
   }
   for (const row of campaigns ?? []) {
     const playlistId = asString((row as { playlist_id: string }).playlist_id);
+    if (!livePlaylistIds.has(playlistId)) continue;
     const mediaIdsForPlaylist = (itemRows ?? [])
       .filter((item) => asString((item as { playlist_id: string }).playlist_id) === playlistId)
       .map((item) => asString((item as { media_id: string }).media_id));
@@ -940,29 +963,54 @@ async function assertIdsDeletable(
   rows: MediaRow[],
 ): Promise<void> {
   const ids = rows.map((row) => row.id);
-  const { data: itemRows, error } = await client
-    .from("playlist_items")
-    .select("media_id")
-    .in("media_id", ids);
-  throwIfError(error, "Could not check media usage.");
-  const usedIds = new Set(
-    (itemRows ?? []).map((row) => asString((row as { media_id: string }).media_id)),
-  );
-  if (usedIds.size === 0) return;
-  if (rows.length === 1) {
-    throw new Error("This media is used in a playlist. Archive it instead of deleting.");
-  }
-  const usedIn = await loadUsedIn(client, [...usedIds]);
+  const usedIn = await loadUsedIn(client, ids);
   const blocked = rows
-    .filter((row) => usedIds.has(row.id))
     .map((row) => ({
       filename: row.name,
       usedIn: usedIn.get(row.id) ?? { playlists: [], campaigns: [], screens: [] },
-    }));
+    }))
+    .filter((item) => item.usedIn.playlists.length > 0);
   assertBulkDeleteAllowed(blocked);
 }
 
+async function detachNonLivePlaylistItems(
+  client: ReturnType<typeof getUserClient>,
+  mediaId: string,
+): Promise<void> {
+  const { data: itemRows, error } = await client
+    .from("playlist_items")
+    .select("id, playlist_id")
+    .eq("media_id", mediaId);
+  throwIfError(error, "Could not check media usage.");
+  const playlistIds = [
+    ...new Set((itemRows ?? []).map((row) => asString((row as { playlist_id: string }).playlist_id))),
+  ].filter(Boolean);
+  if (playlistIds.length === 0) return;
+
+  const { data: playlists, error: playlistError } = await client
+    .from("playlists")
+    .select("id, status, archived_at")
+    .in("id", playlistIds);
+  throwIfError(playlistError, "Could not check playlist usage.");
+  const liveIds = liveUsagePlaylistIds(
+    (playlists ?? []).map((row) => ({
+      id: asString((row as { id: string }).id),
+      status: asString((row as { status: string }).status),
+      archived_at: asNullableString((row as { archived_at: string | null }).archived_at),
+    })),
+  );
+  const staleIds = (itemRows ?? [])
+    .filter((row) => !liveIds.has(asString((row as { playlist_id: string }).playlist_id)))
+    .map((row) => asString((row as { id: string }).id))
+    .filter(Boolean);
+  if (staleIds.length === 0) return;
+
+  const { error: deleteError } = await client.from("playlist_items").delete().in("id", staleIds);
+  throwIfError(deleteError, "Could not clear archived playlist usage.");
+}
+
 async function purgeMediaRow(client: ReturnType<typeof getUserClient>, id: string): Promise<void> {
+  await detachNonLivePlaylistItems(client, id);
   const { data: versions, error: versionError } = await client
     .from("media_versions")
     .select("storage_key, thumbnail_key")

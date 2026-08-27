@@ -1,5 +1,6 @@
 import type { CmsProfile } from "@/lib/auth-types";
 import { isOrgWideRole } from "@/lib/location-scope";
+import { liveUsagePlaylistIds } from "@/lib/media-bulk";
 import { getUserClient } from "./supabase.server";
 
 type UserClient = ReturnType<typeof getUserClient>;
@@ -83,15 +84,39 @@ async function loadScopedContentUsageUnsafe(
 
   const playlistList = [...usage.playlistIds];
   if (playlistList.length > 0) {
-    const { data: items } = await client
-      .from("playlist_items")
-      .select("media_id, layout_id")
-      .in("playlist_id", playlistList);
-    for (const row of items ?? []) {
-      const mediaId = asId((row as { media_id: unknown }).media_id);
-      const layoutId = asId((row as { layout_id: unknown }).layout_id);
-      if (mediaId) usage.mediaIds.add(mediaId);
-      if (layoutId) usage.layoutIds.add(layoutId);
+    const { data: playlists } = await client
+      .from("playlists")
+      .select("id, status, archived_at")
+      .in("id", playlistList);
+    const liveIds = liveUsagePlaylistIds(
+      (playlists ?? []).flatMap((row) => {
+        const id = asId((row as { id: unknown }).id);
+        if (!id) return [];
+        const status = (row as { status: unknown }).status;
+        const archivedAt = (row as { archived_at: unknown }).archived_at;
+        return [
+          {
+            id,
+            status: typeof status === "string" ? status : null,
+            archived_at: typeof archivedAt === "string" ? archivedAt : null,
+          },
+        ];
+      }),
+    );
+    usage.playlistIds.clear();
+    for (const id of liveIds) usage.playlistIds.add(id);
+    const liveList = [...usage.playlistIds];
+    if (liveList.length > 0) {
+      const { data: items } = await client
+        .from("playlist_items")
+        .select("media_id, layout_id")
+        .in("playlist_id", liveList);
+      for (const row of items ?? []) {
+        const mediaId = asId((row as { media_id: unknown }).media_id);
+        const layoutId = asId((row as { layout_id: unknown }).layout_id);
+        if (mediaId) usage.mediaIds.add(mediaId);
+        if (layoutId) usage.layoutIds.add(layoutId);
+      }
     }
   }
 

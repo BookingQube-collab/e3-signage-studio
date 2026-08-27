@@ -7,6 +7,9 @@ import {
   applySelectionClick,
   assertBulkDeleteAllowed,
   inUseDeleteMessage,
+  isLivePlaylistStatus,
+  liveUsagePlaylistIds,
+  liveUsagePlaylistNames,
   partitionBulkDelete,
   releaseHiddenIfGone,
   selectAllActionLabel,
@@ -83,6 +86,47 @@ test("bulk move assigns a folder to every selected file", () => {
   const unfiled = applyBulkFolderMove(moved, ["m-wire", "m-rajan"], null, null);
   assert.equal(unfiled.find((item) => item.id === "m-wire")?.folderId, null);
   assert.equal(unfiled.find((item) => item.id === "m-rajan")?.folderId, null);
+});
+
+test("archived and deleted playlists do not count as live usage", () => {
+  assert.equal(isLivePlaylistStatus("ACTIVE", null), true);
+  assert.equal(isLivePlaylistStatus("DRAFT", null), true);
+  assert.equal(isLivePlaylistStatus("SCHEDULED", null), true);
+  assert.equal(isLivePlaylistStatus("ARCHIVED", null), false);
+  assert.equal(isLivePlaylistStatus("ACTIVE", "2026-08-27T00:00:00Z"), false);
+  assert.equal(isLivePlaylistStatus("DRAFT", "2026-08-27T00:00:00Z"), false);
+  assert.deepEqual(
+    liveUsagePlaylistNames([
+      { id: "p-poppy", name: "Poppy Birthday", status: "ARCHIVED", archived_at: "2026-08-27T00:00:00Z" },
+      { id: "p-rajan", name: "Rajan Room Playlist", status: "ACTIVE", archived_at: null },
+    ]),
+    ["Rajan Room Playlist"],
+  );
+  assert.deepEqual(
+    [...liveUsagePlaylistIds([
+      { id: "p-poppy", name: "Poppy Birthday", status: "ARCHIVED", archived_at: "2026-08-27T00:00:00Z" },
+      { id: "p-rajan", name: "Rajan Room Playlist", status: "ACTIVE", archived_at: null },
+    ])],
+    ["p-rajan"],
+  );
+  const ghost = {
+    id: "m-poppy",
+    filename: "ninjago-happy-6th-birthday-poppy.jpg",
+    usedIn: {
+      playlists: liveUsagePlaylistNames([
+        { name: "Poppy Birthday", status: "ARCHIVED", archived_at: "2026-08-27T00:00:00Z" },
+      ]),
+      campaigns: [] as string[],
+      screens: [] as string[],
+    },
+  };
+  const { deletable, blocked } = partitionBulkDelete([ghost], ["m-poppy"]);
+  assert.deepEqual(
+    deletable.map((item) => item.filename),
+    ["ninjago-happy-6th-birthday-poppy.jpg"],
+  );
+  assert.equal(blocked.length, 0);
+  assert.doesNotThrow(() => assertBulkDeleteAllowed(blocked));
 });
 
 test("bulk delete is blocked when a file is in a live playlist, naming that playlist", () => {

@@ -6,6 +6,44 @@ export type MediaUsage = {
   screens?: string[];
 };
 
+export type PlaylistUsageRow = {
+  id?: string;
+  name?: string;
+  status?: string | null;
+  archived_at?: string | null;
+};
+
+/**
+ * Live usage is any playlist still in the library (draft/active/scheduled).
+ * Archived or soft-deleted playlists must not block media delete.
+ */
+export function isLivePlaylistStatus(
+  status: string | null | undefined,
+  archivedAt: string | null | undefined,
+): boolean {
+  if (typeof archivedAt === "string" && archivedAt.length > 0) return false;
+  return (status ?? "").toUpperCase() !== "ARCHIVED";
+}
+
+export function liveUsagePlaylistNames(playlists: PlaylistUsageRow[]): string[] {
+  const names: string[] = [];
+  for (const playlist of playlists) {
+    if (!isLivePlaylistStatus(playlist.status, playlist.archived_at)) continue;
+    if (playlist.name && !names.includes(playlist.name)) names.push(playlist.name);
+  }
+  return names;
+}
+
+export function liveUsagePlaylistIds(playlists: PlaylistUsageRow[]): Set<string> {
+  const ids = new Set<string>();
+  for (const playlist of playlists) {
+    if (!playlist.id) continue;
+    if (!isLivePlaylistStatus(playlist.status, playlist.archived_at)) continue;
+    ids.add(playlist.id);
+  }
+  return ids;
+}
+
 export type ClickModifiers = {
   toggle: boolean;
   range: boolean;

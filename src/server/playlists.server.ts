@@ -382,6 +382,9 @@ export async function archivePlaylist(accessToken: string, id: string): Promise<
     .eq("organization_id", auth.profile.organizationId);
   throwIfError(screenError, "Could not unassign this playlist from screens.");
 
+  const { error: itemsError } = await client.from("playlist_items").delete().eq("playlist_id", id);
+  throwIfError(itemsError, "Could not clear playlist items.");
+
   const { error } = await client
     .from("playlists")
     .update({ status: "ARCHIVED", archived_at: new Date().toISOString() })
