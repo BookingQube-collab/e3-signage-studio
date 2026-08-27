@@ -19,7 +19,7 @@ import {
 } from "@/components/e3";
 import { cn } from "@/lib/utils";
 import { reportService } from "@/services";
-import { ADMIN_MONITORING_REFETCH_MS, toCsv } from "@/lib/monitoring";
+import { toCsv } from "@/lib/monitoring";
 import type { AvailabilityRow, CampaignPerformanceRow, ProofOfPlayRow } from "@/types";
 
 export const Route = createFileRoute("/_shell/reports")({
@@ -58,17 +58,14 @@ function ReportsPage() {
   const pop = useQuery({
     queryKey: ["report-pop"],
     queryFn: reportService.proofOfPlay,
-    refetchInterval: ADMIN_MONITORING_REFETCH_MS,
   });
   const avail = useQuery({
     queryKey: ["report-avail"],
     queryFn: reportService.availability,
-    refetchInterval: ADMIN_MONITORING_REFETCH_MS,
   });
   const perf = useQuery({
     queryKey: ["report-perf"],
     queryFn: reportService.campaignPerformance,
-    refetchInterval: ADMIN_MONITORING_REFETCH_MS,
   });
 
   const popRows = pop.data ?? [];

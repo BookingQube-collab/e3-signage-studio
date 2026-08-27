@@ -53,6 +53,16 @@ export default defineConfig({
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
     server: { entry: "server" },
+    router: {
+      codeSplittingOptions: {
+        defaultBehavior: [
+          ["component"],
+          ["pendingComponent"],
+          ["errorComponent"],
+          ["notFoundComponent"],
+        ],
+      },
+    },
   },
   // Pin Vercel for this host; Lovable sandbox still overwrites to cloudflare-module.
   // runtimeConfig + empty envPrefix lets Nitro overlay process.env at lambda runtime.

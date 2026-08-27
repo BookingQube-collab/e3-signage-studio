@@ -2,14 +2,16 @@ import { Outlet, createFileRoute, redirect, useRouterState } from "@tanstack/rea
 
 import { PermissionDenied } from "@/components/auth/PermissionDenied";
 import { AppShell } from "@/components/layout/AppShell";
-import { getAuthSessionFn } from "@/lib/auth-functions";
+import { AUTH_SESSION_STALE_MS, loadShellAuth } from "@/lib/query-defaults";
 import { canAccessPath } from "@/lib/rbac";
-import { getBrowserAccessToken } from "@/lib/supabase";
 
 export const Route = createFileRoute("/_shell")({
-  beforeLoad: async () => {
-    const accessToken = await getBrowserAccessToken();
-    const auth = await getAuthSessionFn({ data: { accessToken } });
+  // Keep sidebar+header mounted; don't re-hit auth on every sidebar click.
+  staleTime: AUTH_SESSION_STALE_MS,
+  preloadStaleTime: AUTH_SESSION_STALE_MS,
+  shouldReload: false,
+  beforeLoad: async ({ context }) => {
+    const auth = await loadShellAuth(context.queryClient);
     if (!auth.ok && auth.code === "UNAUTHENTICATED") {
       throw redirect({ to: "/login" });
     }

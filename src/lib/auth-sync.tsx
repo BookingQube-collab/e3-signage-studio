@@ -1,12 +1,15 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 
 import { clearSessionFn, persistSessionFn } from "@/lib/auth-functions";
+import { clearShellAuth } from "@/lib/query-defaults";
 import { ensurePublicSupabaseConfig, getSupabase } from "@/lib/supabase";
 
 /** Keeps httpOnly auth cookies in sync with the browser Supabase session. */
 export function AuthSessionSync({ children }: { children: ReactNode }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     let cancelled = false;
@@ -16,6 +19,7 @@ export function AuthSessionSync({ children }: { children: ReactNode }) {
       if (!config || cancelled) return;
       const { data } = getSupabase().auth.onAuthStateChange((event, session) => {
         if (event === "SIGNED_OUT") {
+          clearShellAuth(queryClient);
           void clearSessionFn()
             .then(async () => {
               await router.invalidate();
@@ -30,6 +34,9 @@ export function AuthSessionSync({ children }: { children: ReactNode }) {
           session &&
           (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION")
         ) {
+          if (event === "SIGNED_IN") {
+            clearShellAuth(queryClient);
+          }
           void persistSessionFn({
             data: {
               accessToken: session.access_token,
@@ -45,7 +52,7 @@ export function AuthSessionSync({ children }: { children: ReactNode }) {
       cancelled = true;
       unsubscribe?.();
     };
-  }, [router]);
+  }, [queryClient, router]);
 
   return children;
 }

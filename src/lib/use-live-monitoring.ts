@@ -18,7 +18,9 @@ export function useLiveMonitoring(queryKeys: ReadonlyArray<readonly unknown[]>):
     } catch {
       return;
     }
+    let active = true;
     const invalidate = () => {
+      if (!active) return;
       for (const key of queryKeys) {
         void qc.invalidateQueries({ queryKey: [...key] });
       }
@@ -33,6 +35,7 @@ export function useLiveMonitoring(queryKeys: ReadonlyArray<readonly unknown[]>):
     }
     channel.subscribe();
     return () => {
+      active = false;
       void supabase.removeChannel(channel);
     };
     // queryKeys is captured via fingerprint so callers can pass inline arrays.

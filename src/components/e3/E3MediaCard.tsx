@@ -30,7 +30,13 @@ export function MediaThumb({ item, className }: { item: Media; className?: strin
       aria-hidden
     >
       {item.thumbnailUrl ? (
-        <img src={item.thumbnailUrl} alt="" className="size-full object-cover" />
+        <img
+          src={item.thumbnailUrl}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          className="size-full object-cover"
+        />
       ) : (
         <Icon className="size-7 text-foreground/70" />
       )}
