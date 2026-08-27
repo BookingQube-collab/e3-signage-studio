@@ -45,6 +45,15 @@ export function E3Button({
   ...props
 }: E3ButtonProps) {
   const Comp = asChild && !loading ? Slot : "button";
+  // Radix Slot throws unless it receives exactly one element child.
+  const content = loading ? (
+    <>
+      <Loader2 className="animate-spin" aria-hidden />
+      {children}
+    </>
+  ) : (
+    children
+  );
   return (
     <Comp
       className={cn(e3ButtonVariants({ variant, size }), className)}
@@ -52,8 +61,7 @@ export function E3Button({
       aria-busy={loading || undefined}
       {...props}
     >
-      {loading ? <Loader2 className="animate-spin" aria-hidden /> : null}
-      {children}
+      {content}
     </Comp>
   );
 }
