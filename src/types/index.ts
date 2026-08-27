@@ -224,6 +224,7 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  username?: string | null;
   role: UserRole;
   locationIds: string[];
   status: "Active" | "Invited" | "Disabled";

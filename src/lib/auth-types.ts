@@ -35,6 +35,7 @@ export type CmsUserRow = {
   id: string;
   name: string;
   email: string;
+  username: string | null;
   role: UserRole;
   status: UserStatus;
   locationIds: string[];

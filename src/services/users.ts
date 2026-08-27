@@ -1,6 +1,6 @@
 import { invert, UI_ROLE } from "@e3/shared-types";
 
-import { inviteUserFn, listUsersFn, updateUserFn } from "@/lib/auth-functions";
+import { createUserFn, inviteUserFn, listUsersFn, updateUserFn } from "@/lib/auth-functions";
 import type { CmsUserRow } from "@/lib/auth-types";
 import { formatLastActive } from "@/lib/relative-time";
 import { getBrowserAccessToken } from "@/lib/supabase";
@@ -20,6 +20,7 @@ function toUiUser(row: CmsUserRow): User {
     id: row.id,
     name: row.name,
     email: row.email,
+    username: row.username,
     role: UI_ROLE[row.role],
     locationIds: row.locationIds,
     status: row.status === "ACTIVE" ? "Active" : row.status === "INVITED" ? "Invited" : "Disabled",
@@ -60,6 +61,20 @@ export const liveUserService: UserService = {
         accessToken: await accessToken(),
         name: input.name,
         email: input.email,
+        role: ROLE_FROM_UI[input.role],
+        locationIds: uuidLocationIds(input.locationIds),
+      },
+    });
+    return toUiUser(result.user);
+  },
+  create: async (input) => {
+    const result = await createUserFn({
+      data: {
+        accessToken: await accessToken(),
+        name: input.name,
+        username: input.username,
+        password: input.password,
+        email: input.email?.trim() || "",
         role: ROLE_FROM_UI[input.role],
         locationIds: uuidLocationIds(input.locationIds),
       },

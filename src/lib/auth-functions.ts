@@ -4,6 +4,7 @@ import { z } from "zod";
 import { USER_ROLES } from "@e3/shared-types";
 
 import type { AuthSessionResult, CmsUserRow, LocationOption } from "@/lib/auth-types";
+import { usernameError } from "@/lib/user-credentials";
 
 function roleEnum() {
   return z.enum(USER_ROLES);
@@ -60,6 +61,40 @@ export const inviteUserFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { inviteCmsUser } = await import("@/server/auth.server");
     return inviteCmsUser(data);
+  });
+
+export const createUserFn = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      accessToken: z.string(),
+      name: z.string().trim().min(1).max(200),
+      username: z
+        .string()
+        .trim()
+        .min(3)
+        .max(32)
+        .refine((value) => usernameError(value) === null, {
+          message: "Use letters, numbers, dots, hyphens, or underscores.",
+        }),
+      password: z.string().min(8).max(72),
+      email: z.union([z.string().email(), z.literal("")]).optional(),
+      role: roleEnum(),
+      locationIds: z.array(z.string().uuid()),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const { createCmsUser } = await import("@/server/auth.server");
+    return createCmsUser({
+      ...data,
+      email: data.email || null,
+    });
+  });
+
+export const resolveLoginIdentifierFn = createServerFn({ method: "POST" })
+  .validator(z.object({ identifier: z.string().trim().min(1).max(200) }))
+  .handler(async ({ data }): Promise<{ email: string }> => {
+    const { resolveLoginIdentifier } = await import("@/server/auth.server");
+    return resolveLoginIdentifier(data.identifier);
   });
 
 export const updateUserFn = createServerFn({ method: "POST" })

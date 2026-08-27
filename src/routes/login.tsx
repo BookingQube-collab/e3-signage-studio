@@ -6,7 +6,7 @@ import logo from "@/assets/e3-logo.png";
 import { E3Button } from "@/components/e3";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getAuthSessionFn, persistSessionFn } from "@/lib/auth-functions";
+import { getAuthSessionFn, persistSessionFn, resolveLoginIdentifierFn } from "@/lib/auth-functions";
 import { getPublicCmsUrl } from "@/lib/cms-settings";
 import { getPublicSupabaseConfigFn } from "@/lib/public-config-functions";
 import {
@@ -15,6 +15,7 @@ import {
   getSupabase,
   seedPublicSupabaseConfig,
 } from "@/lib/supabase";
+import { looksLikeEmail } from "@/lib/user-credentials";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -53,7 +54,7 @@ export const Route = createFileRoute("/login")({
 function mapLoginError(message: string): string {
   const lower = message.toLowerCase();
   if (lower.includes("invalid login") || lower.includes("invalid credentials")) {
-    return "Invalid email or password.";
+    return "Invalid username, email, or password.";
   }
   if (lower.includes("email not confirmed")) {
     return "Confirm your email before signing in.";
@@ -69,7 +70,7 @@ function LoginPage() {
   seedPublicSupabaseConfig(publicSupabase);
   const navigate = useNavigate();
   const router = useRouter();
-  const [email, setEmail] = useState("rajan@e3.qa");
+  const [identifier, setIdentifier] = useState("rajan@e3.qa");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -78,8 +79,8 @@ function LoginPage() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (submitting) return;
-    if (!email || !password) {
-      setError("Enter your email and password to continue.");
+    if (!identifier || !password) {
+      setError("Enter your username or email, and password to continue.");
       return;
     }
     const config = await ensurePublicSupabaseConfig();
@@ -93,14 +94,17 @@ function LoginPage() {
       const limited = await fetch("/api/auth/login-attempt", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ identifier }),
       });
       if (limited.status === 429) {
         setError("Too many sign-in attempts. Try again in a few minutes.");
         return;
       }
+      const resolved = looksLikeEmail(identifier)
+        ? { email: identifier.trim() }
+        : await resolveLoginIdentifierFn({ data: { identifier: identifier.trim() } });
       const { data, error: signError } = await getSupabase().auth.signInWithPassword({
-        email,
+        email: resolved.email,
         password,
       });
       if (signError) {
@@ -129,8 +133,12 @@ function LoginPage() {
 
   async function onForgotPassword() {
     if (resetting || submitting) return;
-    if (!email) {
+    if (!identifier) {
       setError("Enter your email to reset your password.");
+      return;
+    }
+    if (!looksLikeEmail(identifier)) {
+      setError("Password reset needs an email address. Ask a Super Admin if this account has none.");
       return;
     }
     const config = await ensurePublicSupabaseConfig();
@@ -144,13 +152,13 @@ function LoginPage() {
       const limited = await fetch("/api/auth/login-attempt", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ identifier }),
       });
       if (limited.status === 429) {
         setError("Too many password reset attempts. Try again in a few minutes.");
         return;
       }
-      const { error: resetError } = await getSupabase().auth.resetPasswordForEmail(email, {
+      const { error: resetError } = await getSupabase().auth.resetPasswordForEmail(identifier.trim(), {
         redirectTo: `${getPublicCmsUrl()}/login`,
       });
       if (resetError) {
@@ -198,15 +206,15 @@ function LoginPage() {
         <div className="e3-gradient-border rounded-2xl bg-card p-6 sm:p-8">
           <form onSubmit={(e) => void onSubmit(e)} className="space-y-5" noValidate>
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="identifier">Email or username</Label>
               <Input
-                id="email"
-                type="email"
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="identifier"
+                type="text"
+                autoComplete="username"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
                 className="h-11 rounded-xl bg-background"
-                placeholder="you@e3.qa"
+                placeholder="you@e3.qa or username"
               />
             </div>
             <div className="space-y-2">

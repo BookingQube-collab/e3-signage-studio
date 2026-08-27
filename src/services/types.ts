@@ -138,6 +138,14 @@ export type UserService = {
     role: User["role"];
     locationIds: string[];
   }) => Promise<User>;
+  create: (input: {
+    name: string;
+    username: string;
+    password: string;
+    email?: string;
+    role: User["role"];
+    locationIds: string[];
+  }) => Promise<User>;
 };
 
 export type DashboardService = {

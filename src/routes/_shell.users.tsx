@@ -17,7 +17,6 @@ import {
   E3Table,
   type E3Column,
 } from "@/components/e3";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -26,7 +25,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { listLocationOptionsFn, inviteUserFn } from "@/lib/auth-functions";
+import { CreateUserDialog } from "@/features/users/CreateUserDialog";
+import { listLocationOptionsFn } from "@/lib/auth-functions";
 import { isProtectedSuperAdminEmail, requiresLocationAssignment } from "@/lib/location-scope";
 import { getBrowserAccessToken } from "@/lib/supabase";
 import { userService } from "@/services";
@@ -98,39 +98,6 @@ function UsersPage() {
       : locationOptions;
   const inviteNeedsLocations = requiresLocationAssignment(ROLE_FROM_UI[form.role]);
 
-  const invite = useMutation({
-    mutationFn: async (input: {
-      name: string;
-      email: string;
-      role: UserRole;
-      locationIds: string[];
-    }) => {
-      const accessToken = await getBrowserAccessToken();
-      return inviteUserFn({
-        data: {
-          accessToken,
-          name: input.name,
-          email: input.email,
-          role: ROLE_FROM_UI[input.role],
-          locationIds: input.locationIds,
-        },
-      });
-    },
-    onSuccess: (result) => {
-      void qc.invalidateQueries({ queryKey: ["users"] });
-      setOpen(false);
-      setForm({ name: "", email: "", role: "Site Supervisor", locationIds: [] });
-      if (result.warning) {
-        toast.warning(result.warning);
-      } else {
-        toast.success("Invitation sent");
-      }
-    },
-    onError: (err: Error) => {
-      toast.error(err.message || "Could not send invite");
-    },
-  });
-
   const saveUser = useMutation({
     mutationFn: (user: User) => userService.save(user),
     onSuccess: () => {
@@ -158,7 +125,11 @@ function UsersPage() {
           </span>
           <div className="min-w-0">
             <p className="truncate font-medium">{u.name}</p>
-            <p className="truncate text-xs text-muted-foreground">{u.email}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {u.username ? `@${u.username}` : null}
+              {u.username && u.email ? " · " : null}
+              {u.email || (!u.username ? "No email" : null)}
+            </p>
           </div>
         </div>
       ),
@@ -243,14 +214,8 @@ function UsersPage() {
         title="Users & roles"
         description="Who can access the E3 signage network and what they can change."
         actions={
-          <E3Button
-            variant="primary"
-            onClick={() => {
-              setForm({ name: "", email: "", role: "Site Supervisor", locationIds: [] });
-              setOpen(true);
-            }}
-          >
-            <UserPlus /> Invite user
+          <E3Button variant="primary" onClick={() => setOpen(true)}>
+            <UserPlus /> Add user
           </E3Button>
         }
       />
@@ -279,117 +244,11 @@ function UsersPage() {
         </E3Card>
       </div>
 
-      <E3Modal
+      <CreateUserDialog
         open={open}
-        onOpenChange={(next) => {
-          if (!next && invite.isPending) return;
-          setOpen(next);
-        }}
-        title="Invite user"
-        description="They'll receive an email invitation. Site Supervisors must be assigned one or more locations."
-        footer={
-          <>
-            <E3Button variant="ghost" disabled={invite.isPending} onClick={() => setOpen(false)}>
-              Cancel
-            </E3Button>
-            <E3Button
-              variant="primary"
-              loading={invite.isPending}
-              disabled={
-                !form.name.trim() ||
-                !form.email.includes("@") ||
-                (inviteNeedsLocations && form.locationIds.length === 0)
-              }
-              onClick={() =>
-                invite.mutate({
-                  name: form.name.trim(),
-                  email: form.email.trim(),
-                  role: form.role,
-                  locationIds: form.locationIds,
-                })
-              }
-            >
-              Send invite
-            </E3Button>
-          </>
-        }
-      >
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="u-name">Full name</Label>
-            <Input
-              id="u-name"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder="Layla Hassan"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="u-email">Email</Label>
-            <Input
-              id="u-email"
-              type="email"
-              value={form.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-              placeholder="layla@e3.qa"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="u-role">Role</Label>
-            <Select
-              value={form.role}
-              onValueChange={(v) => setForm({ ...form, role: v as UserRole })}
-            >
-              <SelectTrigger id="u-role">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ROLES.map((r) => (
-                  <SelectItem key={r.role} value={r.role}>
-                    {r.role}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {locationOptions.length > 0 ? (
-            <div className="space-y-2">
-              <Label>Assigned locations</Label>
-              {inviteNeedsLocations ? (
-                <p className="text-xs text-muted-foreground">
-                  Required. They only see these locations after login (pick one or more).
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  Optional for Super Admin and Marketing — they already see every location.
-                </p>
-              )}
-              <div className="max-h-40 space-y-2 overflow-y-auto rounded-xl border border-border p-3">
-                {assignableLocations.map((loc) => (
-                  <label key={loc.id} className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={form.locationIds.includes(loc.id)}
-                      onChange={(e) => locationToggle(loc.id, e.target.checked)}
-                    />
-                    <span>
-                      {loc.name}
-                      {ROLE_FROM_UI[form.role] === "EVENT_MANAGER"
-                        ? ` · ${UI_LOCATION_TYPE[loc.type]}`
-                        : ""}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              No locations in the database yet. Location assignment will appear after locations are
-              created.
-            </p>
-          )}
-        </div>
-      </E3Modal>
+        onOpenChange={setOpen}
+        locationOptions={locationOptions}
+      />
 
       <E3Modal
         open={editing !== null}

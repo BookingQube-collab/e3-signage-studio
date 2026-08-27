@@ -79,6 +79,7 @@ export const apiServices: AppServices = {
     save: () => notConfigured(),
     remove: () => notConfigured(),
     invite: () => notConfigured(),
+    create: () => notConfigured(),
   },
   dashboardService: {
     summary: () => notConfigured(),

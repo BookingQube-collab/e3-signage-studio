@@ -374,6 +374,20 @@ export const mockServices: AppServices = {
       store.users = [user, ...store.users];
       return delay(user, 250);
     },
+    create: (input) => {
+      const user: User = {
+        id: `usr-${Date.now()}`,
+        name: input.name,
+        email: input.email ?? "",
+        username: input.username,
+        role: input.role,
+        locationIds: input.locationIds,
+        status: "Active",
+        lastActive: "Never",
+      };
+      store.users = [user, ...store.users];
+      return delay(user, 250);
+    },
   },
 
   dashboardService: {

@@ -21,6 +21,14 @@ import {
   isProtectedSuperAdminEmail,
   requiresLocationAssignment,
 } from "@/lib/location-scope";
+import {
+  assertPassword,
+  assertUsername,
+  authEmailForUser,
+  looksLikeEmail,
+  normalizeUsername,
+  syntheticEmailForUsername,
+} from "@/lib/user-credentials";
 import { clearAuthCookies, readAuthCookies, setAuthCookies } from "./session-cookies.server";
 import { ensureSeedLocations } from "./location-seed.server";
 import { getServiceRoleClient, getUserClient } from "./supabase.server";
@@ -67,14 +75,15 @@ function parseProfile(raw: unknown): CmsProfile | null {
   const role = row["role"];
   const status = row["status"];
   if (typeof id !== "string" || typeof organizationId !== "string") return null;
-  if (typeof name !== "string" || typeof email !== "string") return null;
+  if (typeof name !== "string") return null;
+  if (email != null && typeof email !== "string") return null;
   if (typeof role !== "string" || !isUserRole(role)) return null;
   if (typeof status !== "string" || !isUserStatus(status)) return null;
   return {
     id,
     organizationId,
     name,
-    email,
+    email: typeof email === "string" ? email : "",
     role,
     status,
     locationIds: parseLocationIds(row["locationIds"]),
@@ -86,7 +95,8 @@ type DbUser = {
   id: string;
   organization_id: string;
   name: string;
-  email: string;
+  email: string | null;
+  username: string | null;
   role: string;
   status: string;
   last_active_at: string | null;
@@ -98,13 +108,25 @@ function toCmsUserRow(row: DbUser, locationIds: string[]): CmsUserRow | null {
   return {
     id: row.id,
     name: row.name,
-    email: row.email,
+    email: row.email ?? "",
+    username: row.username,
     role: row.role,
     status: row.status,
     locationIds,
     lastActiveAt: row.last_active_at,
     createdAt: row.created_at,
   };
+}
+
+function uniqueViolation(message: string | undefined, fallback: string): Error {
+  const lower = (message ?? "").toLowerCase();
+  if (lower.includes("users_username") || lower.includes("(username)")) {
+    return new Error("That username is already taken.");
+  }
+  if (lower.includes("email") || lower.includes("already been registered")) {
+    return new Error("A user with this email already exists.");
+  }
+  return new Error(message || fallback);
 }
 
 export function persistAuthCookies(accessToken: string, refreshToken: string): { ok: true } {
@@ -206,7 +228,7 @@ export async function listCmsUsers(accessToken: string): Promise<CmsUserRow[]> {
   const client = getUserClient(accessToken);
   const { data: users, error } = await client
     .from("users")
-    .select("id, organization_id, name, email, role, status, last_active_at, created_at")
+    .select("id, organization_id, name, email, username, role, status, last_active_at, created_at")
     .order("created_at", { ascending: true });
   if (error) throw new Error(error.message);
 
@@ -324,7 +346,7 @@ export async function inviteCmsUser(input: {
       status: "INVITED",
       created_by: auth.userId,
     })
-    .select("id, organization_id, name, email, role, status, last_active_at, created_at")
+    .select("id, organization_id, name, email, username, role, status, last_active_at, created_at")
     .single();
 
   if (insertError || !inserted) {
@@ -349,6 +371,127 @@ export async function inviteCmsUser(input: {
   return { user, inviteSent, warning };
 }
 
+export async function createCmsUser(input: {
+  accessToken: string;
+  name: string;
+  username: string;
+  password: string;
+  email?: string | null;
+  role: UserRole;
+  locationIds: string[];
+}): Promise<{ user: CmsUserRow }> {
+  const auth = await requireCmsPermission(input.accessToken, "users.manage");
+  assertLocationAssignment(input.role, input.locationIds);
+  if (input.role === "EVENT_MANAGER") {
+    await assertEventLocations(input.locationIds);
+  }
+
+  const username = assertUsername(input.username);
+  assertPassword(input.password);
+  const email = input.email?.trim() || null;
+  if (email && !looksLikeEmail(email)) {
+    throw new Error("Enter a valid email, or leave it blank.");
+  }
+
+  const admin = getServiceRoleClient();
+
+  const { data: takenUsername, error: usernameLookupError } = await admin
+    .from("users")
+    .select("id")
+    .eq("username", username)
+    .maybeSingle();
+  if (usernameLookupError) throw new Error(usernameLookupError.message);
+  if (takenUsername) throw new Error("That username is already taken.");
+
+  if (email) {
+    const { data: takenEmail, error: emailLookupError } = await admin
+      .from("users")
+      .select("id")
+      .eq("email", email)
+      .maybeSingle();
+    if (emailLookupError) throw new Error(emailLookupError.message);
+    if (takenEmail) throw new Error("A user with this email already exists.");
+  }
+
+  const authEmail = authEmailForUser({ username, email });
+  const created = await admin.auth.admin.createUser({
+    email: authEmail,
+    password: input.password,
+    email_confirm: true,
+    user_metadata: { name: input.name, username },
+  });
+  if (created.error || !created.data.user) {
+    throw uniqueViolation(
+      created.error?.message,
+      "Could not create the Auth user. Check the service role key.",
+    );
+  }
+  const authUserId = created.data.user.id;
+
+  const { data: inserted, error: insertError } = await admin
+    .from("users")
+    .insert({
+      id: authUserId,
+      organization_id: auth.profile.organizationId,
+      name: input.name,
+      email,
+      username,
+      role: input.role,
+      status: "ACTIVE",
+      created_by: auth.userId,
+    })
+    .select("id, organization_id, name, email, username, role, status, last_active_at, created_at")
+    .single();
+
+  if (insertError || !inserted) {
+    await admin.auth.admin.deleteUser(authUserId);
+    throw uniqueViolation(insertError?.message, "Could not create the CMS user profile.");
+  }
+
+  if (input.locationIds.length > 0) {
+    const { error: locError } = await admin.from("user_location_access").insert(
+      input.locationIds.map((locationId) => ({
+        user_id: authUserId,
+        location_id: locationId,
+        created_by: auth.userId,
+      })),
+    );
+    if (locError) {
+      throw new Error(locError.message);
+    }
+  }
+
+  const user = toCmsUserRow(inserted as DbUser, input.locationIds);
+  if (!user) throw new Error("Created user had an unexpected role or status.");
+  return { user };
+}
+
+export async function resolveLoginIdentifier(identifier: string): Promise<{ email: string }> {
+  const trimmed = identifier.trim();
+  if (!trimmed) return { email: syntheticEmailForUsername("unknown") };
+  if (looksLikeEmail(trimmed)) return { email: trimmed.toLowerCase() };
+
+  const username = normalizeUsername(trimmed);
+  try {
+    const admin = getServiceRoleClient();
+    const { data } = await admin
+      .from("users")
+      .select("id, email")
+      .eq("username", username)
+      .maybeSingle();
+    if (!data) return { email: syntheticEmailForUsername(username || "unknown") };
+
+    const { data: authUser } = await admin.auth.admin.getUserById((data as { id: string }).id);
+    const authEmail = authUser.user?.email;
+    if (authEmail) return { email: authEmail };
+    const profileEmail = (data as { email: string | null }).email;
+    if (profileEmail) return { email: profileEmail };
+    return { email: syntheticEmailForUsername(username) };
+  } catch {
+    return { email: syntheticEmailForUsername(username || "unknown") };
+  }
+}
+
 export async function updateCmsUser(input: {
   accessToken: string;
   userId: string;
@@ -369,7 +512,7 @@ export async function updateCmsUser(input: {
     .maybeSingle();
   if (existingError) throw new Error(existingError.message);
   if (!existing) throw new Error("User not found.");
-  const existingEmail = (existing as { email: string }).email;
+  const existingEmail = (existing as { email: string | null }).email ?? "";
   if (isProtectedSuperAdminEmail(existingEmail) && input.role !== "SUPER_ADMIN") {
     throw new Error("This Super Admin account cannot be changed to another role.");
   }
@@ -378,7 +521,7 @@ export async function updateCmsUser(input: {
     .from("users")
     .update({ role: input.role })
     .eq("id", input.userId)
-    .select("id, organization_id, name, email, role, status, last_active_at, created_at")
+    .select("id, organization_id, name, email, username, role, status, last_active_at, created_at")
     .single();
   if (error || !updated) {
     throw new Error(error?.message ?? "Could not update the user.");
