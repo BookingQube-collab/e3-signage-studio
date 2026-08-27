@@ -563,6 +563,54 @@ export async function updateCmsUser(input: {
   return user;
 }
 
+export async function deleteCmsUser(input: {
+  accessToken: string;
+  userId: string;
+}): Promise<{ ok: true }> {
+  const auth = await requireCmsPermission(input.accessToken, "users.manage");
+  if (auth.userId === input.userId) {
+    throw new Error("You cannot delete your own account.");
+  }
+
+  const admin = getServiceRoleClient();
+  const { data: existing, error: existingError } = await admin
+    .from("users")
+    .select("id, email, role, organization_id")
+    .eq("id", input.userId)
+    .maybeSingle();
+  if (existingError) throw new Error(existingError.message);
+  if (!existing) throw new Error("User not found.");
+
+  const row = existing as { id: string; email: string | null; role: string; organization_id: string };
+  if (row.organization_id !== auth.profile.organizationId) {
+    throw new Error("User not found.");
+  }
+  if (isProtectedSuperAdminEmail(row.email ?? "")) {
+    throw new Error("This Super Admin account cannot be deleted.");
+  }
+  if (row.role === "SUPER_ADMIN") {
+    const { count, error: countError } = await admin
+      .from("users")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", auth.profile.organizationId)
+      .eq("role", "SUPER_ADMIN");
+    if (countError) throw new Error(countError.message);
+    if ((count ?? 0) <= 1) {
+      throw new Error("Cannot delete the last Super Admin.");
+    }
+  }
+
+  // Auth user PK cascades to public.users. If Auth delete fails, still remove the CMS profile.
+  const authDeleted = await admin.auth.admin.deleteUser(input.userId);
+  if (!authDeleted.error) return { ok: true };
+
+  const { error: cmsError } = await admin.from("users").delete().eq("id", input.userId);
+  if (cmsError) {
+    throw new Error(authDeleted.error.message || cmsError.message || "Could not delete the user.");
+  }
+  return { ok: true };
+}
+
 async function assertEventLocations(locationIds: string[]): Promise<void> {
   if (locationIds.length === 0) return;
   const admin = getServiceRoleClient();

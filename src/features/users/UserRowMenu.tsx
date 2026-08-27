@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, MoreHorizontal, Pencil, UserX } from "lucide-react";
+import { Loader2, MoreHorizontal, Pencil, Trash2, UserX } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -18,18 +18,22 @@ import type { User } from "@/types";
 export function UserRowMenu({
   user,
   currentUserId,
+  isLastSuperAdmin,
   onEdit,
 }: {
   user: User;
   currentUserId?: string | undefined;
+  isLastSuperAdmin?: boolean;
   onEdit: () => void;
 }) {
   const qc = useQueryClient();
   const [confirm, setConfirm] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const locked = isProtectedSuperAdminEmail(user.email);
   const isSelf = Boolean(currentUserId && currentUserId === user.id);
   const disabled = user.status === "Disabled";
   const canToggle = !locked && !isSelf;
+  const canDelete = !locked && !isSelf && !isLastSuperAdmin;
 
   const save = useMutation({
     mutationFn: () =>
@@ -44,6 +48,20 @@ export function UserRowMenu({
     },
   });
 
+  const remove = useMutation({
+    mutationFn: () => userService.remove(user.id),
+    onSuccess: () => {
+      setConfirmDelete(false);
+      void qc.invalidateQueries({ queryKey: ["users"] });
+      toast.success(`${user.name} deleted`);
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Could not delete user.");
+    },
+  });
+
+  const busy = save.isPending || remove.isPending;
+
   return (
     <div
       onClick={(e) => e.stopPropagation()}
@@ -55,10 +73,10 @@ export function UserRowMenu({
           <button
             type="button"
             aria-label={`Actions for ${user.name}`}
-            disabled={save.isPending}
+            disabled={busy}
             className="grid size-8 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
           >
-            {save.isPending ? (
+            {busy ? (
               <Loader2 className="size-4 animate-spin" aria-hidden />
             ) : (
               <MoreHorizontal className="size-4" />
@@ -82,13 +100,25 @@ export function UserRowMenu({
               </DropdownMenuItem>
             </>
           ) : null}
+          {canDelete ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onSelect={() => setConfirmDelete(true)}
+              >
+                <Trash2 />
+                Delete
+              </DropdownMenuItem>
+            </>
+          ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
 
       <E3Modal
         open={confirm}
         onOpenChange={(open) => {
-          if (!open && save.isPending) return;
+          if (!open && busy) return;
           setConfirm(open);
         }}
         title={disabled ? `Enable ${user.name}?` : `Deactivate ${user.name}?`}
@@ -99,7 +129,7 @@ export function UserRowMenu({
         }
         footer={
           <>
-            <E3Button variant="outline" disabled={save.isPending} onClick={() => setConfirm(false)}>
+            <E3Button variant="outline" disabled={busy} onClick={() => setConfirm(false)}>
               Cancel
             </E3Button>
             <E3Button
@@ -108,6 +138,26 @@ export function UserRowMenu({
               onClick={() => save.mutate()}
             >
               {disabled ? "Enable user" : "Deactivate user"}
+            </E3Button>
+          </>
+        }
+      />
+
+      <E3Modal
+        open={confirmDelete}
+        onOpenChange={(open) => {
+          if (!open && remove.isPending) return;
+          setConfirmDelete(open);
+        }}
+        title={`Delete ${user.name}?`}
+        description="This permanently removes their CMS profile and sign-in. They will not be able to access the studio."
+        footer={
+          <>
+            <E3Button variant="outline" disabled={remove.isPending} onClick={() => setConfirmDelete(false)}>
+              Cancel
+            </E3Button>
+            <E3Button variant="danger" loading={remove.isPending} onClick={() => remove.mutate()}>
+              Delete user
             </E3Button>
           </>
         }

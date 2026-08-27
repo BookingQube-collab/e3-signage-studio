@@ -115,3 +115,15 @@ export const updateUserFn = createServerFn({ method: "POST" })
     const { status, ...rest } = data;
     return status ? updateCmsUser({ ...rest, status }) : updateCmsUser(rest);
   });
+
+export const deleteUserFn = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      accessToken: z.string(),
+      userId: z.string().uuid(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const { deleteCmsUser } = await import("@/server/auth.server");
+    return deleteCmsUser(data);
+  });

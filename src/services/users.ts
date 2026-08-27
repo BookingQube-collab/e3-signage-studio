@@ -1,6 +1,6 @@
 import { invert, UI_ROLE } from "@e3/shared-types";
 
-import { createUserFn, inviteUserFn, listUsersFn, updateUserFn } from "@/lib/auth-functions";
+import { createUserFn, deleteUserFn, inviteUserFn, listUsersFn, updateUserFn } from "@/lib/auth-functions";
 import type { CmsUserRow } from "@/lib/auth-types";
 import { formatLastActive } from "@/lib/relative-time";
 import { getBrowserAccessToken } from "@/lib/supabase";
@@ -55,8 +55,14 @@ export const liveUserService: UserService = {
     });
     return toUiUser(row);
   },
-  remove: async () => {
-    throw new Error("Deleting users is not enabled. Disable the account instead.");
+  remove: async (id) => {
+    await deleteUserFn({
+      data: {
+        accessToken: await accessToken(),
+        userId: id,
+      },
+    });
+    return true;
   },
   invite: async (input) => {
     const result = await inviteUserFn({

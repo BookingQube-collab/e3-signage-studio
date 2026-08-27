@@ -93,6 +93,7 @@ function UsersPage() {
     },
   });
   const locationOptions = locationsQuery.data ?? [];
+  const superAdminCount = (data ?? []).filter((u) => u.role === "Super Admin").length;
   const assignableLocations =
     ROLE_FROM_UI[form.role] === "EVENT_MANAGER"
       ? locationOptions.filter((loc) =>
@@ -210,6 +211,7 @@ function UsersPage() {
         <UserRowMenu
           user={u}
           currentUserId={currentUserId}
+          isLastSuperAdmin={u.role === "Super Admin" && superAdminCount <= 1}
           onEdit={() => {
             setEditing(u);
             setForm({
