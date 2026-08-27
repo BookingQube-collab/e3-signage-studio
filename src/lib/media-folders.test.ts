@@ -5,16 +5,22 @@ import {
   FOLDER_DUPLICATE_MESSAGE,
   applyFolderCascadeDelete,
   applyFolderMove,
+  applyUploadedMedia,
   assertFolderName,
   countFilesInFolder,
   createFolderRecord,
+  findFolderByName,
   folderCardLabel,
   folderDeleteCopy,
   isDuplicateFolderName,
   foldersInLibraryView,
   libraryViewFor,
   mediaInLibraryView,
+  mergeLibraryMedia,
+  resolveFolderCreate,
   resolveUploadFolderId,
+  uniqueFoldersByName,
+  upsertFolder,
 } from "./media-folders.ts";
 
 const inflata = { id: "m1", filename: "banner.png", folderId: "f-inflata" };
@@ -98,4 +104,50 @@ test("folder delete warns and removes files in that folder", () => {
     false,
   );
   assert.equal(cascaded.media.some((item) => item.id === "m2"), true);
+});
+
+test("recreating a folder name reuses the live row instead of stacking a duplicate card", () => {
+  const live = [
+    { id: "f-old", name: "InflataPark", fileCount: 0 },
+    { id: "f-office", name: "Rajan Office", fileCount: 2 },
+  ];
+  const reused = resolveFolderCreate(live, "  inflatapark  ", "f-new");
+  assert.equal(reused.reused, true);
+  assert.equal(reused.folder.id, "f-old");
+  assert.equal(findFolderByName(live, "INFLATAPARK")?.id, "f-old");
+  const created = resolveFolderCreate(live, "Birthday - Poppy", "f-new");
+  assert.equal(created.reused, false);
+  assert.deepEqual(created.folder, { id: "f-new", name: "Birthday - Poppy" });
+  const dupes = uniqueFoldersByName([
+    { id: "f-old", name: "InflataPark", fileCount: 0 },
+    { id: "f-new", name: "inflatapark", fileCount: 3 },
+    { id: "f-office", name: "Rajan Office", fileCount: 2 },
+  ]);
+  assert.equal(dupes.length, 2);
+  assert.equal(dupes.find((folder) => folder.name.toLowerCase() === "inflatapark")?.id, "f-new");
+  const upserted = upsertFolder(live, { id: "f-new", name: "InflataPark", fileCount: 3 });
+  assert.equal(upserted.filter((folder) => folderNameMatch(folder.name)).length, 1);
+  assert.equal(upserted.find((folder) => folderNameMatch(folder.name))?.id, "f-new");
+});
+
+function folderNameMatch(name: string): boolean {
+  return name.toLowerCase() === "inflatapark";
+}
+
+test("multi-upload into a folder merges files immediately and bumps the card count", () => {
+  const folders = [
+    { id: "f-inflata", name: "InflataPark", fileCount: 1 },
+    { id: "f-office", name: "Rajan Office", fileCount: 1 },
+  ];
+  const added = [
+    { id: "m4", filename: "one.png", folderId: "f-inflata" },
+    { id: "m5", filename: "two.png", folderId: "f-inflata" },
+  ];
+  const next = applyUploadedMedia(items, folders, added);
+  assert.equal(next.media.some((item) => item.id === "m4"), true);
+  assert.equal(next.media.filter((item) => item.folderId === "f-inflata").length, 3);
+  assert.equal(next.folders.find((folder) => folder.id === "f-inflata")?.fileCount, 3);
+  const retry = applyUploadedMedia(next.media, next.folders, added);
+  assert.equal(retry.folders.find((folder) => folder.id === "f-inflata")?.fileCount, 3);
+  assert.equal(mergeLibraryMedia(items, [{ id: "m1", filename: "banner-v2.png", folderId: "f-inflata" }]).length, 3);
 });

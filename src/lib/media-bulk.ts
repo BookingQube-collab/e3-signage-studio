@@ -114,6 +114,14 @@ export function withoutIds(current: ReadonlySet<string>, ids: Iterable<string>):
   return next;
 }
 
+export function sameIdSet(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const id of a) {
+    if (!b.has(id)) return false;
+  }
+  return true;
+}
+
 /** Drop IDs that a refetch already omitted so a later stale payload can stay hidden. */
 export function releaseHiddenIfGone<T extends { id: string }>(
   hidden: ReadonlySet<string>,
@@ -126,6 +134,15 @@ export function releaseHiddenIfGone<T extends { id: string }>(
     if (!present.has(id)) next.delete(id);
   }
   return next;
+}
+
+/** Keep the same Set instance when nothing was released so React effects can bail out. */
+export function pruneHiddenIds<T extends { id: string }>(
+  hidden: Set<string>,
+  items: T[],
+): Set<string> {
+  const next = releaseHiddenIfGone(hidden, items, hidden);
+  return sameIdSet(hidden, next) ? hidden : next;
 }
 
 export function applyBulkFolderMove<

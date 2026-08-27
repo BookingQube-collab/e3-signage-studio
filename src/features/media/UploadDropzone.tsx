@@ -14,17 +14,20 @@ interface PendingUpload {
 export function UploadDropzone({
   onUpload,
   hint,
+  disabled,
 }: {
   onUpload: (
     files: File[],
     onProgress: (fileName: string, percent: number) => void,
   ) => Promise<void>;
   hint?: string;
+  disabled?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [pending, setPending] = useState<PendingUpload[]>([]);
-  const busy = pending.length > 0;
+  const uploading = pending.length > 0;
+  const busy = uploading || Boolean(disabled);
 
   async function startUpload(files: File[]) {
     if (files.length === 0 || busy) return;
@@ -77,7 +80,7 @@ export function UploadDropzone({
           className="mt-5"
           variant="primary"
           disabled={busy}
-          loading={busy}
+          loading={uploading}
           onClick={() => inputRef.current?.click()}
         >
           Browse Files

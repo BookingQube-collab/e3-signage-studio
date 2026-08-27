@@ -1,5 +1,6 @@
 import * as db from "@/mocks/data";
 import { applyBulkFolderMove, assertBulkDeleteAllowed, partitionBulkDelete } from "@/lib/media-bulk";
+import { findFolderByName, resolveFolderCreate } from "@/lib/media-folders";
 import type {
   Campaign,
   DeviceLogLine,
@@ -246,9 +247,14 @@ export const mockServices: AppServices = {
     },
     listFolders: () => delay(store.folders),
     createFolder: (name: string) => {
-      const folder = {
-        id: `fld-${Date.now()}`,
-        name: name.trim(),
+      const resolved = resolveFolderCreate(store.folders, name, `fld-${Date.now()}`);
+      if (resolved.reused) {
+        const existing = findFolderByName(store.folders, resolved.folder.name);
+        if (existing) return delay(existing, 200);
+      }
+      const folder: MediaFolder = {
+        id: resolved.folder.id,
+        name: resolved.folder.name,
         createdAt: new Date().toISOString().slice(0, 10),
         fileCount: 0,
       };

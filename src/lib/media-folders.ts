@@ -20,10 +20,99 @@ export function assertFolderName(name: string): string {
   return normalized;
 }
 
+export function folderNameKey(name: string): string {
+  return normalizeFolderName(name).toLowerCase();
+}
+
 export function isDuplicateFolderName(existingNames: string[], name: string): boolean {
-  const needle = normalizeFolderName(name).toLowerCase();
+  const needle = folderNameKey(name);
   if (!needle) return false;
-  return existingNames.some((value) => normalizeFolderName(value).toLowerCase() === needle);
+  return existingNames.some((value) => folderNameKey(value) === needle);
+}
+
+export function findFolderByName<T extends { name: string }>(folders: T[], name: string): T | undefined {
+  const needle = folderNameKey(name);
+  if (!needle) return undefined;
+  return folders.find((folder) => folderNameKey(folder.name) === needle);
+}
+
+/** One card per name so a recreate after delete cannot stack duplicates. */
+export function uniqueFoldersByName<T extends { id: string; name: string; fileCount?: number }>(
+  folders: T[],
+): T[] {
+  const seen = new Map<string, T>();
+  for (const folder of folders) {
+    const key = folderNameKey(folder.name);
+    const existing = seen.get(key);
+    if (!existing) {
+      seen.set(key, folder);
+      continue;
+    }
+    const existingCount = existing.fileCount ?? 0;
+    const nextCount = folder.fileCount ?? 0;
+    if (nextCount > existingCount) seen.set(key, folder);
+  }
+  return [...seen.values()];
+}
+
+export function upsertFolder<T extends { id: string; name: string }>(folders: T[], folder: T): T[] {
+  const key = folderNameKey(folder.name);
+  const without = folders.filter(
+    (item) => item.id !== folder.id && folderNameKey(item.name) !== key,
+  );
+  return [...without, folder].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function mergeLibraryMedia<T extends { id: string }>(current: T[], added: T[]): T[] {
+  if (added.length === 0) return current;
+  const byId = new Map(current.map((item) => [item.id, item]));
+  for (const item of added) byId.set(item.id, item);
+  return [...byId.values()];
+}
+
+export function bumpFolderFileCount<T extends { id: string; fileCount: number }>(
+  folders: T[],
+  folderId: string | null | undefined,
+  delta: number,
+): T[] {
+  if (!folderId || delta === 0) return folders;
+  return folders.map((folder) =>
+    folder.id === folderId ? { ...folder, fileCount: Math.max(0, folder.fileCount + delta) } : folder,
+  );
+}
+
+export function applyUploadedMedia<
+  TMedia extends { id: string; folderId: string | null },
+  TFolder extends { id: string; fileCount: number },
+>(
+  media: TMedia[],
+  folders: TFolder[],
+  added: TMedia[],
+): { media: TMedia[]; folders: TFolder[] } {
+  const existingIds = new Set(media.map((item) => item.id));
+  const merged = mergeLibraryMedia(media, added);
+  const counts = new Map<string, number>();
+  for (const item of added) {
+    if (!item.folderId || existingIds.has(item.id)) continue;
+    counts.set(item.folderId, (counts.get(item.folderId) ?? 0) + 1);
+  }
+  let nextFolders = folders;
+  for (const [id, delta] of counts) {
+    nextFolders = bumpFolderFileCount(nextFolders, id, delta);
+  }
+  return { media: merged, folders: nextFolders };
+}
+
+/** Reuse a live folder with the same name instead of inserting a second row. */
+export function resolveFolderCreate<T extends { id: string; name: string }>(
+  existing: T[],
+  name: string,
+  newId: string,
+): { folder: { id: string; name: string }; reused: boolean } {
+  const normalized = assertFolderName(name);
+  const found = findFolderByName(existing, normalized);
+  if (found) return { folder: { id: found.id, name: found.name }, reused: true };
+  return { folder: { id: newId, name: normalized }, reused: false };
 }
 
 export function folderDeleteCopy(

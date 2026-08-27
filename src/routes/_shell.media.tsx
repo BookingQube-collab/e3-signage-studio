@@ -42,13 +42,17 @@ import {
 import { ACCEPT_MEDIA } from "@/lib/media-file";
 import {
   applyFolderCascadeDelete,
+  applyUploadedMedia,
   countFilesInFolder,
+  findFolderByName,
   folderCardLabel,
   folderDeleteCopy,
   foldersInLibraryView,
   libraryViewFor,
   mediaInLibraryView,
   resolveUploadFolderId,
+  uniqueFoldersByName,
+  upsertFolder,
 } from "@/lib/media-folders";
 import { cn } from "@/lib/utils";
 import { mediaService } from "@/services";
@@ -100,7 +104,8 @@ function MediaPage() {
   const foldersQuery = useQuery({ queryKey: ["media-folders"], queryFn: mediaService.listFolders });
 
   const folders = useMemo(
-    () => (foldersQuery.data ?? []).filter((folder) => !hiddenFolderIds.has(folder.id)),
+    () =>
+      uniqueFoldersByName((foldersQuery.data ?? []).filter((folder) => !hiddenFolderIds.has(folder.id))),
     [foldersQuery.data, hiddenFolderIds],
   );
   const libraryMedia = useMemo(
@@ -115,12 +120,21 @@ function MediaPage() {
     mutationFn: ({
       files,
       onProgress,
+      targetFolderId,
     }: {
       files: File[];
       onProgress: (fileName: string, percent: number) => void;
-    }) => mediaService.upload(files, onProgress, resolveUploadFolderId(folderId)),
+      targetFolderId: string | null;
+    }) => mediaService.upload(files, onProgress, resolveUploadFolderId(targetFolderId)),
     retry: 0,
     onSuccess: (added) => {
+      const ids = added.map((item) => item.id);
+      setHiddenMediaIds((prev) => withoutIds(prev, ids));
+      const currentMedia = qc.getQueryData<Media[]>(["media"]) ?? [];
+      const currentFolders = qc.getQueryData<MediaFolder[]>(["media-folders"]) ?? [];
+      const next = applyUploadedMedia(currentMedia, currentFolders, added);
+      qc.setQueryData(["media"], next.media);
+      qc.setQueryData(["media-folders"], next.folders);
       toast.success(`${added.length} file${added.length > 1 ? "s" : ""} uploaded`);
     },
     onSettled: () => {
@@ -132,6 +146,10 @@ function MediaPage() {
   const createFolder = useMutation({
     mutationFn: mediaService.createFolder,
     onSuccess: (folder) => {
+      setHiddenFolderIds((prev) => withoutIds(prev, [folder.id]));
+      qc.setQueryData(["media-folders"], (prev: MediaFolder[] | undefined) =>
+        upsertFolder(prev ?? [], folder),
+      );
       void qc.invalidateQueries({ queryKey: ["media-folders"] });
       setCreateOpen(false);
       setNewFolderName("");
@@ -359,6 +377,17 @@ function MediaPage() {
     : 0;
   const folderCopy = folderDeleteCopy(deleteFolderTarget?.name ?? "folder", folderFileCount);
 
+  function submitNewFolder() {
+    const existing = findFolderByName(folders, newFolderName);
+    if (existing) {
+      setCreateOpen(false);
+      setNewFolderName("");
+      setFolderId(existing.id);
+      return;
+    }
+    createFolder.mutate(newFolderName);
+  }
+
   function clearSelection() {
     setSelectedIds(new Set());
     setAnchorId(null);
@@ -447,7 +476,7 @@ function MediaPage() {
                 Delete folder
               </E3Button>
             ) : null}
-            <E3Button variant="primary" onClick={() => setCreateOpen(true)}>
+            <E3Button variant="primary" disabled={deleteFolder.isPending} onClick={() => setCreateOpen(true)}>
               <FolderPlus /> Create folder
             </E3Button>
           </>
@@ -456,13 +485,16 @@ function MediaPage() {
 
       <div className="mb-6">
         <UploadDropzone
+          disabled={deleteFolder.isPending}
           hint={
-            currentFolder && !searching
-              ? `Uploads go into ${currentFolder.name}`
-              : "Uploads stay in Unfiled until you move them"
+            deleteFolder.isPending
+              ? "Wait until the folder is removed before uploading"
+              : folderId && !searching
+                ? `Uploads go into ${currentFolder?.name ?? "this folder"}`
+                : "Uploads stay in Unfiled until you move them"
           }
           onUpload={async (files, onProgress) => {
-            await upload.mutateAsync({ files, onProgress });
+            await upload.mutateAsync({ files, onProgress, targetFolderId: folderId });
           }}
         />
       </div>
@@ -557,16 +589,16 @@ function MediaPage() {
         {empty ? (
           <E3EmptyState
             icon={ImageIcon}
-            title={searching ? "No matching media" : currentFolder ? "This folder is empty" : "No media uploaded"}
+            title={searching ? "No matching media" : libraryView.mode === "folder" ? "This folder is empty" : "No media uploaded"}
             description={
               searching
                 ? "Search looks across every folder."
-                : currentFolder
+                : libraryView.mode === "folder"
                   ? "Drop a video or image above to add it here."
                   : "Create a folder for a venue or campaign, or drop files into Unfiled."
             }
             action={
-              currentFolder ? undefined : (
+              libraryView.mode === "folder" || deleteFolder.isPending ? undefined : (
                 <E3Button variant="primary" onClick={() => setCreateOpen(true)}>
                   <FolderPlus /> Create folder
                 </E3Button>
@@ -645,8 +677,8 @@ function MediaPage() {
             <E3Button
               variant="primary"
               loading={createFolder.isPending}
-              disabled={!newFolderName.trim()}
-              onClick={() => createFolder.mutate(newFolderName)}
+              disabled={!newFolderName.trim() || deleteFolder.isPending}
+              onClick={submitNewFolder}
             >
               Create folder
             </E3Button>
@@ -661,8 +693,8 @@ function MediaPage() {
             onChange={(e) => setNewFolderName(e.target.value)}
             placeholder="e.g. InflataPark, Rajan Office, Birthday - Poppy"
             onKeyDown={(e) => {
-              if (e.key === "Enter" && newFolderName.trim() && !createFolder.isPending) {
-                createFolder.mutate(newFolderName);
+              if (e.key === "Enter" && newFolderName.trim() && !createFolder.isPending && !deleteFolder.isPending) {
+                submitNewFolder();
               }
             }}
           />

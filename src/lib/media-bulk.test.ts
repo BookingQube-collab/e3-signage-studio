@@ -11,6 +11,7 @@ import {
   liveUsagePlaylistIds,
   liveUsagePlaylistNames,
   partitionBulkDelete,
+  pruneHiddenIds,
   releaseHiddenIfGone,
   selectAllActionLabel,
   selectAllIds,
@@ -76,6 +77,17 @@ test("hidden ids stay until a refetch omits the deleted files", () => {
   assert.equal(afterFresh.has("m-wire"), false);
   assert.equal(afterFresh.has("m-ninjago"), true);
   assert.deepEqual([...withoutIds(hidden, ["m-ninjago"])], ["m-wire"]);
+  const stillHidden = new Set(["m-wire"]);
+  const prunedStale = pruneHiddenIds(stillHidden, items);
+  assert.equal(prunedStale.has("m-wire"), true);
+  assert.equal(prunedStale, stillHidden);
+  const prunedGone = pruneHiddenIds(stillHidden, remaining);
+  assert.equal(prunedGone.has("m-wire"), false);
+  const uploadedAgain = [...remaining, unused];
+  assert.deepEqual(
+    [...withoutIds(unionIds(new Set(), ["m-wire"]), uploadedAgain.map((item) => item.id))],
+    [],
+  );
 });
 
 test("bulk move assigns a folder to every selected file", () => {

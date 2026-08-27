@@ -86,4 +86,8 @@ test("in-flight client uploads of the same file share one key", () => {
   const file = { mediaId: null, folderId: null, name: "hero.jpg", size: 12, lastModified: 1 };
   assert.equal(clientUploadDedupeKey(file), clientUploadDedupeKey(file));
   assert.notEqual(clientUploadDedupeKey(file), clientUploadDedupeKey({ ...file, lastModified: 2 }));
+  assert.notEqual(
+    clientUploadDedupeKey(file),
+    clientUploadDedupeKey({ ...file, folderId: "f-inflata" }),
+  );
 });

@@ -30,7 +30,9 @@ import { mediaKeysToSign } from "../lib/media-sign";
 import {
   FOLDER_DUPLICATE_MESSAGE,
   assertFolderName,
-  isDuplicateFolderName,
+  findFolderByName,
+  resolveFolderCreate,
+  uniqueFoldersByName,
 } from "../lib/media-folders";
 import {
   incompleteVersionReusable,
@@ -1096,12 +1098,14 @@ export async function listFolders(accessToken: string): Promise<MediaFolderRecor
     if (!folderId) continue;
     counts.set(folderId, (counts.get(folderId) ?? 0) + 1);
   }
-  return folders.map((folder) => ({
-    id: folder.id,
-    name: folder.name,
-    createdAt: dateLabel(folder.created_at),
-    fileCount: counts.get(folder.id) ?? 0,
-  }));
+  return uniqueFoldersByName(
+    folders.map((folder) => ({
+      id: folder.id,
+      name: folder.name,
+      createdAt: dateLabel(folder.created_at),
+      fileCount: counts.get(folder.id) ?? 0,
+    })),
+  );
 }
 
 export async function createFolder(accessToken: string, name: string): Promise<MediaFolderRecord> {
@@ -1111,12 +1115,18 @@ export async function createFolder(accessToken: string, name: string): Promise<M
   const normalized = assertFolderName(name);
   const { data: existing, error: existingError } = await client
     .from("media_folders")
-    .select("name")
+    .select(FOLDER_SELECT)
     .eq("organization_id", orgId);
   throwIfError(existingError, "Could not load folders.");
-  const names = (existing ?? []).map((row) => asString((row as { name: string }).name));
-  if (isDuplicateFolderName(names, normalized)) {
-    throw new Error(FOLDER_DUPLICATE_MESSAGE);
+  const rows = (existing ?? []).map((row) => mapFolder(row as Record<string, unknown>));
+  const resolved = resolveFolderCreate(
+    rows.map((row) => ({ id: row.id, name: row.name })),
+    normalized,
+    "",
+  );
+  if (resolved.reused) {
+    const match = rows.find((row) => row.id === resolved.folder.id);
+    if (match) return toFolderRecord(client, match);
   }
   const { data, error } = await client
     .from("media_folders")
@@ -1127,7 +1137,17 @@ export async function createFolder(accessToken: string, name: string): Promise<M
     })
     .select(FOLDER_SELECT)
     .single();
-  if (error?.code === "23505") throw new Error(FOLDER_DUPLICATE_MESSAGE);
+  if (error?.code === "23505") {
+    const { data: raced, error: racedError } = await client
+      .from("media_folders")
+      .select(FOLDER_SELECT)
+      .eq("organization_id", orgId);
+    throwIfError(racedError, "Could not load folders.");
+    const racedRows = (raced ?? []).map((row) => mapFolder(row as Record<string, unknown>));
+    const match = findFolderByName(racedRows, normalized);
+    if (match) return toFolderRecord(client, match);
+    throw new Error(FOLDER_DUPLICATE_MESSAGE);
+  }
   throwIfError(error, "Could not create folder.");
   return toFolderRecord(client, mapFolder(data as Record<string, unknown>));
 }
