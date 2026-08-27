@@ -19,6 +19,8 @@ import {
 import { isUuid } from "@/services/inventory-map";
 import type { LayoutRecord, LayoutZoneRecord } from "@/services/layout-map";
 import { requireCmsPermission } from "./auth.server";
+import { assertCanMutateOwnedContent, contentVisibleToProfile } from "@/lib/location-scope";
+import { loadScopedContentUsage } from "./scoped-content.server";
 import { getUserClient } from "./supabase.server";
 
 const LAYOUT_SELECT =
@@ -200,7 +202,15 @@ export async function listLayouts(accessToken: string): Promise<LayoutRecord[]> 
     .is("archived_at", null)
     .order("updated_at", { ascending: false });
   throwIfError(error, "Could not load layouts.");
-  return toRecords(client, auth.profile.organizationId, (data ?? []) as Array<Record<string, unknown>>);
+  const usage = await loadScopedContentUsage(client, auth.profile);
+  const rows = ((data ?? []) as Array<Record<string, unknown>>).filter((row) =>
+    contentVisibleToProfile(
+      auth.profile,
+      asNullableString(row["created_by"]),
+      usage.layoutIds.has(asString(row["id"])),
+    ),
+  );
+  return toRecords(client, auth.profile.organizationId, rows);
 }
 
 export async function getLayout(accessToken: string, id: string): Promise<LayoutRecord | null> {
@@ -215,7 +225,18 @@ export async function getLayout(accessToken: string, id: string): Promise<Layout
     .maybeSingle();
   throwIfError(error, "Could not load layout.");
   if (!data) return null;
-  const records = await toRecords(client, auth.profile.organizationId, [data as Record<string, unknown>]);
+  const usage = await loadScopedContentUsage(client, auth.profile);
+  const row = data as Record<string, unknown>;
+  if (
+    !contentVisibleToProfile(
+      auth.profile,
+      asNullableString(row["created_by"]),
+      usage.layoutIds.has(asString(row["id"])),
+    )
+  ) {
+    return null;
+  }
+  const records = await toRecords(client, auth.profile.organizationId, [row]);
   return records[0] ?? null;
 }
 
@@ -276,12 +297,16 @@ export async function saveLayout(
   if (existingId) {
     const { data: existing, error: existingError } = await client
       .from("layouts")
-      .select("id")
+      .select("id, created_by")
       .eq("id", existingId)
       .eq("organization_id", auth.profile.organizationId)
       .maybeSingle();
     throwIfError(existingError, "Could not load layout.");
     if (!existing) throw new Error("Layout not found.");
+    assertCanMutateOwnedContent(
+      auth.profile,
+      asNullableString((existing as { created_by: string | null }).created_by),
+    );
     const { error: updateError } = await client.from("layouts").update(layoutFields).eq("id", existingId);
     throwIfError(updateError, "Could not save layout.");
   } else {

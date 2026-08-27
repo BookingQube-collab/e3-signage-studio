@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { playlistService, mediaService, screenService } from "@/services";
+import { NO_LOCATION_ACCESS_MESSAGE } from "@/lib/location-scope";
 import { ADMIN_MONITORING_REFETCH_MS } from "@/lib/monitoring";
 import { bindPreviewClips } from "@/lib/playlist-preview";
 import { useLiveMonitoring } from "@/lib/use-live-monitoring";
@@ -171,8 +172,8 @@ function ScreenDetailPage() {
       >
         {!screen ? (
           <E3EmptyState
-            title="Screen not found"
-            description="This screen may have been unpaired."
+            title={NO_LOCATION_ACCESS_MESSAGE}
+            description="This screen is not at one of your assigned locations, or it may have been unpaired."
             action={
               <E3Button variant="outline" asChild>
                 <Link to="/screens">Back to screens</Link>
@@ -195,9 +196,9 @@ function ScreenDetailPage() {
                   <E3Button
                     variant="primary"
                     onClick={() => sync.mutate()}
-                    disabled={sync.isPending}
+                    loading={sync.isPending}
                   >
-                    <RefreshCw /> {sync.isPending ? "Syncing…" : "Sync Now"}
+                    <RefreshCw /> Sync Now
                   </E3Button>
                 </>
               }
@@ -291,6 +292,7 @@ function ScreenDetailPage() {
                     <E3Button
                       variant="outline"
                       className="w-full justify-start"
+                      loading={sync.isPending}
                       onClick={() => sync.mutate()}
                     >
                       <RefreshCw /> Sync Now
@@ -312,6 +314,7 @@ function ScreenDetailPage() {
                     <E3Button
                       variant="outline"
                       className="w-full justify-start"
+                      loading={disable.isPending}
                       onClick={() => disable.mutate()}
                     >
                       <PowerOff />{" "}
@@ -357,17 +360,21 @@ function ScreenDetailPage() {
 
             <E3Modal
               open={playlistOpen}
-              onOpenChange={setPlaylistOpen}
+              onOpenChange={(open) => {
+                if (!open && changePlaylist.isPending) return;
+                setPlaylistOpen(open);
+              }}
               title="Change playlist"
               description="The screen will download the new content on the next sync."
               footer={
                 <>
-                  <E3Button variant="outline" onClick={() => setPlaylistOpen(false)}>
+                  <E3Button variant="outline" disabled={changePlaylist.isPending} onClick={() => setPlaylistOpen(false)}>
                     Cancel
                   </E3Button>
                   <E3Button
                     variant="primary"
-                    disabled={!nextPlaylist || changePlaylist.isPending}
+                    loading={changePlaylist.isPending}
+                    disabled={!nextPlaylist}
                     onClick={() => changePlaylist.mutate(nextPlaylist)}
                   >
                     Apply
@@ -426,15 +433,18 @@ function ScreenDetailPage() {
 
             <E3Modal
               open={unpairOpen}
-              onOpenChange={setUnpairOpen}
+              onOpenChange={(open) => {
+                if (!open && unpair.isPending) return;
+                setUnpairOpen(open);
+              }}
               title="Unpair this screen?"
               description="The device will stop receiving content until it is paired again."
               footer={
                 <>
-                  <E3Button variant="outline" onClick={() => setUnpairOpen(false)}>
+                  <E3Button variant="outline" disabled={unpair.isPending} onClick={() => setUnpairOpen(false)}>
                     Cancel
                   </E3Button>
-                  <E3Button variant="danger" onClick={() => unpair.mutate()}>
+                  <E3Button variant="danger" loading={unpair.isPending} onClick={() => unpair.mutate()}>
                     Unpair screen
                   </E3Button>
                 </>

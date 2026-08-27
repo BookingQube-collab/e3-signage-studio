@@ -1,6 +1,5 @@
 import {
   DEVICE_SYNC_STATES,
-  EVENT_LOCATION_TYPES,
   LOCATION_STATUSES,
   LOCATION_TYPES,
   ORIENTATIONS,
@@ -14,8 +13,15 @@ import {
 
 import { connectivityFromHeartbeat, DEFAULT_OFFLINE_AFTER_SECONDS } from "@/lib/connectivity";
 import { hashPairingCode } from "@/lib/device-crypto";
+import { assertPairingCodeDigits, pairingCodeLinkError } from "@/lib/pairing-code";
 
 import type { CmsProfile } from "@/lib/auth-types";
+import {
+  assertLocationAccess,
+  assertScreenLocationAccess,
+  filterLocationsByScope,
+  filterScreensByScope,
+} from "@/lib/location-scope";
 import type { LocationRecord, ScreenGroupRecord, ScreenRecord } from "@/services/inventory-map";
 import { requireCmsPermission, resolveAuthFromRequest } from "./auth.server";
 import { ensureSeedLocations } from "./location-seed.server";
@@ -113,16 +119,83 @@ function assertAssignedLocation(
   locationId: string,
   locationType: string,
 ): void {
-  if (profile.role === "SUPER_ADMIN" || profile.role === "MARKETING") return;
-  if (!profile.locationIds.includes(locationId)) {
-    throw new Error("You do not have access to this location.");
+  assertScreenLocationAccess(profile, locationId, locationType);
+}
+
+type PairingCodeRow = {
+  id: string;
+  expires_at: string;
+  consumed_at: string | null;
+  screen_id: string | null;
+};
+
+async function requireScreenLocation(
+  accessToken: string,
+  auth: { profile: CmsProfile },
+  current: ScreenRecord,
+): Promise<void> {
+  const client = getUserClient(accessToken);
+  const { data: location, error: locError } = await client
+    .from("locations")
+    .select("type")
+    .eq("id", current.locationId)
+    .maybeSingle();
+  throwIfError(locError, "Could not load location.");
+  assertAssignedLocation(
+    auth.profile,
+    current.locationId,
+    asString((location as { type?: string } | null)?.type),
+  );
+}
+
+async function lookupPairingCode(
+  admin: ReturnType<typeof getServiceRoleClient>,
+  digits: string,
+): Promise<PairingCodeRow | null> {
+  const { data, error } = await admin
+    .from("device_pairing_codes")
+    .select("id, expires_at, consumed_at, screen_id")
+    .eq("code_hash", hashPairingCode(digits))
+    .maybeSingle();
+  throwIfError(error, "Could not look up pairing code.");
+  return (data as PairingCodeRow | null) ?? null;
+}
+
+async function attachPairingCodeToScreen(
+  admin: ReturnType<typeof getServiceRoleClient>,
+  organizationId: string,
+  screenId: string,
+  digits: string,
+  existing: PairingCodeRow | null,
+): Promise<void> {
+  if (existing) {
+    const linkErrorMessage = pairingCodeLinkError(
+      {
+        expiresAt: existing.expires_at,
+        consumedAt: existing.consumed_at,
+        screenId: existing.screen_id,
+      },
+      screenId,
+    );
+    if (linkErrorMessage) throw new Error(linkErrorMessage);
+    const { error: linkError } = await admin
+      .from("device_pairing_codes")
+      .update({
+        screen_id: screenId,
+        organization_id: organizationId,
+      })
+      .eq("id", existing.id);
+    throwIfError(linkError, "Could not link the pairing code.");
+    return;
   }
-  if (profile.role === "EVENT_MANAGER") {
-    const allowed = new Set<string>(EVENT_LOCATION_TYPES);
-    if (!allowed.has(locationType)) {
-      throw new Error("Event Managers can only access temporary/event locations.");
-    }
-  }
+
+  const { error: pendingError } = await admin.from("device_pairing_codes").insert({
+    organization_id: organizationId,
+    code_hash: hashPairingCode(digits),
+    expires_at: new Date(Date.now() + PENDING_PAIR_TTL_MS).toISOString(),
+    screen_id: screenId,
+  });
+  throwIfError(pendingError, "Could not store the pairing code.");
 }
 
 async function maybeSeed(auth: AuthOk): Promise<void> {
@@ -381,7 +454,12 @@ export async function listLocations(accessToken: string): Promise<LocationRecord
     .eq("organization_id", auth.profile.organizationId)
     .order("created_at", { ascending: true });
   throwIfError(error, "Could not load locations.");
-  return loadLocationRecords(client, auth.profile.organizationId, (data ?? []) as LocRow[]);
+  const records = await loadLocationRecords(
+    client,
+    auth.profile.organizationId,
+    (data ?? []) as LocRow[],
+  );
+  return filterLocationsByScope(auth.profile, records);
 }
 
 export async function getLocation(accessToken: string, id: string): Promise<LocationRecord | null> {
@@ -395,7 +473,7 @@ export async function getLocation(accessToken: string, id: string): Promise<Loca
   throwIfError(error, "Could not load location.");
   if (!data) return null;
   const rows = await loadLocationRecords(client, auth.profile.organizationId, [data as LocRow]);
-  return rows[0] ?? null;
+  return filterLocationsByScope(auth.profile, rows)[0] ?? null;
 }
 
 export async function createLocation(
@@ -451,6 +529,7 @@ export async function createLocation(
 async function listScreenRows(accessToken: string, locationId?: string): Promise<ScreenRecord[]> {
   const auth = await requireCmsPermission(accessToken, "screens.view");
   await maybeSeed(auth);
+  if (locationId) assertLocationAccess(auth.profile, locationId);
   const client = getUserClient(accessToken);
   let query = client
     .from("screens")
@@ -461,7 +540,12 @@ async function listScreenRows(accessToken: string, locationId?: string): Promise
   if (locationId) query = query.eq("location_id", locationId);
   const { data, error } = await query;
   throwIfError(error, "Could not load screens.");
-  return loadScreenRecords(client, auth.profile.organizationId, (data ?? []) as ScreenDb[]);
+  const records = await loadScreenRecords(
+    client,
+    auth.profile.organizationId,
+    (data ?? []) as ScreenDb[],
+  );
+  return filterScreensByScope(auth.profile, records);
 }
 
 export async function listScreens(accessToken: string): Promise<ScreenRecord[]> {
@@ -487,7 +571,7 @@ export async function getScreen(accessToken: string, id: string): Promise<Screen
   throwIfError(error, "Could not load screen.");
   if (!data) return null;
   const rows = await loadScreenRecords(client, auth.profile.organizationId, [data as ScreenDb]);
-  return rows[0] ?? null;
+  return filterScreensByScope(auth.profile, rows)[0] ?? null;
 }
 
 export async function pairScreen(
@@ -503,8 +587,7 @@ export async function pairScreen(
   },
 ): Promise<ScreenRecord> {
   const auth = await requireCmsPermission(accessToken, "screens.manage");
-  const digits = input.code.replace(/\D/g, "");
-  if (digits.length !== 6) throw new Error("Pairing code must be 6 digits.");
+  const digits = assertPairingCodeDigits(input.code);
 
   const client = getUserClient(accessToken);
   const { data: location, error: locError } = await client

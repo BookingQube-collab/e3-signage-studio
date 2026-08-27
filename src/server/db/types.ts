@@ -117,6 +117,7 @@ export type MediaRow = {
   status: string;
   archived_at: string | null;
   folder_id: string | null;
+  location_ids: string[];
   created_at: string;
   updated_at: string;
   created_by: string | null;

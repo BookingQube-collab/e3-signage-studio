@@ -2,7 +2,6 @@ import {
   CAMPAIGN_STATUSES,
   CAMPAIGN_TARGET_TYPES,
   DEVICE_SYNC_STATES,
-  EVENT_LOCATION_TYPES,
   UI_LABELS,
   type CampaignStatus,
   type CampaignTargetType,
@@ -21,6 +20,13 @@ import {
   type ScreenLite,
 } from "@/lib/target-resolve";
 import type { CmsProfile } from "@/lib/auth-types";
+import {
+  NO_LOCATION_ACCESS_MESSAGE,
+  assertScreenLocationAccess,
+  campaignEditableByProfile,
+  campaignVisibleToProfile,
+  isLocationScopedRole,
+} from "@/lib/location-scope";
 import { isUuid } from "@/services/inventory-map";
 import type { CampaignRecord } from "@/services/campaign-map";
 import type { SyncStatusItem } from "@/types";
@@ -119,16 +125,7 @@ function asDayNums(value: unknown): number[] {
 }
 
 function assertScreenAccess(profile: CmsProfile, locationId: string, locationType: string): void {
-  if (profile.role === "SUPER_ADMIN" || profile.role === "MARKETING") return;
-  if (!profile.locationIds.includes(locationId)) {
-    throw new Error("You do not have access to this location.");
-  }
-  if (profile.role === "EVENT_MANAGER") {
-    const allowed = new Set<string>(EVENT_LOCATION_TYPES);
-    if (!allowed.has(locationType)) {
-      throw new Error("Event Managers can only target temporary/event locations.");
-    }
-  }
+  assertScreenLocationAccess(profile, locationId, locationType);
 }
 
 function contentFields(input: CampaignWriteInput): {
@@ -450,11 +447,10 @@ function visibleToProfile(
   locationByScreen: Map<string, string>,
   createdBy: string | null,
 ): boolean {
-  if (profile.role !== "EVENT_MANAGER") return true;
-  if (screenIds.some((id) => profile.locationIds.includes(locationByScreen.get(id) ?? ""))) {
-    return true;
-  }
-  return screenIds.length === 0 && createdBy === profile.id;
+  const screenLocationIds = [
+    ...new Set(screenIds.map((id) => locationByScreen.get(id)).filter((id): id is string => Boolean(id))),
+  ];
+  return campaignVisibleToProfile(profile, screenLocationIds, createdBy);
 }
 
 async function toRecords(
@@ -605,12 +601,57 @@ async function persistCampaign(
   if (existingId) {
     const { data: existing, error: existingError } = await client
       .from("campaigns")
-      .select("id")
+      .select("id, created_by")
       .eq("id", existingId)
       .eq("organization_id", auth.profile.organizationId)
       .maybeSingle();
     throwIfError(existingError, "Could not load campaign.");
     if (!existing) throw new Error("Campaign not found.");
+    const { data: existingTargets, error: existingTargetsError } = await client
+      .from("campaign_targets")
+      .select("type, target_id")
+      .eq("campaign_id", existingId);
+    throwIfError(existingTargetsError, "Could not load campaign targets.");
+    const screens = await loadOrgScreens(client, auth.profile.organizationId);
+    const groups = await loadGroups(client, auth.profile.organizationId);
+    const visibleScreenIds = new Set(screens.map((screen) => screen.id));
+    const parsedTargets = (existingTargets ?? []).map((row) => ({
+      type: isTargetType((row as { type: string }).type)
+        ? (row as { type: CampaignTargetType }).type
+        : "SCREEN",
+      targetId: (row as { target_id: string | null }).target_id,
+    }));
+    const hasHiddenScreenTarget = parsedTargets.some(
+      (target) =>
+        target.type === "SCREEN" &&
+        Boolean(target.targetId) &&
+        !visibleScreenIds.has(target.targetId as string),
+    );
+    const hasHiddenLocationTarget = parsedTargets.some(
+      (target) =>
+        target.type === "LOCATION" &&
+        Boolean(target.targetId) &&
+        !auth.profile.locationIds.includes(target.targetId as string),
+    );
+    const locationByScreen = new Map(screens.map((screen) => [screen.id, screen.locationId]));
+    const existingScreenIds = resolveTargetScreenIds(parsedTargets, screens, groups);
+    const existingLocationIds = [
+      ...new Set(
+        existingScreenIds
+          .map((id) => locationByScreen.get(id))
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    if (
+      (isLocationScopedRole(auth.profile.role) && (hasHiddenScreenTarget || hasHiddenLocationTarget)) ||
+      !campaignEditableByProfile(
+        auth.profile,
+        existingLocationIds,
+        asNullableString((existing as { created_by: string | null }).created_by),
+      )
+    ) {
+      throw new Error(NO_LOCATION_ACCESS_MESSAGE);
+    }
     const { error: updateError } = await client
       .from("campaigns")
       .update({
@@ -979,7 +1020,7 @@ async function notifyScreens(
     const screen = byId.get(screenId);
     if (!screen) continue;
     if (screen.archivedAt || screen.operationalStatus === "DISABLED") continue;
-    if (auth.profile.role === "EVENT_MANAGER" && !auth.profile.locationIds.includes(screen.locationId)) {
+    if (isLocationScopedRole(auth.profile.role) && !auth.profile.locationIds.includes(screen.locationId)) {
       continue;
     }
     const campaignIds = new Set(campaignIdsTargetingScreen(screen, targets, groups));

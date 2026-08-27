@@ -12,6 +12,8 @@ import {
 import { isUuid } from "@/services/inventory-map";
 import type { PlaylistItemRecord, PlaylistRecord } from "@/services/playlist-map";
 import { requireCmsPermission } from "./auth.server";
+import { assertCanMutateOwnedContent, contentVisibleToProfile } from "@/lib/location-scope";
+import { loadScopedContentUsage } from "./scoped-content.server";
 import { getUserClient } from "./supabase.server";
 
 const PLAYLIST_SELECT = "id, organization_id, name, status, archived_at, created_at, updated_at, created_by";
@@ -31,6 +33,10 @@ function throwIfError(error: { message: string } | null, fallback: string): void
 
 function asString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
+}
+
+function asNullableString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function asNumber(value: unknown, fallback = 0): number {
@@ -137,7 +143,15 @@ export async function listPlaylists(accessToken: string): Promise<PlaylistRecord
     .is("archived_at", null)
     .order("updated_at", { ascending: false });
   throwIfError(error, "Could not load playlists.");
-  return toRecords(client, (data ?? []) as Array<Record<string, unknown>>);
+  const usage = await loadScopedContentUsage(client, auth.profile);
+  const rows = ((data ?? []) as Array<Record<string, unknown>>).filter((row) =>
+    contentVisibleToProfile(
+      auth.profile,
+      asNullableString(row["created_by"]),
+      usage.playlistIds.has(asString(row["id"])),
+    ),
+  );
+  return toRecords(client, rows);
 }
 
 export async function getPlaylist(accessToken: string, id: string): Promise<PlaylistRecord | null> {
@@ -152,7 +166,18 @@ export async function getPlaylist(accessToken: string, id: string): Promise<Play
     .maybeSingle();
   throwIfError(error, "Could not load playlist.");
   if (!data) return null;
-  const records = await toRecords(client, [data as Record<string, unknown>]);
+  const usage = await loadScopedContentUsage(client, auth.profile);
+  const row = data as Record<string, unknown>;
+  if (
+    !contentVisibleToProfile(
+      auth.profile,
+      asNullableString(row["created_by"]),
+      usage.playlistIds.has(asString(row["id"])),
+    )
+  ) {
+    return null;
+  }
+  const records = await toRecords(client, [row]);
   return records[0] ?? null;
 }
 
@@ -204,12 +229,16 @@ export async function savePlaylist(
   if (existingId) {
     const { data: existing, error: existingError } = await client
       .from("playlists")
-      .select("id")
+      .select("id, created_by")
       .eq("id", existingId)
       .eq("organization_id", auth.profile.organizationId)
       .maybeSingle();
     throwIfError(existingError, "Could not load playlist.");
     if (!existing) throw new Error("Playlist not found.");
+    assertCanMutateOwnedContent(
+      auth.profile,
+      asNullableString((existing as { created_by: string | null }).created_by),
+    );
     const { error: updateError } = await client
       .from("playlists")
       .update({ name, status: input.status })

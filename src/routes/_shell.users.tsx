@@ -27,6 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { listLocationOptionsFn, inviteUserFn } from "@/lib/auth-functions";
+import { isProtectedSuperAdminEmail, requiresLocationAssignment } from "@/lib/location-scope";
 import { getBrowserAccessToken } from "@/lib/supabase";
 import { userService } from "@/services";
 import type { User, UserRole } from "@/types";
@@ -57,7 +58,8 @@ const ROLES: { role: UserRole; permissions: string }[] = [
   },
   {
     role: "Site Supervisor",
-    permissions: "Manage screens, playback and schedules for assigned locations",
+    permissions:
+      "Assigned locations only: dashboard, screens, media, playlists, layouts, campaigns, schedule and reports",
   },
   { role: "Event Manager", permissions: "Create and schedule campaigns for event locations" },
 ];
@@ -71,7 +73,7 @@ function UsersPage() {
   const [form, setForm] = useState({
     name: "",
     email: "",
-    role: "Event Manager" as UserRole,
+    role: "Site Supervisor" as UserRole,
     locationIds: [] as string[],
   });
 
@@ -94,6 +96,7 @@ function UsersPage() {
           (EVENT_LOCATION_TYPES as readonly string[]).includes(loc.type),
         )
       : locationOptions;
+  const inviteNeedsLocations = requiresLocationAssignment(ROLE_FROM_UI[form.role]);
 
   const invite = useMutation({
     mutationFn: async (input: {
@@ -116,7 +119,7 @@ function UsersPage() {
     onSuccess: (result) => {
       void qc.invalidateQueries({ queryKey: ["users"] });
       setOpen(false);
-      setForm({ name: "", email: "", role: "Event Manager", locationIds: [] });
+      setForm({ name: "", email: "", role: "Site Supervisor", locationIds: [] });
       if (result.warning) {
         toast.warning(result.warning);
       } else {
@@ -163,10 +166,26 @@ function UsersPage() {
     {
       key: "role",
       header: "Role",
-      cell: (u) => (
+      cell: (u) => {
+        const locked = isProtectedSuperAdminEmail(u.email);
+        return (
         <Select
           value={u.role}
-          onValueChange={(v) => saveUser.mutate({ ...u, role: v as UserRole })}
+          disabled={locked || saveUser.isPending}
+          onValueChange={(v) => {
+            const next = v as UserRole;
+            if (requiresLocationAssignment(ROLE_FROM_UI[next]) && u.locationIds.length === 0) {
+              setEditing(u);
+              setForm({
+                name: u.name,
+                email: u.email,
+                role: next,
+                locationIds: u.locationIds,
+              });
+              return;
+            }
+            saveUser.mutate({ ...u, role: next });
+          }}
         >
           <SelectTrigger className="h-9 w-[170px]">
             <SelectValue />
@@ -179,7 +198,8 @@ function UsersPage() {
             ))}
           </SelectContent>
         </Select>
-      ),
+        );
+      },
     },
     {
       key: "locations",
@@ -198,7 +218,11 @@ function UsersPage() {
             });
           }}
         >
-          {u.locationIds.length === 0 ? "All locations" : `${u.locationIds.length} assigned`}
+          {u.locationIds.length === 0
+            ? requiresLocationAssignment(ROLE_FROM_UI[u.role])
+              ? "None assigned"
+              : "All locations"
+            : `${u.locationIds.length} assigned`}
         </button>
       ),
     },
@@ -222,7 +246,7 @@ function UsersPage() {
           <E3Button
             variant="primary"
             onClick={() => {
-              setForm({ name: "", email: "", role: "Event Manager", locationIds: [] });
+              setForm({ name: "", email: "", role: "Site Supervisor", locationIds: [] });
               setOpen(true);
             }}
           >
@@ -257,17 +281,25 @@ function UsersPage() {
 
       <E3Modal
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={(next) => {
+          if (!next && invite.isPending) return;
+          setOpen(next);
+        }}
         title="Invite user"
-        description="They'll receive an email invitation to join the E3 admin panel."
+        description="They'll receive an email invitation. Site Supervisors must be assigned one or more locations."
         footer={
           <>
-            <E3Button variant="ghost" onClick={() => setOpen(false)}>
+            <E3Button variant="ghost" disabled={invite.isPending} onClick={() => setOpen(false)}>
               Cancel
             </E3Button>
             <E3Button
               variant="primary"
-              disabled={!form.name.trim() || !form.email.includes("@") || invite.isPending}
+              loading={invite.isPending}
+              disabled={
+                !form.name.trim() ||
+                !form.email.includes("@") ||
+                (inviteNeedsLocations && form.locationIds.length === 0)
+              }
               onClick={() =>
                 invite.mutate({
                   name: form.name.trim(),
@@ -323,6 +355,15 @@ function UsersPage() {
           {locationOptions.length > 0 ? (
             <div className="space-y-2">
               <Label>Assigned locations</Label>
+              {inviteNeedsLocations ? (
+                <p className="text-xs text-muted-foreground">
+                  Required. They only see these locations after login (pick one or more).
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Optional for Super Admin and Marketing — they already see every location.
+                </p>
+              )}
               <div className="max-h-40 space-y-2 overflow-y-auto rounded-xl border border-border p-3">
                 {assignableLocations.map((loc) => (
                   <label key={loc.id} className="flex items-center gap-2 text-sm">
@@ -353,18 +394,23 @@ function UsersPage() {
       <E3Modal
         open={editing !== null}
         onOpenChange={(next) => {
+          if (!next && saveUser.isPending) return;
           if (!next) setEditing(null);
         }}
         title="Assign locations"
         description="Site Supervisors and Event Managers are limited to the locations you assign."
         footer={
           <>
-            <E3Button variant="ghost" onClick={() => setEditing(null)}>
+            <E3Button variant="ghost" disabled={saveUser.isPending} onClick={() => setEditing(null)}>
               Cancel
             </E3Button>
             <E3Button
               variant="primary"
-              disabled={!editing || saveUser.isPending}
+              loading={saveUser.isPending}
+              disabled={
+                !editing ||
+                (inviteNeedsLocations && form.locationIds.length === 0)
+              }
               onClick={() => {
                 if (!editing) return;
                 saveUser.mutate({ ...editing, role: form.role, locationIds: form.locationIds });
@@ -380,6 +426,7 @@ function UsersPage() {
             <Label htmlFor="e-role">Role</Label>
             <Select
               value={form.role}
+              disabled={Boolean(editing && isProtectedSuperAdminEmail(editing.email))}
               onValueChange={(v) => setForm({ ...form, role: v as UserRole })}
             >
               <SelectTrigger id="e-role">

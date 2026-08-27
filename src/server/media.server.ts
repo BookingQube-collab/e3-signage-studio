@@ -39,6 +39,12 @@ import { requireCmsPermission } from "./auth.server";
 import type { MediaFolderRow, MediaRow, MediaVersionRow } from "./db/types";
 import { getServerEnv } from "./env.server";
 import {
+  assertCanMutateOwnedContent,
+  locationIdsForNewMedia,
+  mediaVisibleToProfile,
+} from "@/lib/location-scope";
+import { loadScopedContentUsage } from "./scoped-content.server";
+import {
   createObjectDownloadUrl,
   createObjectDownloadUrls,
   createObjectUploadUrl,
@@ -50,7 +56,7 @@ import {
 import { getUserClient } from "./supabase.server";
 
 const MEDIA_SELECT =
-  "id, organization_id, name, type, mime_type, current_version_id, status, archived_at, folder_id, created_at, updated_at, created_by, uploaded_by";
+  "id, organization_id, name, type, mime_type, current_version_id, status, archived_at, folder_id, location_ids, created_at, updated_at, created_by, uploaded_by";
 const FOLDER_SELECT = "id, organization_id, name, created_at, updated_at, created_by";
 const VERSION_SELECT =
   "id, media_id, version_number, storage_key, thumbnail_key, size_bytes, width, height, duration_ms, checksum_sha256, mime_type, status, created_at, created_by";
@@ -135,6 +141,11 @@ function mapVersion(row: Record<string, unknown>): MediaVersionRow {
   };
 }
 
+function asUuidList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((id): id is string => typeof id === "string" && id.length > 0);
+}
+
 function mapMedia(row: Record<string, unknown>): MediaRow {
   return {
     id: asString(row["id"]),
@@ -150,6 +161,7 @@ function mapMedia(row: Record<string, unknown>): MediaRow {
     created_by: asNullableString(row["created_by"]),
     uploaded_by: asNullableString(row["uploaded_by"]),
     folder_id: asNullableString(row["folder_id"]),
+    location_ids: asUuidList(row["location_ids"]),
   };
 }
 
@@ -403,7 +415,16 @@ export async function listMedia(accessToken: string): Promise<MediaRecord[]> {
     .eq("status", "READY")
     .order("created_at", { ascending: false });
   throwIfError(error, "Could not load media.");
-  const rows = (data ?? []).map((row) => mapMedia(row as Record<string, unknown>));
+  const usage = await loadScopedContentUsage(client, auth.profile);
+  const rows = (data ?? [])
+    .map((row) => mapMedia(row as Record<string, unknown>))
+    .filter((row) =>
+      mediaVisibleToProfile(
+        auth.profile,
+        { createdBy: row.created_by, uploadedBy: row.uploaded_by, locationIds: row.location_ids },
+        usage.mediaIds.has(row.id),
+      ),
+    );
   return toRecords(client, rows);
 }
 
@@ -412,6 +433,16 @@ export async function getMedia(accessToken: string, id: string): Promise<MediaRe
   const client = getUserClient(accessToken);
   const row = await getMediaRow(client, id, auth.profile.organizationId);
   if (!row || row.archived_at || !isVisibleLibraryStatus(row.status)) return null;
+  const usage = await loadScopedContentUsage(client, auth.profile);
+  if (
+    !mediaVisibleToProfile(
+      auth.profile,
+      { createdBy: row.created_by, uploadedBy: row.uploaded_by, locationIds: row.location_ids },
+      usage.mediaIds.has(row.id),
+    )
+  ) {
+    return null;
+  }
   const records = await toRecords(client, [row], true);
   return records[0] ?? null;
 }
@@ -576,6 +607,7 @@ export async function createUploadIntent(
   if (mediaId) {
     const existing = await getMediaRow(client, mediaId, orgId);
     if (!existing) throw new Error("Media not found.");
+    assertCanMutateOwnedContent(auth.profile, existing.created_by);
     if (existing.archived_at || existing.status === "ARCHIVED") {
       throw new Error("Archived media cannot be replaced.");
     }
@@ -616,6 +648,7 @@ export async function createUploadIntent(
       input.mimeType,
     );
     if (reusable) {
+      assertCanMutateOwnedContent(auth.profile, reusable.media.created_by);
       const folderId = await requireFolderId(client, orgId, input.folderId);
       const { error: reuseError } = await client
         .from("media")
@@ -667,6 +700,7 @@ export async function createUploadIntent(
         mime_type: input.mimeType,
         status: "PROCESSING",
         folder_id: folderId,
+        location_ids: locationIdsForNewMedia(auth.profile),
         created_by: auth.userId,
         uploaded_by: auth.userId,
       })
@@ -801,6 +835,7 @@ export async function discardIncompleteUpload(
   const client = getUserClient(accessToken);
   const media = await getMediaRow(client, input.mediaId, auth.profile.organizationId);
   if (!media) return true;
+  assertCanMutateOwnedContent(auth.profile, media.created_by);
   const { data: versionRaw, error } = await client
     .from("media_versions")
     .select(VERSION_SELECT)
@@ -826,6 +861,7 @@ export async function renameMedia(
   const client = getUserClient(accessToken);
   const existing = await getMediaRow(client, id, auth.profile.organizationId);
   if (!existing) throw new Error("Media not found.");
+  assertCanMutateOwnedContent(auth.profile, existing.created_by);
   const { error } = await client
     .from("media")
     .update({ name: safeMediaFilename(filename) })
@@ -844,6 +880,7 @@ export async function archiveMedia(accessToken: string, id: string): Promise<Med
   const client = getUserClient(accessToken);
   const existing = await getMediaRow(client, id, auth.profile.organizationId);
   if (!existing) throw new Error("Media not found.");
+  assertCanMutateOwnedContent(auth.profile, existing.created_by);
   const { error } = await client
     .from("media")
     .update({ status: "ARCHIVED", archived_at: new Date().toISOString() })
@@ -862,6 +899,7 @@ export async function deleteMedia(accessToken: string, id: string): Promise<bool
   const client = getUserClient(accessToken);
   const existing = await getMediaRow(client, id, auth.profile.organizationId);
   if (!existing) throw new Error("Media not found.");
+  assertCanMutateOwnedContent(auth.profile, existing.created_by);
   await assertIdsDeletable(client, [existing]);
   await purgeMediaRow(client, id);
   return true;
@@ -874,6 +912,9 @@ export async function deleteMediaBulk(accessToken: string, ids: string[]): Promi
   if (unique.length === 0) return true;
   const rows = await getMediaRows(client, unique, auth.profile.organizationId);
   if (rows.length !== unique.length) throw new Error("Some files were not found.");
+  for (const row of rows) {
+    assertCanMutateOwnedContent(auth.profile, row.created_by);
+  }
   await assertIdsDeletable(client, rows);
   for (const row of rows) {
     await purgeMediaRow(client, row.id);
@@ -1077,6 +1118,9 @@ export async function moveMediaBulk(
   if (unique.length === 0) return [];
   const existing = await getMediaRows(client, unique, auth.profile.organizationId);
   if (existing.length !== unique.length) throw new Error("Some files were not found.");
+  for (const row of existing) {
+    assertCanMutateOwnedContent(auth.profile, row.created_by);
+  }
   const nextFolderId = await requireFolderId(client, auth.profile.organizationId, folderId);
   const { error } = await client
     .from("media")

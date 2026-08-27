@@ -16,6 +16,7 @@ import {
 import { SyncStatusPanel } from "@/features/campaigns/SyncStatusPanel";
 import { effectiveCampaignStatus, formatCampaignDateTime } from "@/lib/campaign-window";
 import { campaignService } from "@/services";
+import { NO_LOCATION_ACCESS_MESSAGE } from "@/lib/location-scope";
 
 export const Route = createFileRoute("/_shell/campaigns/$id")({
   head: () => ({
@@ -66,8 +67,8 @@ function CampaignDetailPage() {
     <E3QueryBoundary isLoading={isLoading} isError={isError} refetch={() => void refetch()}>
       {!data ? (
         <E3EmptyState
-          title="Campaign not found"
-          description="It may have been archived."
+          title={NO_LOCATION_ACCESS_MESSAGE}
+          description="This campaign is not targeted at your assigned locations, or it may have been archived."
           action={
             <E3Button variant="outline" asChild>
               <Link to="/campaigns">Back to campaigns</Link>
@@ -95,7 +96,7 @@ function CampaignDetailPage() {
                   Edit
                 </E3Button>
                 {data.status === "Paused" || data.status === "Active" || data.status === "Scheduled" ? (
-                  <E3Button variant="primary" disabled={toggle.isPending} onClick={() => toggle.mutate()}>
+                  <E3Button variant="primary" loading={toggle.isPending} onClick={() => toggle.mutate()}>
                     {data.status === "Paused" ? <Play /> : <Pause />}
                     {data.status === "Paused" ? "Resume" : "Stop"}
                   </E3Button>

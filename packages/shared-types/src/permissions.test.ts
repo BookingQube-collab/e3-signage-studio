@@ -20,13 +20,20 @@ test("Marketing can publish content but cannot open Users or Settings", () => {
   assert.equal(canAccessPath("MARKETING", "/settings"), false);
 });
 
-test("Site Supervisor is limited to screens and schedules", () => {
+test("Site Supervisor can run assigned-location ops but not Users or Settings", () => {
   assert.equal(hasPermission("SITE_SUPERVISOR", "screens.manage"), true);
   assert.equal(hasPermission("SITE_SUPERVISOR", "schedule.manage"), true);
-  assert.equal(hasPermission("SITE_SUPERVISOR", "media.manage"), false);
+  assert.equal(hasPermission("SITE_SUPERVISOR", "media.manage"), true);
+  assert.equal(hasPermission("SITE_SUPERVISOR", "playlists.manage"), true);
+  assert.equal(hasPermission("SITE_SUPERVISOR", "layouts.manage"), true);
+  assert.equal(hasPermission("SITE_SUPERVISOR", "campaigns.publish"), true);
+  assert.equal(hasPermission("SITE_SUPERVISOR", "users.view"), false);
+  assert.equal(hasPermission("SITE_SUPERVISOR", "settings.view"), false);
   assert.equal(canAccessPath("SITE_SUPERVISOR", "/screens/abc"), true);
-  assert.equal(canAccessPath("SITE_SUPERVISOR", "/media"), false);
+  assert.equal(canAccessPath("SITE_SUPERVISOR", "/media"), true);
+  assert.equal(canAccessPath("SITE_SUPERVISOR", "/campaigns"), true);
   assert.equal(canAccessPath("SITE_SUPERVISOR", "/users"), false);
+  assert.equal(canAccessPath("SITE_SUPERVISOR", "/settings"), false);
 });
 
 test("Event Manager can run campaigns but not manage users", () => {

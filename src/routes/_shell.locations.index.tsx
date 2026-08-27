@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { NO_LOCATION_ACCESS_MESSAGE } from "@/lib/location-scope";
 import { cn } from "@/lib/utils";
 import { locationService } from "@/services";
 import type { LocationStatus, LocationType } from "@/types";
@@ -58,7 +59,9 @@ const LOCATION_TYPES: LocationType[] = [
 const LOCATION_STATUSES: LocationStatus[] = ["Active", "Upcoming", "Inactive", "Archived"];
 
 function LocationsPage() {
+  const { auth } = Route.useRouteContext();
   const qc = useQueryClient();
+  const canManageLocations = Boolean(auth?.ok && auth.profile.role === "SUPER_ADMIN");
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("All");
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
@@ -100,9 +103,11 @@ function LocationsPage() {
         title="Locations"
         description="Every venue, event and activation running E3 screens."
         actions={
-          <E3Button variant="primary" onClick={() => setOpen(true)}>
-            <Plus /> Add Location
-          </E3Button>
+          canManageLocations ? (
+            <E3Button variant="primary" onClick={() => setOpen(true)}>
+              <Plus /> Add Location
+            </E3Button>
+          ) : undefined
         }
       />
 
@@ -129,12 +134,18 @@ function LocationsPage() {
         {filtered.length === 0 ? (
           <E3EmptyState
             icon={MapPin}
-            title="No locations here"
-            description="Nothing matches this filter yet. Add a location to get started."
+            title={data && data.length === 0 ? NO_LOCATION_ACCESS_MESSAGE : "No locations here"}
+            description={
+              data && data.length === 0
+                ? "Ask a Super Admin to assign you one or more locations."
+                : "Nothing matches this filter yet. Add a location to get started."
+            }
             action={
-              <E3Button variant="primary" onClick={() => setOpen(true)}>
-                <Plus /> Add Location
-              </E3Button>
+              canManageLocations ? (
+                <E3Button variant="primary" onClick={() => setOpen(true)}>
+                  <Plus /> Add Location
+                </E3Button>
+              ) : undefined
             }
           />
         ) : (
@@ -148,17 +159,21 @@ function LocationsPage() {
 
       <E3Modal
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={(open) => {
+          if (!open && create.isPending) return;
+          setOpen(open);
+        }}
         title="Add location"
         description="Locations group the screens installed at one venue or event."
         footer={
           <>
-            <E3Button variant="outline" onClick={() => setOpen(false)}>
+            <E3Button variant="outline" disabled={create.isPending} onClick={() => setOpen(false)}>
               Cancel
             </E3Button>
             <E3Button
               variant="primary"
-              disabled={!form.name || create.isPending}
+              disabled={!form.name}
+              loading={create.isPending}
               onClick={() =>
                 create.mutate({
                   name: form.name,
@@ -172,7 +187,7 @@ function LocationsPage() {
                 })
               }
             >
-              {create.isPending ? "Saving…" : "Add Location"}
+              Add Location
             </E3Button>
           </>
         }

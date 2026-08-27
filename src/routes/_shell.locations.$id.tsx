@@ -19,6 +19,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { effectiveCampaignStatus, formatCampaignDateTime } from "@/lib/campaign-window";
 import { campaignService, locationService, screenService } from "@/services";
+import { NO_LOCATION_ACCESS_MESSAGE } from "@/lib/location-scope";
 import type { Campaign } from "@/types";
 
 export const Route = createFileRoute("/_shell/locations/$id")({
@@ -82,7 +83,10 @@ function LocationDetailPage() {
         refetch={() => void locationQuery.refetch()}
       >
         {!location ? (
-          <E3EmptyState title="Location not found" description="This location may have been removed." />
+          <E3EmptyState
+            title={NO_LOCATION_ACCESS_MESSAGE}
+            description="This location is not in your assigned list, or it may have been removed."
+          />
         ) : (
           <>
             <E3PageHeader

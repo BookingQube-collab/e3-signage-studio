@@ -17,6 +17,10 @@ import type {
   CmsUserRow,
   LocationOption,
 } from "@/lib/auth-types";
+import {
+  isProtectedSuperAdminEmail,
+  requiresLocationAssignment,
+} from "@/lib/location-scope";
 import { clearAuthCookies, readAuthCookies, setAuthCookies } from "./session-cookies.server";
 import { ensureSeedLocations } from "./location-seed.server";
 import { getServiceRoleClient, getUserClient } from "./supabase.server";
@@ -260,6 +264,12 @@ function randomPassword(): string {
   return `E3-${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
+function assertLocationAssignment(role: UserRole, locationIds: string[]): void {
+  if (requiresLocationAssignment(role) && locationIds.length === 0) {
+    throw new Error("Assign at least one location to this role.");
+  }
+}
+
 export async function inviteCmsUser(input: {
   accessToken: string;
   name: string;
@@ -268,6 +278,7 @@ export async function inviteCmsUser(input: {
   locationIds: string[];
 }): Promise<{ user: CmsUserRow; inviteSent: boolean; warning: string | null }> {
   const auth = await requireCmsPermission(input.accessToken, "users.manage");
+  assertLocationAssignment(input.role, input.locationIds);
   if (input.role === "EVENT_MANAGER") {
     await assertEventLocations(input.locationIds);
   }
@@ -345,11 +356,24 @@ export async function updateCmsUser(input: {
   locationIds: string[];
 }): Promise<CmsUserRow> {
   await requireCmsPermission(input.accessToken, "users.manage");
+  assertLocationAssignment(input.role, input.locationIds);
   if (input.role === "EVENT_MANAGER") {
     await assertEventLocations(input.locationIds);
   }
 
   const admin = getServiceRoleClient();
+  const { data: existing, error: existingError } = await admin
+    .from("users")
+    .select("id, email, role")
+    .eq("id", input.userId)
+    .maybeSingle();
+  if (existingError) throw new Error(existingError.message);
+  if (!existing) throw new Error("User not found.");
+  const existingEmail = (existing as { email: string }).email;
+  if (isProtectedSuperAdminEmail(existingEmail) && input.role !== "SUPER_ADMIN") {
+    throw new Error("This Super Admin account cannot be changed to another role.");
+  }
+
   const { data: updated, error } = await admin
     .from("users")
     .update({ role: input.role })
