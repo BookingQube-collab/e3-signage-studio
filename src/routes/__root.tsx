@@ -10,6 +10,7 @@ import {
 import { lazy, Suspense, useEffect, type ReactNode } from "react";
 import { AuthSessionSync } from "@/lib/auth-sync";
 import type { AuthSessionResult } from "@/lib/auth-types";
+import { ThemeProvider, THEME_INIT_SCRIPT } from "@/lib/theme";
 import { useIsClient } from "@/lib/use-is-client";
 import appCss from "../styles.css?url";
 import { CmsFavicon } from "@/components/branding/CmsBranding";
@@ -124,8 +125,10 @@ export const Route = createRootRouteWithContext<{
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className="dark">
+    // Default dark via blocking script + class; suppressHydrationWarning for theme class sync.
+    <html lang="en" className="dark" suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <HeadContent />
       </head>
       <body>
@@ -146,16 +149,18 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthSessionSync>
-        {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-        <Outlet />
-        {isClient ? <CmsFavicon /> : null}
-        {isClient ? (
-          <Suspense fallback={null}>
-            <Toaster position="top-right" richColors />
-          </Suspense>
-        ) : null}
-      </AuthSessionSync>
+      <ThemeProvider>
+        <AuthSessionSync>
+          {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+          <Outlet />
+          {isClient ? <CmsFavicon /> : null}
+          {isClient ? (
+            <Suspense fallback={null}>
+              <Toaster position="top-right" richColors />
+            </Suspense>
+          ) : null}
+        </AuthSessionSync>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

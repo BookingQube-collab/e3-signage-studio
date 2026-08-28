@@ -55,7 +55,9 @@
 
 /*
  * E3 Digital Signage design system.
- * Dark-first. All color values in oklch.
+ * Light + dark themes via CSS variables. Default is dark (html.dark).
+ * Brand accents (purple / pink / blue / orange) stay shared across modes.
+ * All color values in oklch unless noted (gradients keep hex for compatibility).
  */
 
 @theme inline {
@@ -121,7 +123,66 @@
 }
 
 :root {
+  color-scheme: light;
   --radius: 1rem;
+
+  /* Shared brand accents */
+  --e3-pink: oklch(0.688 0.166 358.6);
+  --e3-purple: oklch(0.52 0.2 297.7);
+  --e3-purple-deep: oklch(0.393 0.239 295.5);
+  --e3-blue: oklch(0.58 0.14 251.5);
+  --e3-orange: oklch(0.65 0.14 43.5);
+
+  /* Light surfaces — cool white with a soft purple cast */
+  --e3-bg: oklch(0.975 0.008 300);
+  --e3-surface: oklch(0.995 0.003 300);
+  --e3-surface-elevated: oklch(0.945 0.01 300);
+
+  --background: var(--e3-bg);
+  --foreground: oklch(0.24 0.02 300);
+  --card: var(--e3-surface);
+  --card-foreground: oklch(0.24 0.02 300);
+  --popover: var(--e3-surface);
+  --popover-foreground: oklch(0.24 0.02 300);
+  --primary: var(--e3-purple);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: var(--e3-surface-elevated);
+  --secondary-foreground: oklch(0.28 0.02 300);
+  --muted: var(--e3-surface-elevated);
+  --muted-foreground: oklch(0.48 0.02 300);
+  --accent: var(--e3-surface-elevated);
+  --accent-foreground: oklch(0.24 0.02 300);
+  --destructive: oklch(0.55 0.2 22);
+  --destructive-foreground: oklch(0.99 0 0);
+  --success: oklch(0.5 0.13 158);
+  --success-foreground: oklch(0.99 0 0);
+  --warning: oklch(0.58 0.14 70);
+  --warning-foreground: oklch(0.99 0 0);
+  --info: var(--e3-blue);
+  --info-foreground: oklch(0.99 0 0);
+  --border: oklch(0.35 0.02 300 / 14%);
+  --input: oklch(0.35 0.02 300 / 18%);
+  --ring: var(--e3-purple);
+  --chart-1: var(--e3-pink);
+  --chart-2: var(--e3-purple);
+  --chart-3: var(--e3-blue);
+  --chart-4: var(--e3-orange);
+  --chart-5: var(--e3-purple-deep);
+  --sidebar: oklch(0.96 0.01 300);
+  --sidebar-foreground: oklch(0.24 0.02 300);
+  --sidebar-primary: var(--e3-purple);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: var(--e3-surface-elevated);
+  --sidebar-accent-foreground: oklch(0.24 0.02 300);
+  --sidebar-border: oklch(0.35 0.02 300 / 12%);
+  --sidebar-ring: var(--e3-purple);
+
+  --e3-gradient: linear-gradient(110deg, #e95a9d 0%, #8d5cdd 38%, #5f0bc0 62%, #5ba2ed 100%);
+  --e3-gradient-accent: linear-gradient(110deg, #e95a9d, #8d5cdd, #5ba2ed, #e97c53);
+}
+
+.dark {
+  color-scheme: dark;
 
   --e3-bg: oklch(0.213 0.014 316);
   --e3-surface: oklch(0.271 0.014 314);
@@ -170,13 +231,6 @@
   --sidebar-accent-foreground: oklch(0.972 0.003 300);
   --sidebar-border: oklch(1 0 0 / 8%);
   --sidebar-ring: var(--e3-purple);
-
-  --e3-gradient: linear-gradient(110deg, #e95a9d 0%, #8d5cdd 38%, #5f0bc0 62%, #5ba2ed 100%);
-  --e3-gradient-accent: linear-gradient(110deg, #e95a9d, #8d5cdd, #5ba2ed, #e97c53);
-}
-
-.dark {
-  color-scheme: dark;
 }
 
 @layer base {

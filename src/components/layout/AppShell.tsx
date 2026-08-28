@@ -18,6 +18,7 @@ import {
 import { useState, type ReactNode } from "react";
 
 import { useCmsLogoSrc } from "@/components/branding/CmsBranding";
+import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -182,7 +183,7 @@ export function AppShell({
       {/* Desktop sidebar */}
       <aside
         className={cn(
-          "sticky top-0 hidden h-screen shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-200 lg:flex",
+          "sticky top-0 hidden h-screen shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-200 lg:flex",
           collapsed ? "w-[76px]" : "w-64",
         )}
       >
@@ -239,10 +240,11 @@ export function AppShell({
             </div>
           </div>
 
-          <div className="flex flex-1 items-center justify-end gap-3 md:flex-none">
+          <div className="flex flex-1 items-center justify-end gap-2 sm:gap-3 md:flex-none">
             <span className="font-display hidden text-sm font-semibold uppercase tracking-widest text-muted-foreground lg:inline">
               E3 Digital Signage
             </span>
+            <ThemeToggle />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
