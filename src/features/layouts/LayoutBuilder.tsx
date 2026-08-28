@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, getRouteApi } from "@tanstack/react-router";
 import { Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -21,12 +21,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { firstHttpUrl } from "@/lib/playlist-preview";
 import { cn } from "@/lib/utils";
 import { hasPermission } from "@/lib/rbac";
 import { isUuid } from "@/services/inventory-map";
 import { layoutService, mediaService } from "@/services";
 import { MediaPicker } from "@/features/media/MediaPicker";
-import type { FitMode, Layout, LayoutPreset, LayoutZone, Orientation, ZoneContentType } from "@/types";
+import type {
+  FitMode,
+  Layout,
+  LayoutPreset,
+  LayoutZone,
+  Media,
+  Orientation,
+  ZoneContentType,
+} from "@/types";
 
 const PRESETS: LayoutPreset[] = [
   "Full Screen",
@@ -124,6 +133,198 @@ function selectValue<T extends string>(value: string | null | undefined, allowed
   return allowed.includes(value as T) ? (value as T) : fallback;
 }
 
+function fitObjectClass(fit: FitMode | null | undefined): string {
+  switch (fit) {
+    case "Contain":
+      return "object-contain";
+    case "Fill":
+    case "Stretch":
+      return "object-fill";
+    case "Cover":
+    default:
+      return "object-cover";
+  }
+}
+
+function contentTypeForMedia(media: Media): ZoneContentType {
+  switch (media.type) {
+    case "Video":
+      return "Video";
+    case "QR":
+      return "QR";
+    case "Logo":
+      return "Logo";
+    default:
+      return "Image";
+  }
+}
+
+function mediaForRef(library: Media[], contentRef: string | null | undefined): Media | null {
+  if (!contentRef) return null;
+  return library.find((item) => item.filename === contentRef || item.id === contentRef) ?? null;
+}
+
+function ZoneMediaFill({
+  media,
+  fit,
+  playback,
+}: {
+  media: Media;
+  fit: FitMode;
+  playback?: boolean;
+}) {
+  const poster = firstHttpUrl(media.thumbnailUrl);
+  const videoSrc = media.type === "Video" ? firstHttpUrl(media.previewUrl, media.thumbnailUrl) : null;
+  const imageSrc =
+    media.type === "Video" ? poster : firstHttpUrl(media.thumbnailUrl, media.previewUrl);
+  const objectClass = fitObjectClass(fit);
+
+  if (videoSrc) {
+    return (
+      <video
+        src={videoSrc}
+        poster={poster && poster !== videoSrc ? poster : undefined}
+        className={cn("absolute inset-0 size-full", objectClass)}
+        muted
+        playsInline
+        autoPlay={playback}
+        loop={playback}
+        preload={playback ? "auto" : "metadata"}
+        referrerPolicy="no-referrer"
+      />
+    );
+  }
+
+  if (imageSrc) {
+    return (
+      <img
+        src={imageSrc}
+        alt=""
+        className={cn("absolute inset-0 size-full", objectClass)}
+        loading="lazy"
+        decoding="async"
+        referrerPolicy="no-referrer"
+        onError={(event) => {
+          event.currentTarget.style.display = "none";
+        }}
+      />
+    );
+  }
+
+  return null;
+}
+
+function LayoutCanvas({
+  layout,
+  zones,
+  mediaLibrary,
+  selectedId,
+  interactive,
+  onSelect,
+  onAssign,
+}: {
+  layout: Layout;
+  zones: LayoutZone[];
+  mediaLibrary: Media[];
+  selectedId?: string | null;
+  interactive?: boolean;
+  onSelect?: (id: string) => void;
+  onAssign?: (zoneId: string, media: Media) => void;
+}) {
+  const portrait = layout.orientation === "Portrait";
+
+  return (
+    <div
+      className={cn(
+        "relative mx-auto w-full overflow-hidden rounded-xl border border-border",
+        portrait ? "max-w-sm" : "",
+      )}
+      style={{
+        aspectRatio: portrait ? "9 / 16" : "16 / 9",
+        background: layout.background,
+      }}
+    >
+      {zones.map((z) => {
+        const media = mediaForRef(mediaLibrary, z.contentRef);
+        const selected = interactive && selectedId === z.id;
+        const sharedClassName = cn(
+          "absolute overflow-hidden border text-left transition-colors",
+          interactive ? "cursor-pointer" : "",
+          selected ? "border-transparent ring-2 ring-e3-pink ring-inset" : "border-white/10",
+          interactive && !selected ? "hover:border-white/25" : "",
+        );
+        const sharedStyle = {
+          left: `${z.x}%`,
+          top: `${z.y}%`,
+          width: `${z.width}%`,
+          height: `${z.height}%`,
+          background: z.background,
+        } as const;
+        const body = (
+          <>
+            {media ? (
+              <ZoneMediaFill media={media} fit={z.fit} playback={!interactive || selected} />
+            ) : null}
+            <span
+              className={cn(
+                "pointer-events-none absolute inset-x-0 bottom-0 z-[1] bg-gradient-to-t from-black/70 via-black/35 to-transparent px-2 pb-2 pt-6",
+                media
+                  ? ""
+                  : "inset-0 grid place-items-center bg-none from-transparent via-transparent to-transparent px-2 py-2",
+              )}
+            >
+              <span className={cn("min-w-0", media ? "block" : "text-center")}>
+                <span className="font-display block truncate text-[10px] font-semibold uppercase tracking-widest text-white/90 sm:text-xs">
+                  {z.name}
+                </span>
+                <span className="block truncate text-[10px] text-white/70 sm:text-[11px]">
+                  {z.contentRef ?? z.contentType}
+                </span>
+              </span>
+            </span>
+          </>
+        );
+
+        if (interactive) {
+          return (
+            <button
+              key={z.id}
+              type="button"
+              onClick={onSelect ? () => onSelect(z.id) : undefined}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={
+                onAssign
+                  ? (e) => {
+                      e.preventDefault();
+                      const filename = e.dataTransfer.getData("text/plain");
+                      const mediaId = e.dataTransfer.getData("application/x-e3-media-id");
+                      const dropped =
+                        (mediaId
+                          ? mediaLibrary.find((item) => item.id === mediaId)
+                          : undefined) ??
+                        mediaLibrary.find((item) => item.filename === filename);
+                      if (dropped) onAssign(z.id, dropped);
+                    }
+                  : undefined
+              }
+              className={sharedClassName}
+              style={sharedStyle}
+            >
+              {body}
+            </button>
+          );
+        }
+
+        return (
+          <div key={z.id} className={sharedClassName} style={sharedStyle}>
+            {body}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 const shellRoute = getRouteApi("/_shell");
 
 export function LayoutBuilder({ initial }: { initial: Layout }) {
@@ -139,10 +340,12 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
     Array.isArray(initial.zones) ? (initial.zones[0]?.id ?? null) : null,
   );
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const savedLayout = isUuid(initial.id);
 
   const mediaQuery = useQuery({ queryKey: ["media"], queryFn: mediaService.list });
   const foldersQuery = useQuery({ queryKey: ["media-folders"], queryFn: mediaService.listFolders });
+  const mediaLibrary = mediaQuery.data ?? [];
 
   const save = useMutation({
     mutationFn: layoutService.save,
@@ -178,7 +381,12 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
     setLayout({ ...layout, zones: zones.map((z) => (z.id === id ? { ...z, ...patch } : z)) });
   }
 
-  const portrait = layout.orientation === "Portrait";
+  function assignMediaToZone(zoneId: string, media: Media) {
+    patchZone(zoneId, {
+      contentRef: media.filename,
+      contentType: contentTypeForMedia(media),
+    });
+  }
 
   return (
     <div>
@@ -192,7 +400,7 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
                 <Trash2 /> Delete
               </E3Button>
             ) : null}
-            <E3Button variant="outline" onClick={() => toast.info("Preview is UI-only")}>
+            <E3Button variant="outline" onClick={() => setPreviewOpen(true)}>
               Preview
             </E3Button>
             <E3Button
@@ -260,52 +468,15 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
               }
             />
             <E3CardBody>
-              <div
-                className={cn(
-                  "relative mx-auto w-full overflow-hidden rounded-xl border border-border",
-                  portrait ? "max-w-sm" : "",
-                )}
-                style={{
-                  aspectRatio: portrait ? "9 / 16" : "16 / 9",
-                  background: layout.background,
-                }}
-              >
-                {zones.map((z) => (
-                  <button
-                    key={z.id}
-                    type="button"
-                    onClick={() => setSelectedId(z.id)}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      const name = e.dataTransfer.getData("text/plain");
-                      if (name) patchZone(z.id, { contentRef: name });
-                    }}
-                    className={cn(
-                      "absolute grid place-items-center overflow-hidden border p-2 text-center transition-colors",
-                      selectedId === z.id
-                        ? "border-transparent ring-2 ring-e3-pink"
-                        : "border-white/10 hover:border-white/25",
-                    )}
-                    style={{
-                      left: `${z.x}%`,
-                      top: `${z.y}%`,
-                      width: `${z.width}%`,
-                      height: `${z.height}%`,
-                      background: z.background,
-                    }}
-                  >
-                    <span className="min-w-0">
-                      <span className="font-display block truncate text-xs font-semibold uppercase tracking-widest">
-                        {z.name}
-                      </span>
-                      <span className="block truncate text-[11px] text-muted-foreground">
-                        {z.contentRef ?? z.contentType}
-                      </span>
-                    </span>
-                  </button>
-                ))}
-              </div>
+              <LayoutCanvas
+                layout={layout}
+                zones={zones}
+                mediaLibrary={mediaLibrary}
+                selectedId={selectedId}
+                interactive
+                onSelect={setSelectedId}
+                onAssign={assignMediaToZone}
+              />
 
               <div className="mt-5">
                 <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
@@ -313,11 +484,11 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
                 </p>
                 <div className="max-h-80 overflow-y-auto pr-1">
                   <MediaPicker
-                    media={mediaQuery.data ?? []}
+                    media={mediaLibrary}
                     folders={foldersQuery.data ?? []}
                     draggable
                     onPick={(m) => {
-                      if (selectedId) patchZone(selectedId, { contentRef: m.filename });
+                      if (selectedId) assignMediaToZone(selectedId, m);
                     }}
                   />
                 </div>
@@ -450,9 +621,15 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
                     <Label htmlFor="z-content">Content</Label>
                     <Select
                       value={selected.contentRef && selected.contentRef.length > 0 ? selected.contentRef : "none"}
-                      onValueChange={(v) =>
-                        patchZone(selected.id, { contentRef: v === "none" ? null : v })
-                      }
+                      onValueChange={(v) => {
+                        if (v === "none") {
+                          patchZone(selected.id, { contentRef: null });
+                          return;
+                        }
+                        const media = mediaForRef(mediaLibrary, v);
+                        if (media) assignMediaToZone(selected.id, media);
+                        else patchZone(selected.id, { contentRef: v });
+                      }}
                     >
                       <SelectTrigger id="z-content">
                         <SelectValue />
@@ -531,6 +708,21 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
           </E3Card>
         </div>
       </div>
+
+      <E3Modal
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        title={layout.name || "Layout preview"}
+        description={`${layout.preset} · ${layout.orientation} · ${layout.resolution}`}
+        className="max-w-5xl"
+        footer={
+          <E3Button variant="outline" onClick={() => setPreviewOpen(false)}>
+            Close
+          </E3Button>
+        }
+      >
+        <LayoutCanvas layout={layout} zones={zones} mediaLibrary={mediaLibrary} />
+      </E3Modal>
 
       <E3Modal
         open={deleteOpen}

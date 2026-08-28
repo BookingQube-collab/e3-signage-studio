@@ -95,6 +95,7 @@ export function MediaPicker({
                 draggable
                   ? (e) => {
                       e.dataTransfer.setData("text/plain", item.filename);
+                      e.dataTransfer.setData("application/x-e3-media-id", item.id);
                     }
                   : undefined
               }
