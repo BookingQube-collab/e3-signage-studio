@@ -90,6 +90,13 @@ export function mergeLibraryMedia<T extends { id: string }>(current: T[], added:
   return [...byId.values()];
 }
 
+/** Display-name change must keep the same card in the same folder. */
+export function applyRenamedMedia<T extends { id: string }>(items: T[], renamed: T): T[] {
+  const next = items.map((item) => (item.id === renamed.id ? renamed : item));
+  if (next.some((item) => item.id === renamed.id)) return next;
+  return [renamed, ...next];
+}
+
 export function bumpFolderFileCount<T extends { id: string; fileCount: number }>(
   folders: T[],
   folderId: string | null | undefined,

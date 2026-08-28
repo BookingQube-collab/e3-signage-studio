@@ -48,6 +48,34 @@ export function shouldResyncPromote(status: string, objectFound: boolean): boole
   return status === "PROCESSING" || status === "FAILED";
 }
 
+/** Reattach R2 objects that have no READY library row. Never duplicate a key that already lists. */
+export function shouldImportOrphanStorageKey(
+  key: string,
+  readyOrKnownKeys: Iterable<string>,
+): boolean {
+  if (!key) return false;
+  const known = readyOrKnownKeys instanceof Set ? readyOrKnownKeys : new Set(readyOrKnownKeys);
+  return !known.has(key);
+}
+
+export function orphanStorageKeysOnPage(
+  pageKeys: string[],
+  readyOrKnownKeys: Iterable<string>,
+): string[] {
+  return pageKeys.filter((key) => shouldImportOrphanStorageKey(key, readyOrKnownKeys));
+}
+
+/** Archived or failed rows whose bytes are still in the bucket should come back as READY. */
+export function shouldResyncRestoreLibraryRow(
+  status: string,
+  archivedAt: string | null | undefined,
+  objectFound: boolean,
+): boolean {
+  if (!objectFound) return false;
+  if (typeof archivedAt === "string" && archivedAt.length > 0) return true;
+  return status !== "READY";
+}
+
 export function describeResyncToast(restored: number): { title: string } {
   if (restored <= 0) return { title: "Library is in sync with Cloudflare" };
   return {

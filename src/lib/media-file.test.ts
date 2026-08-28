@@ -16,6 +16,9 @@ import {
   inferMediaMime,
   mediaTypeFromMime,
   normalizeChecksum,
+  parseMediaStorageKey,
+  renameMediaDisplayName,
+  restoredLibraryFilename,
   safeMediaFilename,
   uniqueLibraryFilename,
   uploadLimitsHint,
@@ -88,4 +91,32 @@ test("duplicate filenames in a folder get a suffix instead of replacing the firs
     "Birthdat (3).jpeg",
   );
   assert.equal(uniqueLibraryFilename(["party.png"], "birthdat.jpeg"), "birthdat.jpeg");
+});
+
+test("rename only changes the display name and keeps a playable extension", () => {
+  assert.equal(renameMediaDisplayName("party.jpeg", "birthday"), "birthday.jpeg");
+  assert.equal(renameMediaDisplayName("party.jpeg", "birthday.png"), "birthday.png");
+  assert.equal(renameMediaDisplayName("loop.mp4", "welcome loop"), "welcome loop.mp4");
+  assert.equal(renameMediaDisplayName("hero.jpg", "hero.gif"), "hero.jpg");
+});
+
+test("storage keys round-trip org, media id, version, and checksum", () => {
+  const key = buildStorageKey({
+    organizationId: "11111111-1111-4111-8111-111111111111",
+    mediaId: "22222222-2222-4222-8222-222222222222",
+    versionNumber: 1,
+    checksumSha256: "ab".repeat(32),
+    mime: "image/jpeg",
+  });
+  const parsed = parseMediaStorageKey(key);
+  assert.equal(parsed?.organizationId, "11111111-1111-4111-8111-111111111111");
+  assert.equal(parsed?.mediaId, "22222222-2222-4222-8222-222222222222");
+  assert.equal(parsed?.versionNumber, 1);
+  assert.equal(parsed?.checksumSha256, "ab".repeat(32));
+  assert.equal(parsed?.mime, "image/jpeg");
+  assert.equal(parseMediaStorageKey("not-a-key"), null);
+  assert.equal(
+    restoredLibraryFilename("22222222-2222-4222-8222-222222222222", "image/jpeg"),
+    "restored-22222222.jpg",
+  );
 });

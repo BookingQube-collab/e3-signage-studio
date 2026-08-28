@@ -24,6 +24,9 @@ import {
   hueFromChecksum,
   mediaTypeFromMime,
   normalizeChecksum,
+  parseMediaStorageKey,
+  renameMediaDisplayName,
+  restoredLibraryFilename,
   safeMediaFilename,
   uniqueLibraryFilename,
 } from "../lib/media-file";
@@ -47,8 +50,10 @@ import {
   RESYNC_R2_MAX_PAGES,
   RESYNC_R2_PAGE_SIZE,
   RESYNC_UPDATE_BATCH_SIZE,
+  orphanStorageKeysOnPage,
   shouldDiscardIncompleteMedia,
   shouldResyncPromote,
+  shouldResyncRestoreLibraryRow,
   shouldSkipCompleteObjectStat,
   shouldSkipLibraryAutoSync,
   STORAGE_LIST_TIMEOUT_MS,
@@ -873,10 +878,242 @@ async function promoteRowsInBatches(
   return promoted;
 }
 
+async function loadCoveredStorageKeys(
+  client: ReturnType<typeof getUserClient>,
+  organizationId: string,
+  storageKeys: string[],
+): Promise<Set<string>> {
+  const uniqueKeys = [...new Set(storageKeys.filter(Boolean))];
+  if (uniqueKeys.length === 0) return new Set();
+  const { data: versionRaw, error } = await client
+    .from("media_versions")
+    .select("storage_key, media_id")
+    .in("storage_key", uniqueKeys);
+  throwIfError(error, "Could not match stored files.");
+  const versions = (versionRaw ?? []).map((row) => ({
+    storage_key: asString((row as { storage_key: string }).storage_key),
+    media_id: asString((row as { media_id: string }).media_id),
+  }));
+  if (versions.length === 0) return new Set();
+  const { data: mediaRaw, error: mediaError } = await client
+    .from("media")
+    .select("id")
+    .in(
+      "id",
+      [...new Set(versions.map((row) => row.media_id))],
+    )
+    .eq("organization_id", organizationId);
+  throwIfError(mediaError, "Could not match stored media.");
+  const inOrg = new Set((mediaRaw ?? []).map((row) => asString((row as { id: string }).id)));
+  return new Set(versions.filter((row) => inOrg.has(row.media_id)).map((row) => row.storage_key));
+}
+
+async function restoreLibraryRowsForKeys(
+  client: ReturnType<typeof getUserClient>,
+  organizationId: string,
+  storageKeys: string[],
+): Promise<MediaRow[]> {
+  const uniqueKeys = [...new Set(storageKeys.filter(Boolean))];
+  if (uniqueKeys.length === 0) return [];
+  const { data: versionRaw, error } = await client
+    .from("media_versions")
+    .select(VERSION_SELECT)
+    .in("storage_key", uniqueKeys);
+  throwIfError(error, "Could not match stored versions.");
+  const versions = (versionRaw ?? []).map((row) => mapVersion(row as Record<string, unknown>));
+  const mediaIds = [...new Set(versions.map((version) => version.media_id))];
+  if (mediaIds.length === 0) return [];
+  const { data, error: mediaError } = await client
+    .from("media")
+    .select(MEDIA_SELECT)
+    .in("id", mediaIds)
+    .eq("organization_id", organizationId);
+  throwIfError(mediaError, "Could not load stored media.");
+  const mediaById = new Map(
+    (data ?? []).map((row) => {
+      const media = mapMedia(row as Record<string, unknown>);
+      return [media.id, media] as const;
+    }),
+  );
+  const restorable: Array<{ media: MediaRow; version: MediaVersionRow }> = [];
+  for (const version of versions) {
+    const media = mediaById.get(version.media_id);
+    if (!media) continue;
+    if (!shouldResyncRestoreLibraryRow(media.status, media.archived_at, true)) continue;
+    restorable.push({ media, version });
+  }
+  const restored: MediaRow[] = [];
+  for (const batch of chunkItems(restorable, RESYNC_UPDATE_BATCH_SIZE)) {
+    const done = await Promise.all(
+      batch.map(async ({ media, version }) => {
+        try {
+          await markUploadReady(client, media, version);
+          if (media.archived_at) {
+            const { error: clearArchive } = await client
+              .from("media")
+              .update({ archived_at: null })
+              .eq("id", media.id);
+            throwIfError(clearArchive, "Could not restore media.");
+          }
+          return {
+            ...media,
+            status: "READY",
+            archived_at: null,
+            current_version_id: version.id,
+            mime_type: version.mime_type,
+          };
+        } catch (error) {
+          if (isCanceledStatementError(error instanceof Error ? error.message : "")) throw error;
+          return null;
+        }
+      }),
+    );
+    for (const row of done) {
+      if (row) restored.push(row);
+    }
+  }
+  return restored;
+}
+
+async function createLibraryRowsForOrphanKeys(
+  client: ReturnType<typeof getUserClient>,
+  organizationId: string,
+  keys: string[],
+  createdBy: string,
+  locationIds: string[],
+): Promise<MediaRow[]> {
+  const created: MediaRow[] = [];
+  for (const batch of chunkItems(keys, RESYNC_UPDATE_BATCH_SIZE)) {
+    const done = await Promise.all(
+      batch.map(async (key) => {
+        const parsed = parseMediaStorageKey(key);
+        if (!parsed || parsed.organizationId !== organizationId) return null;
+        try {
+          const existing = await getMediaRow(client, parsed.mediaId, organizationId);
+          if (existing) {
+            const restored = await restoreLibraryRowsForKeys(client, organizationId, [key]);
+            if (restored[0]) return restored[0];
+            if (isVisibleLibraryStatus(existing.status) && !existing.archived_at) return null;
+            const thumbnailKey = parsed.mime.startsWith("image/") ? key : null;
+            const { data: versionRaw, error: versionError } = await client
+              .from("media_versions")
+              .insert({
+                media_id: existing.id,
+                version_number: parsed.versionNumber,
+                storage_key: key,
+                thumbnail_key: thumbnailKey,
+                size_bytes: 0,
+                width: null,
+                height: null,
+                duration_ms: null,
+                checksum_sha256: parsed.checksumSha256,
+                mime_type: parsed.mime,
+                status: "READY",
+                created_by: createdBy,
+              })
+              .select(VERSION_SELECT)
+              .single();
+            if (versionError?.code === "23505") {
+              const again = await restoreLibraryRowsForKeys(client, organizationId, [key]);
+              return again[0] ?? null;
+            }
+            throwIfError(versionError, "Could not restore media version.");
+            const version = mapVersion(versionRaw as Record<string, unknown>);
+            await markUploadReady(client, existing, version);
+            if (existing.archived_at) {
+              const { error: clearArchive } = await client
+                .from("media")
+                .update({ archived_at: null })
+                .eq("id", existing.id);
+              throwIfError(clearArchive, "Could not restore media.");
+            }
+            return {
+              ...existing,
+              status: "READY",
+              archived_at: null,
+              current_version_id: version.id,
+              mime_type: parsed.mime,
+            };
+          }
+          const type = mediaTypeFromMime(parsed.mime);
+          const filename = await uniqueNameInFolder(
+            client,
+            organizationId,
+            null,
+            restoredLibraryFilename(parsed.mediaId, parsed.mime),
+          );
+          const { data: mediaRaw, error: mediaError } = await client
+            .from("media")
+            .insert({
+              id: parsed.mediaId,
+              organization_id: organizationId,
+              name: filename,
+              type,
+              mime_type: parsed.mime,
+              status: "PROCESSING",
+              folder_id: null,
+              location_ids: locationIds,
+              created_by: createdBy,
+              uploaded_by: createdBy,
+            })
+            .select(MEDIA_SELECT)
+            .single();
+          if (mediaError?.code === "23505") {
+            const raced = await getMediaRow(client, parsed.mediaId, organizationId);
+            if (!raced) return null;
+            const restored = await restoreLibraryRowsForKeys(client, organizationId, [key]);
+            return restored[0] ?? null;
+          }
+          throwIfError(mediaError, "Could not restore media.");
+          const media = mapMedia(mediaRaw as Record<string, unknown>);
+          const thumbnailKey = parsed.mime.startsWith("image/") ? key : null;
+          const { data: versionRaw, error: versionError } = await client
+            .from("media_versions")
+            .insert({
+              media_id: media.id,
+              version_number: parsed.versionNumber,
+              storage_key: key,
+              thumbnail_key: thumbnailKey,
+              size_bytes: 0,
+              width: null,
+              height: null,
+              duration_ms: null,
+              checksum_sha256: parsed.checksumSha256,
+              mime_type: parsed.mime,
+              status: "READY",
+              created_by: createdBy,
+            })
+            .select(VERSION_SELECT)
+            .single();
+          throwIfError(versionError, "Could not restore media version.");
+          const version = mapVersion(versionRaw as Record<string, unknown>);
+          await markUploadReady(client, media, version);
+          return {
+            ...media,
+            status: "READY",
+            current_version_id: version.id,
+            mime_type: parsed.mime,
+          };
+        } catch (error) {
+          if (isCanceledStatementError(error instanceof Error ? error.message : "")) throw error;
+          return null;
+        }
+      }),
+    );
+    for (const row of done) {
+      if (row) created.push(row);
+    }
+  }
+  return created;
+}
+
 type PromoteFromR2Options = {
   folderId?: string | null;
   maxPages: number;
   deadlineMs: number;
+  importOrphans?: boolean;
+  createdBy?: string;
+  locationIds?: string[];
 };
 
 async function promotePendingFromR2Pages(
@@ -884,13 +1121,28 @@ async function promotePendingFromR2Pages(
   organizationId: string,
   options: PromoteFromR2Options,
 ): Promise<MediaRow[]> {
-  if (shouldSkipLibraryAutoSync(await hasIncompleteUploads(client, organizationId, options.folderId))) {
+  const importOrphans = Boolean(options.importOrphans);
+  if (
+    !importOrphans &&
+    shouldSkipLibraryAutoSync(await hasIncompleteUploads(client, organizationId, options.folderId))
+  ) {
     return [];
   }
 
   const promoted: MediaRow[] = [];
+  const seen = new Set<string>();
 
-  if (options.maxPages <= AUTO_SYNC_R2_MAX_PAGES) {
+  function take(rows: MediaRow[]): MediaRow[] {
+    const fresh: MediaRow[] = [];
+    for (const row of rows) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      fresh.push(row);
+    }
+    return fresh;
+  }
+
+  if (options.maxPages <= AUTO_SYNC_R2_MAX_PAGES && !importOrphans) {
     const pending = await loadIncompleteMediaWithVersions(client, organizationId, options.folderId, 20);
     for (const batch of chunkItems(pending, RESYNC_UPDATE_BATCH_SIZE)) {
       const remainingMs = options.deadlineMs - Date.now();
@@ -906,7 +1158,7 @@ async function promotePendingFromR2Pages(
         }),
       );
       if (found.length === 0) continue;
-      promoted.push(...(await promoteRowsInBatches(client, found)));
+      promoted.push(...take(await promoteRowsInBatches(client, found)));
     }
     return promoted;
   }
@@ -930,8 +1182,26 @@ async function promotePendingFromR2Pages(
         keyChunk,
         options.folderId,
       );
-      if (matches.length === 0) continue;
-      promoted.push(...(await promoteRowsInBatches(client, matches)));
+      if (matches.length > 0) {
+        promoted.push(...take(await promoteRowsInBatches(client, matches)));
+      }
+      if (!importOrphans) continue;
+      const restored = await restoreLibraryRowsForKeys(client, organizationId, keyChunk);
+      if (restored.length > 0) promoted.push(...take(restored));
+      const covered = await loadCoveredStorageKeys(client, organizationId, keyChunk);
+      const orphans = orphanStorageKeysOnPage(keyChunk, covered);
+      if (orphans.length === 0 || !options.createdBy) continue;
+      promoted.push(
+        ...take(
+          await createLibraryRowsForOrphanKeys(
+            client,
+            organizationId,
+            orphans,
+            options.createdBy ?? "",
+            options.locationIds ?? [],
+          ),
+        ),
+      );
     }
 
     if (!listed.nextContinuationToken) break;
@@ -939,9 +1209,8 @@ async function promotePendingFromR2Pages(
   }
 
   if (options.deadlineMs - Date.now() >= 400) {
-    const promotedIds = new Set(promoted.map((row) => row.id));
     const leftover = (await loadIncompleteMediaWithVersions(client, organizationId, options.folderId)).filter(
-      (row) => !promotedIds.has(row.media.id),
+      (row) => !seen.has(row.media.id),
     );
     for (const batch of chunkItems(leftover, RESYNC_UPDATE_BATCH_SIZE)) {
       const remainingMs = options.deadlineMs - Date.now();
@@ -957,7 +1226,7 @@ async function promotePendingFromR2Pages(
         }),
       );
       if (found.length === 0) continue;
-      promoted.push(...(await promoteRowsInBatches(client, found)));
+      promoted.push(...take(await promoteRowsInBatches(client, found)));
     }
   }
 
@@ -1215,6 +1484,9 @@ export async function resyncFromStorage(
       folderId,
       maxPages: RESYNC_R2_MAX_PAGES,
       deadlineMs: Date.now() + RESYNC_MANUAL_DEADLINE_MS,
+      importOrphans: true,
+      createdBy: auth.userId,
+      locationIds: locationIdsForNewMedia(auth.profile),
     });
     if (promoted.length === 0) return [];
     return toRecords(client, promoted, true);
@@ -1258,17 +1530,80 @@ export async function renameMedia(
   const existing = await getMediaRow(client, id, auth.profile.organizationId);
   if (!existing) throw new Error("Media not found.");
   assertCanMutateOwnedContent(auth.profile, existing.created_by);
-  const { error } = await client
-    .from("media")
-    .update({ name: safeMediaFilename(filename) })
-    .eq("id", id);
-  throwIfError(error, "Could not rename media.");
-  const updated = await getMediaRow(client, id, auth.profile.organizationId);
+  const nextName = renameMediaDisplayName(existing.name, filename);
+  if (nextName !== existing.name) {
+    const { data, error } = await client
+      .from("media")
+      .update({ name: nextName })
+      .eq("id", id)
+      .eq("organization_id", auth.profile.organizationId)
+      .select(MEDIA_SELECT)
+      .maybeSingle();
+    if (error?.code === "23505") {
+      const unique = await uniqueNameInFolder(
+        client,
+        auth.profile.organizationId,
+        existing.folder_id,
+        nextName,
+        existing.id,
+      );
+      const retry = await client
+        .from("media")
+        .update({ name: unique })
+        .eq("id", id)
+        .eq("organization_id", auth.profile.organizationId)
+        .select(MEDIA_SELECT)
+        .maybeSingle();
+      throwIfError(retry.error, "Could not rename media.");
+      if (!retry.data) throw new Error("Could not rename media.");
+    } else {
+      throwIfError(error, "Could not rename media.");
+      if (!data) throw new Error("Could not rename media.");
+    }
+  }
+
+  let updated = await getMediaRow(client, id, auth.profile.organizationId);
   if (!updated) throw new Error("Media not found.");
-  const records = await toRecords(client, [updated], true);
-  const result = records[0];
-  if (!result) throw new Error("Media not found.");
-  return result;
+  if (updated.current_version_id && (updated.status !== "READY" || updated.archived_at)) {
+    const { data: versionRaw, error: versionError } = await client
+      .from("media_versions")
+      .select("status")
+      .eq("id", updated.current_version_id)
+      .maybeSingle();
+    throwIfError(versionError, "Could not load media version.");
+    if (asString((versionRaw as { status?: string } | null)?.status) === "READY") {
+      const { error: restoreError } = await client
+        .from("media")
+        .update({ status: "READY", archived_at: null })
+        .eq("id", id)
+        .eq("organization_id", auth.profile.organizationId);
+      throwIfError(restoreError, "Could not rename media.");
+      updated = (await getMediaRow(client, id, auth.profile.organizationId)) ?? {
+        ...updated,
+        status: "READY",
+        archived_at: null,
+      };
+    }
+  }
+
+  try {
+    const records = await toRecords(client, [updated], true);
+    const result = records[0];
+    if (result) return result;
+  } catch {
+    // Preview signing must not make a successful rename look like a delete.
+  }
+  if (!updated.current_version_id) {
+    throw new Error("Media not found.");
+  }
+  const { data: versionRaw, error: versionError } = await client
+    .from("media_versions")
+    .select(VERSION_SELECT)
+    .eq("id", updated.current_version_id)
+    .maybeSingle();
+  throwIfError(versionError, "Could not load media version.");
+  if (!versionRaw) throw new Error("Media not found.");
+  return toCompletedRecord(client, { ...updated, status: "READY" }, mapVersion(versionRaw as Record<string, unknown>));
 }
 
 export async function archiveMedia(accessToken: string, id: string): Promise<MediaRecord> {

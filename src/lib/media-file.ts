@@ -31,6 +31,57 @@ export function safeMediaFilename(filename: string): string {
   return trimmed.slice(0, 255);
 }
 
+/**
+ * Rename is CMS metadata only. Keep a playable extension so the library card
+ * stays visible; never invent a new storage object.
+ */
+export function renameMediaDisplayName(currentName: string, nextName: string): string {
+  const safe = safeMediaFilename(nextName);
+  const currentExt = fileExtension(currentName);
+  const nextExt = fileExtension(safe);
+  if (nextExt && MIME_BY_EXT[nextExt]) return safe;
+  if (!currentExt) return safe;
+  const stem =
+    nextExt && safe.toLowerCase().endsWith(nextExt)
+      ? safe.slice(0, safe.length - nextExt.length)
+      : safe;
+  const trimmedStem = stem.replace(/\.+$/g, "").trim() || "media";
+  return `${trimmedStem}${currentExt}`.slice(0, 255);
+}
+
+export type ParsedMediaStorageKey = {
+  organizationId: string;
+  mediaId: string;
+  versionNumber: number;
+  checksumSha256: string;
+  mime: AllowedMediaMime;
+};
+
+const STORAGE_KEY_RE =
+  /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/v(\d+)\/([a-f0-9]{64})\.(jpg|jpeg|png|webp|mp4)$/i;
+
+export function parseMediaStorageKey(key: string): ParsedMediaStorageKey | null {
+  const match = STORAGE_KEY_RE.exec(key.trim());
+  if (!match) return null;
+  const ext = `.${(match[5] ?? "").toLowerCase()}`;
+  const mime = MIME_BY_EXT[ext];
+  if (!mime) return null;
+  const versionNumber = Number.parseInt(match[3] ?? "", 10);
+  if (!Number.isInteger(versionNumber) || versionNumber < 1) return null;
+  return {
+    organizationId: (match[1] ?? "").toLowerCase(),
+    mediaId: (match[2] ?? "").toLowerCase(),
+    versionNumber,
+    checksumSha256: (match[4] ?? "").toLowerCase(),
+    mime,
+  };
+}
+
+export function restoredLibraryFilename(mediaId: string, mime: AllowedMediaMime): string {
+  const short = mediaId.replace(/-/g, "").slice(0, 8);
+  return `restored-${short}.${extensionForMime(mime)}`;
+}
+
 /** Keep both files when two uploads share a name — never replace or hide the other. */
 export function uniqueLibraryFilename(existingNames: string[], filename: string): string {
   const safe = safeMediaFilename(filename);

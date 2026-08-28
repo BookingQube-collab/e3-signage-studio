@@ -5,6 +5,7 @@ import {
   FOLDER_DUPLICATE_MESSAGE,
   applyFolderCascadeDelete,
   applyFolderMove,
+  applyRenamedMedia,
   applyUploadedMedia,
   assertFolderName,
   countFilesInFolder,
@@ -199,4 +200,16 @@ test("multi-upload into a folder merges files immediately and bumps the card cou
   const retry = applyUploadedMedia(next.media, next.folders, added);
   assert.equal(retry.folders.find((folder) => folder.id === "f-inflata")?.fileCount, 3);
   assert.equal(mergeLibraryMedia(items, [{ id: "m1", filename: "banner-v2.png", folderId: "f-inflata" }]).length, 3);
+});
+
+test("rename keeps the same id in the same folder", () => {
+  const renamed = applyRenamedMedia(items, { ...inflata, filename: "birthday.png" });
+  assert.equal(renamed.length, 3);
+  assert.equal(renamed.find((item) => item.id === "m1")?.filename, "birthday.png");
+  assert.equal(renamed.find((item) => item.id === "m1")?.folderId, "f-inflata");
+  const missing = applyRenamedMedia(
+    items.filter((item) => item.id !== "m1"),
+    { ...inflata, filename: "birthday.png" },
+  );
+  assert.equal(missing.some((item) => item.id === "m1"), true);
 });

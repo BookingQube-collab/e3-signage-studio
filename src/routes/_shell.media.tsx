@@ -42,6 +42,7 @@ import {
 import { ACCEPT_MEDIA } from "@/lib/media-file";
 import {
   applyFolderCascadeDelete,
+  applyRenamedMedia,
   applyUploadedMedia,
   countFilesInFolder,
   findFolderByName,
@@ -50,6 +51,7 @@ import {
   foldersInLibraryView,
   libraryViewFor,
   mediaInLibraryView,
+  mergeLibraryMedia,
   resolveUploadFolderId,
   uniqueFoldersByName,
   upsertFolder,
@@ -303,10 +305,35 @@ function MediaPage() {
   const rename = useMutation({
     mutationFn: ({ id, filename }: { id: string; filename: string }) =>
       mediaService.rename(id, filename),
+    onMutate: async ({ id, filename }) => {
+      await qc.cancelQueries({ queryKey: ["media"] });
+      const previous = qc.getQueryData<Media[]>(["media"]);
+      setHiddenMediaIds((prev) => withoutIds(prev, [id]));
+      const current = previous?.find((item) => item.id === id);
+      if (current) {
+        qc.setQueryData(["media"], applyRenamedMedia(previous ?? [], { ...current, filename }));
+        setSelected((prev) => (prev?.id === id ? { ...prev, filename } : prev));
+      }
+      return { previous };
+    },
     onSuccess: (m) => {
-      void qc.invalidateQueries({ queryKey: ["media"] });
+      setHiddenMediaIds((prev) => withoutIds(prev, [m.id]));
+      qc.setQueryData(["media"], (prev: Media[] | undefined) => applyRenamedMedia(prev ?? [], m));
       setSelected(m);
+      setRenaming(m.filename);
       toast.success("Renamed");
+    },
+    onError: (error, _vars, ctx) => {
+      if (ctx?.previous) qc.setQueryData(["media"], ctx.previous);
+      toast.error(error instanceof Error ? error.message : "Could not rename.");
+    },
+    onSettled: async (m) => {
+      await qc.invalidateQueries({ queryKey: ["media"] });
+      if (!m) return;
+      setHiddenMediaIds((prev) => withoutIds(prev, [m.id]));
+      qc.setQueryData(["media"], (prev: Media[] | undefined) =>
+        applyRenamedMedia(mergeLibraryMedia(prev ?? [], [m]), m),
+      );
     },
   });
 

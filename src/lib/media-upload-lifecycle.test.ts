@@ -10,11 +10,14 @@ import {
   describeUploadBatchToast,
   incompleteVersionReusable,
   isVisibleLibraryStatus,
+  orphanStorageKeysOnPage,
   settleEachUpload,
   shouldDiscardIncompleteMedia,
+  shouldImportOrphanStorageKey,
   shouldPromoteIncompleteObject,
   shouldPurgeAbandonedUpload,
   shouldResyncPromote,
+  shouldResyncRestoreLibraryRow,
   shouldSkipCompleteObjectStat,
   shouldSkipLibraryAutoSync,
   storageKeysOnPage,
@@ -215,6 +218,21 @@ test("resync promotes pending rows whose objects exist and never duplicates READ
   assert.equal(shouldResyncPromote("PROCESSING", false), false);
   assert.equal(describeResyncToast(0).title, "Library is in sync with Cloudflare");
   assert.match(describeResyncToast(2).title, /2 files restored/);
+});
+
+test("resync reattaches R2 objects that have no READY library row", () => {
+  const ready = ["org/media-a/v1/aaa.jpg"];
+  const page = ["org/media-a/v1/aaa.jpg", "org/media-b/v1/bbb.jpg", "org/media-c/v1/ccc.jpg"];
+  assert.equal(shouldImportOrphanStorageKey("org/media-b/v1/bbb.jpg", ready), true);
+  assert.equal(shouldImportOrphanStorageKey("org/media-a/v1/aaa.jpg", ready), false);
+  assert.deepEqual(orphanStorageKeysOnPage(page, ready), [
+    "org/media-b/v1/bbb.jpg",
+    "org/media-c/v1/ccc.jpg",
+  ]);
+  assert.equal(shouldResyncRestoreLibraryRow("FAILED", null, true), true);
+  assert.equal(shouldResyncRestoreLibraryRow("READY", "2026-08-28T00:00:00.000Z", true), true);
+  assert.equal(shouldResyncRestoreLibraryRow("READY", null, true), false);
+  assert.equal(shouldResyncRestoreLibraryRow("FAILED", null, false), false);
 });
 
 test("library auto-sync skips when no PROCESSING/FAILED rows exist", () => {
