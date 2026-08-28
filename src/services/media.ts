@@ -13,11 +13,17 @@ import {
   moveMediaBulkFn,
   moveMediaToFolderFn,
   renameMediaFn,
+  resyncMediaFromStorageFn,
   archiveMediaFn,
 } from "@/lib/media-functions";
 import { assertUploadSize, inferMediaMime } from "@/lib/media-file";
 import { describeBrowserUploadFailure, describeCanceledStatement } from "@/lib/media-upload-error";
-import { clientUploadDedupeKey, settleEachUpload } from "@/lib/media-upload-lifecycle";
+import {
+  buildOptimisticLibraryMedia,
+  clientUploadDedupeKey,
+  COMPLETE_UPLOAD_CLIENT_TIMEOUT_MS,
+  settleEachUpload,
+} from "@/lib/media-upload-lifecycle";
 import { probeMediaDimensions, sha256HexOfBlob } from "@/lib/media-hash";
 import { getBrowserAccessToken } from "@/lib/supabase";
 import type { Media } from "@/types";
@@ -96,10 +102,32 @@ async function discardIntent(intent: { mediaId: string; mediaVersionId: string }
   }
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+function localImagePreview(file: File): string | undefined {
+  if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") return undefined;
+  if (!(file.type.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(file.name))) return undefined;
+  return URL.createObjectURL(file);
+}
+
 async function uploadOne(
   file: File,
   mediaId: string | null,
-  onProgress?: (percent: number) => void,
+  onProgress?: (percent: number, ready?: Media) => void,
   folderId?: string | null,
 ): Promise<Media> {
   const key = clientUploadDedupeKey({
@@ -123,6 +151,7 @@ async function uploadOne(
     let intent: {
       mediaId: string;
       mediaVersionId: string;
+      versionNumber?: number;
       uploadUrl: string;
       uploadMethod: "PUT" | "POST";
       uploadHeaders: Record<string, string>;
@@ -142,13 +171,42 @@ async function uploadOne(
           folderId: mediaId ? null : (folderId ?? null),
         },
       });
-      await putWithProgress(intent.uploadUrl, intent.uploadMethod, file, intent.uploadHeaders, onProgress);
+      await putWithProgress(intent.uploadUrl, intent.uploadMethod, file, intent.uploadHeaders, (percent) => {
+        if (percent >= 100) return;
+        onProgress?.(percent);
+      });
     } catch (error) {
       if (intent && !mediaId) await discardIntent(intent);
       throw error;
     }
     if (!intent) throw new Error("Upload session not found.");
-    return completeAfterPut(intent, checksumSha256);
+    const optimistic = buildOptimisticLibraryMedia({
+      id: intent.mediaId,
+      filename: file.name,
+      mimeType: mime,
+      sizeBytes: file.size,
+      folderId: mediaId ? null : (folderId ?? null),
+      folderName: null,
+      width: probe.width,
+      height: probe.height,
+      durationMs: probe.durationMs,
+      checksumSha256,
+      thumbnailUrl: localImagePreview(file),
+      versionNumber: intent.versionNumber,
+    });
+    onProgress?.(100, mediaId ? undefined : optimistic);
+    try {
+      const confirmed = await withTimeout(
+        completeAfterPut(intent, checksumSha256),
+        COMPLETE_UPLOAD_CLIENT_TIMEOUT_MS,
+        "Could not finish uploading this file. Try that file again.",
+      );
+      if (!mediaId) onProgress?.(100, confirmed);
+      return confirmed;
+    } catch (error) {
+      if (!mediaId) return optimistic;
+      throw error;
+    }
   })();
 
   inFlightUploads.set(key, run);
@@ -163,25 +221,26 @@ async function completeAfterPut(
   intent: { mediaVersionId: string },
   checksumSha256: string,
 ): Promise<Media> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    try {
-      const row = await completeMediaUploadFn({
-        data: {
-          accessToken: await accessToken(),
-          mediaVersionId: intent.mediaVersionId,
-          checksumSha256,
-        },
-      });
-      return toUiMedia(row);
-    } catch (error) {
-      lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
-    }
+  try {
+    const row = await completeMediaUploadFn({
+      data: {
+        accessToken: await accessToken(),
+        mediaVersionId: intent.mediaVersionId,
+        checksumSha256,
+      },
+    });
+    return toUiMedia(row);
+  } catch {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const row = await completeMediaUploadFn({
+      data: {
+        accessToken: await accessToken(),
+        mediaVersionId: intent.mediaVersionId,
+        checksumSha256,
+      },
+    });
+    return toUiMedia(row);
   }
-  throw lastError instanceof Error
-    ? lastError
-    : new Error("Could not finish uploading this file. Try that file again.");
 }
 
 export const liveMediaService: MediaService = {
@@ -200,8 +259,8 @@ export const liveMediaService: MediaService = {
         uploadOne(
           file,
           null,
-          (percent) => {
-            onProgress?.(file.name, percent);
+          (percent, ready) => {
+            onProgress?.(file.name, percent, ready);
           },
           folderId,
         ),
@@ -228,6 +287,12 @@ export const liveMediaService: MediaService = {
   removeMany: async (ids) =>
     deleteMediaBulkFn({ data: { accessToken: await accessToken(), ids } }),
   downloadUrl: async (id) => mediaDownloadUrlFn({ data: { accessToken: await accessToken(), id } }),
+  resyncFromStorage: async (folderId) => {
+    const rows = await resyncMediaFromStorageFn({
+      data: { accessToken: await accessToken(), folderId: folderId ?? null },
+    });
+    return rows.map(toUiMedia);
+  },
   listFolders: async () => {
     const rows = await listMediaFoldersFn({ data: { accessToken: await accessToken() } });
     return rows.map(toUiFolder);

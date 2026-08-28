@@ -1,5 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
 
+import { parseS3ListBucketResult } from "../lib/r2-list";
+import { COMPLETE_OBJECT_STAT_TIMEOUT_MS, STORAGE_LIST_TIMEOUT_MS } from "../lib/media-upload-lifecycle";
 import { getServerEnv } from "./env.server";
 
 type HttpMethod = "PUT" | "GET" | "HEAD" | "DELETE";
@@ -66,11 +68,25 @@ function amzDate(now = new Date()): { amzDate: string; dateStamp: string } {
   return { amzDate: iso, dateStamp: iso.slice(0, 8) };
 }
 
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error("Storage request timed out.");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function signedUrl(input: {
   method: HttpMethod;
-  key: string;
+  key?: string;
   expiresIn: number;
   contentType?: string;
+  extraQuery?: Array<[string, string]>;
 }): { url: string; headers: Record<string, string> } {
   const cfg = requireR2();
   const { amzDate: date, dateStamp } = amzDate();
@@ -83,15 +99,17 @@ function signedUrl(input: {
     ["X-Amz-Date", date],
     ["X-Amz-Expires", String(input.expiresIn)],
     ["X-Amz-SignedHeaders", signedHeaders],
+    ...(input.extraQuery ?? []),
   ];
   query.sort(([a], [b]) => a.localeCompare(b));
   const canonicalQuery = query.map(([k, v]) => `${encodeRfc3986(k)}=${encodeRfc3986(v)}`).join("&");
   const canonicalHeaders = input.contentType
     ? `content-type:${input.contentType}\nhost:${host}\n`
     : `host:${host}\n`;
+  const resource = input.key ? `${cfg.bucket}/${input.key}` : cfg.bucket;
   const canonicalRequest = [
     input.method,
-    canonicalObjectPath(`${cfg.bucket}/${input.key}`),
+    canonicalObjectPath(resource),
     canonicalQuery,
     canonicalHeaders,
     signedHeaders,
@@ -106,8 +124,9 @@ function signedUrl(input: {
   const signature = createHmac("sha256", signingKey(cfg.secretAccessKey, dateStamp, cfg.region))
     .update(stringToSign, "utf8")
     .digest("hex");
-  const encodedKey = input.key.split("/").map(encodeRfc3986).join("/");
-  const url = `${cfg.endpoint}/${cfg.bucket}/${encodedKey}?${canonicalQuery}&X-Amz-Signature=${signature}`;
+  const encodedKey = input.key ? input.key.split("/").map(encodeRfc3986).join("/") : "";
+  const path = encodedKey ? `${cfg.endpoint}/${cfg.bucket}/${encodedKey}` : `${cfg.endpoint}/${cfg.bucket}`;
+  const url = `${path}?${canonicalQuery}&X-Amz-Signature=${signature}`;
   const headers: Record<string, string> = {};
   if (input.contentType) headers["Content-Type"] = input.contentType;
   return { url, headers };
@@ -140,7 +159,11 @@ function sizeFromObjectHeaders(headers: Headers): { sizeBytes: number } {
 
 async function r2ProbeObjectViaGet(key: string): Promise<{ sizeBytes: number } | null> {
   const { url } = signedUrl({ method: "GET", key, expiresIn: 60 });
-  const response = await fetch(url, { method: "GET", headers: { Range: "bytes=0-0" } });
+  const response = await fetchWithTimeout(
+    url,
+    { method: "GET", headers: { Range: "bytes=0-0" } },
+    COMPLETE_OBJECT_STAT_TIMEOUT_MS,
+  );
   if (response.status === 404) return null;
   if (response.status === 200 || response.status === 206) {
     return sizeFromObjectHeaders(response.headers);
@@ -150,7 +173,7 @@ async function r2ProbeObjectViaGet(key: string): Promise<{ sizeBytes: number } |
 
 export async function r2HeadObject(key: string): Promise<{ sizeBytes: number } | null> {
   const { url } = signedUrl({ method: "HEAD", key, expiresIn: 60 });
-  const response = await fetch(url, { method: "HEAD" });
+  const response = await fetchWithTimeout(url, { method: "HEAD" }, COMPLETE_OBJECT_STAT_TIMEOUT_MS);
   if (response.status === 404) return null;
   if (response.ok) {
     return sizeFromObjectHeaders(response.headers);
@@ -159,6 +182,27 @@ export async function r2HeadObject(key: string): Promise<{ sizeBytes: number } |
     return r2ProbeObjectViaGet(key);
   }
   throw new Error(`Could not verify uploaded object (${response.status}).`);
+}
+
+export async function r2ListObjectKeys(prefix: string, maxPages = 3): Promise<string[]> {
+  const keys: string[] = [];
+  let token: string | null = null;
+  for (let page = 0; page < maxPages; page += 1) {
+    const extraQuery: Array<[string, string]> = [
+      ["list-type", "2"],
+      ["max-keys", "1000"],
+      ["prefix", prefix],
+    ];
+    if (token) extraQuery.push(["continuation-token", token]);
+    const { url } = signedUrl({ method: "GET", expiresIn: 60, extraQuery });
+    const response = await fetchWithTimeout(url, { method: "GET" }, STORAGE_LIST_TIMEOUT_MS);
+    if (!response.ok) throw new Error(`Could not list stored objects (${response.status}).`);
+    const parsed = parseS3ListBucketResult(await response.text());
+    keys.push(...parsed.keys);
+    if (!parsed.nextContinuationToken) break;
+    token = parsed.nextContinuationToken;
+  }
+  return keys;
 }
 
 export async function r2DeleteObjects(keys: string[]): Promise<void> {

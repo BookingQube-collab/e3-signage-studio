@@ -82,7 +82,7 @@ export type ScreenGroupService = {
   remove: (id: string) => Promise<boolean>;
 };
 
-export type MediaUploadProgress = (fileName: string, percent: number) => void;
+export type MediaUploadProgress = (fileName: string, percent: number, ready?: Media) => void;
 
 export type MediaUploadResult = {
   uploaded: Media[];
@@ -103,6 +103,7 @@ export type MediaService = {
   remove: (id: string) => Promise<boolean>;
   removeMany: (ids: string[]) => Promise<boolean>;
   downloadUrl: (id: string) => Promise<{ url: string; filename: string }>;
+  resyncFromStorage: (folderId?: string | null) => Promise<Media[]>;
   listFolders: () => Promise<MediaFolder[]>;
   createFolder: (name: string) => Promise<MediaFolder>;
   deleteFolder: (id: string) => Promise<boolean>;

@@ -1,4 +1,91 @@
-/** Rules for pending uploads: hide from the library until PUT+confirm succeed. */
+import { hueFromChecksum } from "./media-file.ts";
+
+/** Rules for pending uploads: show in the library as soon as PUT succeeds; confirm in the background. */
+
+export const COMPLETE_OBJECT_STAT_TIMEOUT_MS = 800;
+export const STORAGE_LIST_TIMEOUT_MS = 4000;
+export const COMPLETE_UPLOAD_CLIENT_TIMEOUT_MS = 5000;
+
+export function uploadProgressIsComplete(percent: number): boolean {
+  return percent >= 100;
+}
+
+/** Client PUT already landed the bytes; do not block complete on a storage HEAD. */
+export function shouldSkipCompleteObjectStat(clientPutSucceeded: boolean): boolean {
+  return clientPutSucceeded;
+}
+
+/** Promote PROCESSING/FAILED rows when the object is already in the bucket. Never duplicate READY. */
+export function shouldResyncPromote(status: string, objectFound: boolean): boolean {
+  if (!objectFound) return false;
+  return status === "PROCESSING" || status === "FAILED";
+}
+
+export function describeResyncToast(restored: number): { title: string } {
+  if (restored <= 0) return { title: "Library is in sync with Cloudflare" };
+  return {
+    title: `${restored} file${restored === 1 ? "" : "s"} restored from Cloudflare`,
+  };
+}
+
+export function buildOptimisticLibraryMedia(input: {
+  id: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  folderId: string | null;
+  folderName: string | null;
+  width: number | null;
+  height: number | null;
+  durationMs: number | null;
+  checksumSha256: string;
+  thumbnailUrl?: string;
+  versionNumber?: number;
+  uploadedAtIso?: string;
+}): {
+  id: string;
+  filename: string;
+  type: "Video" | "Image";
+  dimensions: string;
+  durationSec: number | null;
+  sizeMb: number;
+  modifiedAt: string;
+  uploadedBy: string;
+  uploadedAt: string;
+  version: string;
+  thumbnailHue: number;
+  thumbnailUrl?: string;
+  previewUrl?: string;
+  folderId: string | null;
+  folderName: string | null;
+  usedIn: { playlists: string[]; campaigns: string[]; screens: string[] };
+} {
+  const day = (input.uploadedAtIso ?? new Date().toISOString()).slice(0, 10);
+  const isVideo = input.mimeType.startsWith("video/");
+  const dimensions =
+    input.width && input.height ? `${input.width} × ${input.height}` : "—";
+  const media: ReturnType<typeof buildOptimisticLibraryMedia> = {
+    id: input.id,
+    filename: input.filename,
+    type: isVideo ? "Video" : "Image",
+    dimensions,
+    durationSec: input.durationMs ? Math.round(input.durationMs / 1000) : null,
+    sizeMb: Number((input.sizeBytes / 1_000_000).toFixed(1)),
+    modifiedAt: day,
+    uploadedBy: "You",
+    uploadedAt: day,
+    version: `v${input.versionNumber ?? 1}`,
+    thumbnailHue: hueFromChecksum(input.checksumSha256),
+    folderId: input.folderId,
+    folderName: input.folderName,
+    usedIn: { playlists: [], campaigns: [], screens: [] },
+  };
+  if (input.thumbnailUrl) {
+    media.thumbnailUrl = input.thumbnailUrl;
+    media.previewUrl = input.thumbnailUrl;
+  }
+  return media;
+}
 
 export function isVisibleLibraryStatus(status: string): boolean {
   return status === "READY";

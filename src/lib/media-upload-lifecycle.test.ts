@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildOptimisticLibraryMedia,
   clientUploadDedupeKey,
   completeStatOutcome,
+  describeResyncToast,
   describeUploadBatchToast,
   incompleteVersionReusable,
   isVisibleLibraryStatus,
@@ -11,6 +13,9 @@ import {
   shouldDiscardIncompleteMedia,
   shouldPromoteIncompleteObject,
   shouldPurgeAbandonedUpload,
+  shouldResyncPromote,
+  shouldSkipCompleteObjectStat,
+  uploadProgressIsComplete,
 } from "./media-upload-lifecycle.ts";
 
 test("library only shows READY media", () => {
@@ -170,6 +175,43 @@ test("partial batch toast names the failure instead of claiming only the success
   const none = describeUploadBatchToast(0, [{ name: "a.jpg", message: "Could not upload a.jpg." }]);
   assert.equal(none.tone, "error");
   assert.match(none.title, /a\.jpg/);
+});
+
+test("a successful PUT must not wait on storage HEAD before the file can appear", () => {
+  assert.equal(shouldSkipCompleteObjectStat(true), true);
+  assert.equal(shouldSkipCompleteObjectStat(false), false);
+  assert.equal(uploadProgressIsComplete(100), true);
+  assert.equal(uploadProgressIsComplete(99), false);
+});
+
+test("optimistic READY cards are visible in the folder as soon as PUT finishes", () => {
+  const card = buildOptimisticLibraryMedia({
+    id: "m-birthday",
+    filename: "main birthday.jpeg",
+    mimeType: "image/jpeg",
+    sizeBytes: 640_000,
+    folderId: "f-rajan",
+    folderName: "Rajan Room",
+    width: 1920,
+    height: 1080,
+    durationMs: null,
+    checksumSha256: "ab".repeat(32),
+    thumbnailUrl: "blob:preview",
+    uploadedAtIso: "2026-08-28T07:00:00.000Z",
+  });
+  assert.equal(card.folderId, "f-rajan");
+  assert.equal(card.type, "Image");
+  assert.equal(card.dimensions, "1920 × 1080");
+  assert.equal(card.thumbnailUrl, "blob:preview");
+});
+
+test("resync promotes pending rows whose objects exist and never duplicates READY", () => {
+  assert.equal(shouldResyncPromote("PROCESSING", true), true);
+  assert.equal(shouldResyncPromote("FAILED", true), true);
+  assert.equal(shouldResyncPromote("READY", true), false);
+  assert.equal(shouldResyncPromote("PROCESSING", false), false);
+  assert.equal(describeResyncToast(0).title, "Library is in sync with Cloudflare");
+  assert.match(describeResyncToast(2).title, /2 files restored/);
 });
 
 test("an object that landed in storage is completed even when HEAD size is unknown", () => {

@@ -37,12 +37,13 @@ import {
   uniqueFoldersByName,
 } from "../lib/media-folders";
 import {
-  completeStatOutcome,
+  COMPLETE_OBJECT_STAT_TIMEOUT_MS,
   incompleteVersionReusable,
   isVisibleLibraryStatus,
   shouldDiscardIncompleteMedia,
-  shouldPromoteIncompleteObject,
   shouldPurgeAbandonedUpload,
+  shouldResyncPromote,
+  shouldSkipCompleteObjectStat,
 } from "../lib/media-upload-lifecycle";
 import { requireCmsPermission } from "./auth.server";
 import type { MediaFolderRow, MediaRow, MediaVersionRow } from "./db/types";
@@ -58,6 +59,7 @@ import {
   createObjectDownloadUrls,
   createObjectUploadUrl,
   deleteObjects,
+  listStoredObjectKeys,
   statObject,
   storageBackendName,
   UPLOAD_URL_TTL_SECONDS,
@@ -500,7 +502,7 @@ export async function listMedia(accessToken: string): Promise<MediaRecord[]> {
   const auth = await requireCmsPermission(accessToken, "media.view");
   const client = getUserClient(accessToken);
   if (hasPermission(auth.profile.role, "media.manage")) {
-    await reconcileAndPurgeAbandonedUploads(client, auth.profile.organizationId);
+    await reconcilePendingUploadsOnce(client, auth.profile.organizationId);
   }
   const { data, error } = await client
     .from("media")
@@ -675,21 +677,77 @@ function pickIncompleteVersion(versions: MediaVersionRow[], media: MediaRow): Me
   return incomplete[0] ?? null;
 }
 
-async function reconcileAndPurgeAbandonedUploads(
+function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve(undefined), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function toCompletedRecord(
+  client: ReturnType<typeof getUserClient>,
+  media: MediaRow,
+  version: MediaVersionRow,
+): Promise<MediaRecord> {
+  const type = isMediaType(media.type) ? media.type : "IMAGE";
+  const isImage = version.mime_type.startsWith("image/");
+  const previewKey = version.storage_key || null;
+  const keys = mediaKeysToSign({ previewKey, isImage, signAllPreviews: true });
+  const [urls, folderRow] = await Promise.all([
+    createObjectDownloadUrls(keys),
+    media.folder_id
+      ? client.from("media_folders").select("name").eq("id", media.folder_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+  const checksum = version.checksum_sha256 || media.id.replace(/-/g, "").slice(0, 64);
+  const sizeBytes = version.size_bytes ?? 0;
+  return {
+    id: media.id,
+    filename: media.name,
+    type,
+    mimeType: media.mime_type || version.mime_type,
+    status: "READY",
+    dimensions: dimensionsOf(version),
+    durationSec: version.duration_ms ? Math.round(version.duration_ms / 1000) : null,
+    sizeMb: Number((sizeBytes / 1_000_000).toFixed(1)),
+    modifiedAt: dateLabel(media.updated_at || media.created_at),
+    uploadedBy: "Team member",
+    uploadedAt: dateLabel(media.created_at),
+    version: `v${version.version_number || 1}`,
+    thumbnailHue: hueFromChecksum(checksum),
+    thumbnailUrl: isImage && previewKey ? (urls.get(previewKey) ?? null) : null,
+    previewUrl: previewKey ? (urls.get(previewKey) ?? null) : null,
+    folderId: media.folder_id,
+    folderName: media.folder_id ? asNullableString((folderRow.data as { name?: string } | null)?.name) : null,
+    usedIn: { playlists: [], campaigns: [], screens: [] },
+  };
+}
+
+async function loadIncompleteMediaWithVersions(
   client: ReturnType<typeof getUserClient>,
   organizationId: string,
-): Promise<void> {
-  const { data, error } = await client
+  folderId?: string | null,
+): Promise<Array<{ media: MediaRow; version: MediaVersionRow }>> {
+  let query = client
     .from("media")
     .select(MEDIA_SELECT)
     .eq("organization_id", organizationId)
     .in("status", ["PROCESSING", "FAILED"])
     .is("archived_at", null)
-    .limit(50);
-  if (error || !data) return;
+    .limit(100);
+  if (folderId) query = query.eq("folder_id", folderId);
+  const { data, error } = await query;
+  if (error || !data || data.length === 0) return [];
   const mediaRows = data.map((row) => mapMedia(row as Record<string, unknown>));
-  if (mediaRows.length === 0) return;
-
   const { data: versionRaw, error: versionError } = await client
     .from("media_versions")
     .select(VERSION_SELECT)
@@ -697,7 +755,7 @@ async function reconcileAndPurgeAbandonedUploads(
       "media_id",
       mediaRows.map((row) => row.id),
     );
-  if (versionError) return;
+  if (versionError) return [];
   const versionsByMedia = new Map<string, MediaVersionRow[]>();
   for (const raw of versionRaw ?? []) {
     const version = mapVersion(raw as Record<string, unknown>);
@@ -705,35 +763,116 @@ async function reconcileAndPurgeAbandonedUploads(
     list.push(version);
     versionsByMedia.set(version.media_id, list);
   }
-
-  const nowMs = Date.now();
-  const processingTtlMs = UPLOAD_URL_TTL_SECONDS * 1000;
+  const pending: Array<{ media: MediaRow; version: MediaVersionRow }> = [];
   for (const media of mediaRows) {
     const version = pickIncompleteVersion(versionsByMedia.get(media.id) ?? [], media);
-    if (!version) continue;
-    try {
-      const inspected = await inspectUploadedObject(version.storage_key, version.size_bytes);
-      if (shouldPromoteIncompleteObject(inspected.outcome)) {
-        await markUploadReady(client, media, version);
-        continue;
-      }
-      if (inspected.outcome === "retry") continue;
-      if (media.current_version_id && media.current_version_id !== version.id) continue;
-      if (
-        !shouldPurgeAbandonedUpload({
-          status: media.status,
-          createdAtIso: media.created_at,
-          nowMs,
-          processingTtlMs,
-        })
-      ) {
-        continue;
-      }
-      await purgeMediaRow(client, media.id);
-    } catch {
-      // Listing must still succeed if one abandoned row cannot be completed or deleted.
-    }
+    if (version) pending.push({ media, version });
   }
+  return pending;
+}
+
+async function keysPresentInStorage(
+  organizationId: string,
+  pendingKeys: string[],
+): Promise<{ found: Set<string>; authoritative: boolean }> {
+  const listed = await listStoredObjectKeys(`${organizationId}/`);
+  if (listed) return { found: listed, authoritative: true };
+  const found = new Set<string>();
+  await Promise.all(
+    pendingKeys.map(async (key) => {
+      try {
+        const stat = await withDeadline(statObject(key), COMPLETE_OBJECT_STAT_TIMEOUT_MS);
+        if (stat) found.add(key);
+      } catch {
+        // Timed out or missing — not authoritative, so do not purge.
+      }
+    }),
+  );
+  return { found, authoritative: false };
+}
+
+async function promotePendingStoredUploads(
+  client: ReturnType<typeof getUserClient>,
+  organizationId: string,
+  folderId?: string | null,
+): Promise<MediaRow[]> {
+  const pending = await loadIncompleteMediaWithVersions(client, organizationId, folderId);
+  if (pending.length === 0) return [];
+  const stored = await keysPresentInStorage(
+    organizationId,
+    pending.map((row) => row.version.storage_key),
+  );
+  const promoted: MediaRow[] = [];
+  await Promise.all(
+    pending.map(async ({ media, version }) => {
+      if (!shouldResyncPromote(media.status, stored.found.has(version.storage_key))) return;
+      await markUploadReady(client, media, version);
+      promoted.push({
+        ...media,
+        status: "READY",
+        current_version_id: version.id,
+        mime_type: version.mime_type,
+      });
+    }),
+  );
+  return promoted;
+}
+
+const reconcileInFlight = new Map<string, Promise<void>>();
+
+async function reconcilePendingUploadsOnce(
+  client: ReturnType<typeof getUserClient>,
+  organizationId: string,
+): Promise<void> {
+  const existing = reconcileInFlight.get(organizationId);
+  if (existing) return existing;
+  const run = withDeadline(reconcileAndPurgeAbandonedUploads(client, organizationId), 2500)
+    .then(() => undefined)
+    .catch(() => undefined)
+    .finally(() => {
+      reconcileInFlight.delete(organizationId);
+    });
+  reconcileInFlight.set(organizationId, run);
+  return run;
+}
+
+async function reconcileAndPurgeAbandonedUploads(
+  client: ReturnType<typeof getUserClient>,
+  organizationId: string,
+): Promise<void> {
+  const pending = await loadIncompleteMediaWithVersions(client, organizationId);
+  if (pending.length === 0) return;
+  const stored = await keysPresentInStorage(
+    organizationId,
+    pending.map((row) => row.version.storage_key),
+  );
+  const nowMs = Date.now();
+  const processingTtlMs = UPLOAD_URL_TTL_SECONDS * 1000;
+  await Promise.all(
+    pending.map(async ({ media, version }) => {
+      try {
+        if (shouldResyncPromote(media.status, stored.found.has(version.storage_key))) {
+          await markUploadReady(client, media, version);
+          return;
+        }
+        if (!stored.authoritative) return;
+        if (media.current_version_id && media.current_version_id !== version.id) return;
+        if (
+          !shouldPurgeAbandonedUpload({
+            status: media.status,
+            createdAtIso: media.created_at,
+            nowMs,
+            processingTtlMs,
+          })
+        ) {
+          return;
+        }
+        await purgeMediaRow(client, media.id);
+      } catch {
+        // Listing must still succeed if one abandoned row cannot be completed or deleted.
+      }
+    }),
+  );
 }
 
 export async function createUploadIntent(
@@ -907,37 +1046,6 @@ export async function createUploadIntent(
   };
 }
 
-async function inspectUploadedObject(
-  key: string,
-  expectedSizeBytes: number,
-): Promise<{ outcome: ReturnType<typeof completeStatOutcome>; sizeBytes: number }> {
-  let objectFound = false;
-  let sizeBytes = -1;
-  let statErrored = false;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    try {
-      const stat = await statObject(key);
-      if (stat) {
-        objectFound = true;
-        sizeBytes = stat.sizeBytes;
-        break;
-      }
-    } catch {
-      statErrored = true;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
-  }
-  return {
-    outcome: completeStatOutcome({
-      objectFound,
-      sizeBytes,
-      expectedSizeBytes,
-      statErrored,
-    }),
-    sizeBytes,
-  };
-}
-
 export async function completeUpload(
   accessToken: string,
   input: { mediaVersionId: string; checksumSha256: string },
@@ -962,29 +1070,40 @@ export async function completeUpload(
   if (!media) throw new Error("Media not found.");
 
   if (version.status === "READY" && media.current_version_id === version.id) {
-    const records = await toRecords(client, [media], true);
-    const ready = records[0];
-    if (!ready) throw new Error("Media not found.");
-    return ready;
+    return toCompletedRecord(client, media, version);
   }
 
-  const inspected = await inspectUploadedObject(version.storage_key, version.size_bytes);
-  if (inspected.outcome === "missing") {
-    await failOrDiscardUpload(client, media, version);
-    throw new Error("Upload did not reach storage. Try again.");
-  }
-  if (inspected.outcome === "retry") {
-    throw new Error("Could not verify the uploaded file yet. Try that file again.");
+  // Client PUT already succeeded. HEAD to R2 was hanging the library at 100%.
+  if (shouldSkipCompleteObjectStat(true)) {
+    await markUploadReady(client, media, version);
+    return toCompletedRecord(
+      client,
+      {
+        ...media,
+        status: "READY",
+        current_version_id: version.id,
+        mime_type: version.mime_type,
+      },
+      { ...version, status: "READY" },
+    );
   }
 
-  await markUploadReady(client, media, version);
+  throw new Error("Upload did not reach storage. Try again.");
+}
 
-  const updated = await getMediaRow(client, media.id, auth.profile.organizationId);
-  if (!updated) throw new Error("Media not found.");
-  const records = await toRecords(client, [updated], true);
-  const result = records[0];
-  if (!result) throw new Error("Media not found.");
-  return result;
+export async function resyncFromStorage(
+  accessToken: string,
+  folderId: string | null,
+): Promise<MediaRecord[]> {
+  const auth = await requireCmsPermission(accessToken, "media.manage");
+  const client = getUserClient(accessToken);
+  const promoted = await promotePendingStoredUploads(
+    client,
+    auth.profile.organizationId,
+    folderId,
+  );
+  if (promoted.length === 0) return [];
+  return toRecords(client, promoted, true);
 }
 
 export async function discardIncompleteUpload(
@@ -1212,7 +1331,7 @@ export async function listFolders(accessToken: string): Promise<MediaFolderRecor
   const client = getUserClient(accessToken);
   const orgId = auth.profile.organizationId;
   if (hasPermission(auth.profile.role, "media.manage")) {
-    await reconcileAndPurgeAbandonedUploads(client, orgId);
+    await reconcilePendingUploadsOnce(client, orgId);
   }
   const first = await client
     .from("media_folders")

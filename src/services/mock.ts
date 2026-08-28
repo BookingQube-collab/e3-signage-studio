@@ -161,9 +161,8 @@ export const mockServices: AppServices = {
     upload: (files: File[], onProgress, folderId) => {
       const folder = folderId ? store.folders.find((f) => f.id === folderId) : null;
       const added: Media[] = files.map((file, i) => {
-        onProgress?.(file.name, 100);
         const isVideo = file.type.startsWith("video") || /\.mp4$/i.test(file.name);
-        return {
+        const item: Media = {
           id: `med-${Date.now()}-${i}`,
           filename: file.name,
           type: isVideo ? "Video" : "Image",
@@ -179,6 +178,8 @@ export const mockServices: AppServices = {
           folderName: folder?.name ?? null,
           usedIn: { playlists: [], campaigns: [], screens: [] },
         };
+        onProgress?.(file.name, 100, item);
+        return item;
       });
       store.media = [...added, ...store.media];
       if (folder) {
@@ -245,6 +246,7 @@ export const mockServices: AppServices = {
       const existing = store.media.find((m) => m.id === id);
       return delay({ url: "#", filename: existing?.filename ?? "media" }, 100);
     },
+    resyncFromStorage: () => delay([] as Media[], 100),
     listFolders: () => delay(store.folders),
     createFolder: (name: string) => {
       const resolved = resolveFolderCreate(store.folders, name, `fld-${Date.now()}`);

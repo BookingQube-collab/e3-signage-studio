@@ -59,6 +59,13 @@ export const completeMediaUploadFn = createServerFn({ method: "POST" })
     });
   });
 
+export const resyncMediaFromStorageFn = createServerFn({ method: "POST" })
+  .validator(accessTokenSchema.extend({ folderId: z.string().uuid().nullable() }))
+  .handler(async ({ data }): Promise<MediaRecord[]> => {
+    const { resyncFromStorage } = await import("@/server/media.server");
+    return resyncFromStorage(data.accessToken, data.folderId);
+  });
+
 export const discardIncompleteMediaFn = createServerFn({ method: "POST" })
   .validator(
     accessTokenSchema.extend({

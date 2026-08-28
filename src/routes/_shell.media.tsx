@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { FolderPlus, Image as ImageIcon, LayoutGrid, List, Search } from "lucide-react";
+import { Cloud, FolderPlus, Image as ImageIcon, LayoutGrid, List, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { toast } from "sonner";
 
@@ -55,7 +55,7 @@ import {
   upsertFolder,
 } from "@/lib/media-folders";
 import { describeCanceledStatement } from "@/lib/media-upload-error";
-import { describeUploadBatchToast } from "@/lib/media-upload-lifecycle";
+import { describeResyncToast, describeUploadBatchToast } from "@/lib/media-upload-lifecycle";
 import { useIsClient } from "@/lib/use-is-client";
 import { cn } from "@/lib/utils";
 import { mediaService } from "@/services";
@@ -134,6 +134,22 @@ function MediaPage() {
   const libraryView = libraryViewFor(search, folderId);
   const searching = libraryView.mode === "search";
 
+  function mergeIntoLibrary(added: Media[]) {
+    if (added.length === 0) return;
+    const named = added.map((item) => ({
+      ...item,
+      folderName:
+        item.folderName ??
+        folders.find((folder) => folder.id === item.folderId)?.name ??
+        (item.folderId === folderId ? (currentFolder?.name ?? null) : null),
+    }));
+    const currentMedia = qc.getQueryData<Media[]>(["media"]) ?? [];
+    const currentFolders = qc.getQueryData<MediaFolder[]>(["media-folders"]) ?? [];
+    const next = applyUploadedMedia(currentMedia, currentFolders, named);
+    qc.setQueryData(["media"], next.media);
+    qc.setQueryData(["media-folders"], next.folders);
+  }
+
   const upload = useMutation({
     mutationFn: ({
       files,
@@ -141,7 +157,7 @@ function MediaPage() {
       targetFolderId,
     }: {
       files: File[];
-      onProgress: (fileName: string, percent: number) => void;
+      onProgress: (fileName: string, percent: number, ready?: Media) => void;
       targetFolderId: string | null;
     }) => mediaService.upload(files, onProgress, resolveUploadFolderId(targetFolderId)),
     retry: 0,
@@ -149,22 +165,38 @@ function MediaPage() {
       const added = result.uploaded;
       const ids = added.map((item) => item.id);
       setHiddenMediaIds((prev) => withoutIds(prev, ids));
-      if (added.length > 0) {
-        const currentMedia = qc.getQueryData<Media[]>(["media"]) ?? [];
-        const currentFolders = qc.getQueryData<MediaFolder[]>(["media-folders"]) ?? [];
-        const next = applyUploadedMedia(currentMedia, currentFolders, added);
-        qc.setQueryData(["media"], next.media);
-        qc.setQueryData(["media-folders"], next.folders);
-      }
+      mergeIntoLibrary(added);
       const notice = describeUploadBatchToast(added.length, result.failed);
       if (notice.tone === "success") toast.success(notice.title);
       else if (notice.tone === "warning") toast.warning(notice.title);
       else toast.error(notice.title);
       for (const detail of notice.details) toast.error(detail);
     },
-    onSettled: () => {
-      void qc.invalidateQueries({ queryKey: ["media"] });
-      void qc.invalidateQueries({ queryKey: ["media-folders"] });
+    onSettled: (result) => {
+      const added = result?.uploaded ?? [];
+      window.setTimeout(() => {
+        void (async () => {
+          await qc.invalidateQueries({ queryKey: ["media"] });
+          await qc.invalidateQueries({ queryKey: ["media-folders"] });
+          mergeIntoLibrary(added);
+        })();
+      }, 1500);
+    },
+  });
+
+  const resync = useMutation({
+    mutationFn: (targetFolderId: string | null) => mediaService.resyncFromStorage(targetFolderId),
+    onSuccess: (added) => {
+      mergeIntoLibrary(added);
+      toast.success(describeResyncToast(added.length).title);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Could not sync from Cloudflare.");
+    },
+    onSettled: async (added) => {
+      await qc.invalidateQueries({ queryKey: ["media"] });
+      await qc.invalidateQueries({ queryKey: ["media-folders"] });
+      if (added && added.length > 0) mergeIntoLibrary(added);
     },
   });
 
@@ -519,6 +551,14 @@ function MediaPage() {
                 Delete folder
               </E3Button>
             ) : null}
+            <E3Button
+              variant="outline"
+              loading={resync.isPending}
+              disabled={resync.isPending}
+              onClick={() => resync.mutate(folderId)}
+            >
+              <Cloud /> Sync from Cloudflare
+            </E3Button>
             <E3Button variant="primary" onClick={() => setCreateOpen(true)}>
               <FolderPlus /> Create folder
             </E3Button>
@@ -537,7 +577,14 @@ function MediaPage() {
                 : "Uploads stay in Unfiled until you move them"
           }
           onUpload={async (files, onProgress) => {
-            await upload.mutateAsync({ files, onProgress, targetFolderId: folderId });
+            await upload.mutateAsync({
+              files,
+              onProgress: (fileName, percent, ready) => {
+                onProgress(fileName, percent);
+                if (ready) mergeIntoLibrary([ready]);
+              },
+              targetFolderId: folderId,
+            });
           }}
         />
       </div>

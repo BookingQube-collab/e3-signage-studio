@@ -44,17 +44,21 @@ export function UploadDropzone({
       if (inputRef.current) inputRef.current.value = "";
       return;
     }
-    setPending(
-      accepted.map((file, index) => ({
-        id: `${index}:${file.name}:${file.size}:${file.lastModified}`,
-        name: file.name,
-        progress: 0,
-      })),
-    );
+    const batch = accepted.map((file, index) => ({
+      id: `${index}:${file.name}:${file.size}:${file.lastModified}`,
+      name: file.name,
+      progress: 0,
+    }));
+    const batchIds = new Set(batch.map((item) => item.id));
+    setPending(batch);
     try {
       await onUpload(accepted, (fileName, percent) => {
         setPending((prev) => {
           const index = prev.findIndex((item) => item.name === fileName && item.progress < 100);
+          if (percent >= 100) {
+            if (index < 0) return prev.filter((item) => item.name !== fileName);
+            return prev.filter((_, i) => i !== index);
+          }
           if (index < 0) {
             return prev.map((item) => (item.name === fileName ? { ...item, progress: percent } : item));
           }
@@ -64,7 +68,7 @@ export function UploadDropzone({
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Upload failed.");
     } finally {
-      setPending([]);
+      setPending((prev) => prev.filter((item) => !batchIds.has(item.id)));
       if (inputRef.current) inputRef.current.value = "";
     }
   }

@@ -6,6 +6,7 @@ import {
   r2CreateUploadUrl,
   r2DeleteObjects,
   r2HeadObject,
+  r2ListObjectKeys,
 } from "./r2-sign.server";
 import { getServiceRoleClient } from "./supabase.server";
 
@@ -91,6 +92,16 @@ export async function createObjectDownloadUrl(key: string, expiresIn = DOWNLOAD_
   const url = map.get(key);
   if (!url) throw new Error("Could not create a download URL.");
   return url;
+}
+
+export async function listStoredObjectKeys(prefix: string): Promise<Set<string> | null> {
+  if (!isR2Configured()) return null;
+  try {
+    const keys = await r2ListObjectKeys(prefix);
+    return new Set(keys);
+  } catch {
+    return null;
+  }
 }
 
 export async function statObject(key: string): Promise<{ sizeBytes: number } | null> {
