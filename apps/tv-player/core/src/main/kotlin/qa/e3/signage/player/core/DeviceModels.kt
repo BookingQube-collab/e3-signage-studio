@@ -47,6 +47,16 @@ enum class WaitingScreenBrand {
 }
 
 @Serializable
+data class DeviceBrandAsset(
+    val mediaId: String,
+    val version: Int,
+    val checksum: String,
+    val fileSize: Long,
+    val mimeType: String,
+    val downloadUrl: String,
+)
+
+@Serializable
 data class WaitingScreenConfig(
     val brand: WaitingScreenBrand = WaitingScreenBrand.FULL_LOGO,
     val mediaId: String? = null,
@@ -58,6 +68,11 @@ data class WaitingScreenConfig(
     val title: String? = null,
     val message: String? = null,
     val configVersion: Int = 0,
+    /**
+     * Admin-managed in-app brand icon for waiting/idle UI.
+     * Not the Android launcher/home-screen icon — that is baked into the APK.
+     */
+    val brandIcon: DeviceBrandAsset? = null,
 )
 
 @Serializable

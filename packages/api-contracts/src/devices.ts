@@ -48,6 +48,16 @@ export const deviceActivateResponseSchema = z.object({
 
 export const waitingScreenBrandSchema = enumOf(WAITING_SCREEN_BRANDS);
 
+/** Optional downloadable image asset nested under waiting-screen / branding sync. */
+export const deviceBrandAssetSchema = z.object({
+  mediaId: uuidSchema,
+  version: z.number().int().positive(),
+  checksum: sha256Schema,
+  fileSize: z.number().int().min(0),
+  mimeType: z.string(),
+  downloadUrl: z.string().url(),
+});
+
 export const deviceWaitingScreenSchema = z.object({
   brand: waitingScreenBrandSchema,
   mediaId: uuidSchema.nullable(),
@@ -59,6 +69,11 @@ export const deviceWaitingScreenSchema = z.object({
   title: z.string().max(120).nullable(),
   message: z.string().max(500).nullable(),
   configVersion: z.number().int().min(0),
+  /**
+   * Admin-managed in-app brand icon (waiting / idle). Synced at runtime.
+   * This is NOT the Android launcher/home-screen icon — that requires an APK rebuild.
+   */
+  brandIcon: deviceBrandAssetSchema.nullable().optional(),
 });
 
 export const deviceSyncStatusResponseSchema = z.object({
@@ -203,6 +218,7 @@ export type DevicePairResponse = z.infer<typeof devicePairResponseSchema>;
 export type DeviceActivateResponse = z.infer<typeof deviceActivateResponseSchema>;
 export type DeviceSyncStatusResponse = z.infer<typeof deviceSyncStatusResponseSchema>;
 export type DeviceWaitingScreen = z.infer<typeof deviceWaitingScreenSchema>;
+export type DeviceBrandAsset = z.infer<typeof deviceBrandAssetSchema>;
 export type DeviceOkResponse = z.infer<typeof deviceOkResponseSchema>;
 export type ContentManifest = z.infer<typeof contentManifestSchema>;
 export type DeviceHeartbeatRequest = z.infer<typeof deviceHeartbeatRequestSchema>;

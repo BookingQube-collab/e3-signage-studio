@@ -17,6 +17,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import qa.e3.signage.player.E3PlayerApplication
 import qa.e3.signage.player.core.FitMode
 import qa.e3.signage.player.core.HEARTBEAT_INTERVAL_MS
+import qa.e3.signage.player.core.ContentPackageState
 import qa.e3.signage.player.core.OpenPlayback
 import qa.e3.signage.player.core.PlaybackResult
 import qa.e3.signage.player.core.PlaylistItemKind
@@ -93,6 +94,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 val overrides = WaitingOverrides(
                     brand = waiting.brand,
                     localImagePath = waiting.localImagePath,
+                    localBrandIconPath = waiting.localBrandIconPath,
                     title = waiting.title,
                     message = waiting.message,
                 )
@@ -121,10 +123,10 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             if (loaded == null) {
                 closeOpenPlay(PlaybackResult.INTERRUPTED)
                 _ui.value = PlaybackUiState(
-                    waitingKind = WaitingKind.FIRST_PUBLISH,
+                    waitingKind = waitingKindWhilePreparing(),
                     waitingOverrides = waitingOverrides,
                 )
-                withTimeoutOrNull(15_000) { app.container.sync.activations.first() }
+                withTimeoutOrNull(2_000) { app.container.sync.activations.first() }
                 continue
             }
             val (manifest, root) = loaded
@@ -153,11 +155,11 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 _ui.value = PlaybackUiState(
                     playing = false,
                     background = plan.background,
-                    waitingKind = WaitingKind.EMPTY_PLAYLIST,
+                    waitingKind = waitingKindWhilePreparing(fallback = WaitingKind.EMPTY_PLAYLIST),
                     waitingOverrides = waitingOverrides,
                     timezone = tz,
                 )
-                delay(15_000)
+                withTimeoutOrNull(2_000) { app.container.sync.activations.first() }
                 continue
             }
             while (viewModelScope.isActive && ScheduleEngine.shouldPlay(manifest.schedules)) {
@@ -203,6 +205,20 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    private suspend fun waitingKindWhilePreparing(
+        fallback: WaitingKind = WaitingKind.FIRST_PUBLISH,
+    ): WaitingKind {
+        val state = packages.currentPackageState()
+        return when (state) {
+            ContentPackageState.PENDING,
+            ContentPackageState.DOWNLOADING,
+            ContentPackageState.VERIFYING,
+            ContentPackageState.READY,
+            -> WaitingKind.LOADING_CONTENT
+            else -> fallback
+        }
+    }
+
     private suspend fun closeOpenPlay(result: PlaybackResult) {
         val open = openPlay ?: return
         openPlay = null
@@ -218,6 +234,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         return WaitingOverrides(
             brand = waiting.brand,
             localImagePath = waiting.localImagePath,
+            localBrandIconPath = waiting.localBrandIconPath,
             title = waiting.title,
             message = waiting.message,
         )
@@ -280,7 +297,8 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     private suspend fun pollLoop() {
         while (viewModelScope.isActive) {
             pollSyncStatus()
-            delay(120_000)
+            val idle = !_ui.value.playing
+            delay(if (idle) 15_000 else 120_000)
         }
     }
 

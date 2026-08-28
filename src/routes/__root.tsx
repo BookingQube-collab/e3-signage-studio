@@ -12,6 +12,7 @@ import { AuthSessionSync } from "@/lib/auth-sync";
 import type { AuthSessionResult } from "@/lib/auth-types";
 import { useIsClient } from "@/lib/use-is-client";
 import appCss from "../styles.css?url";
+import { CmsFavicon } from "@/components/branding/CmsBranding";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 
 function NotFoundComponent() {
@@ -148,6 +149,7 @@ function RootComponent() {
       <AuthSessionSync>
         {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
         <Outlet />
+        {isClient ? <CmsFavicon /> : null}
         {isClient ? (
           <Suspense fallback={null}>
             <Toaster position="top-right" richColors />

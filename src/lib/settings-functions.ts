@@ -5,6 +5,7 @@ import type { OrganizationSettingsDto } from "@/server/settings.server";
 import { WAITING_SCREEN_BRANDS } from "@e3/shared-types";
 
 const accessTokenSchema = z.object({ accessToken: z.string().min(1) });
+const nullableUuid = z.string().uuid().nullable();
 
 export const getOrganizationSettingsFn = createServerFn({ method: "POST" })
   .validator(accessTokenSchema)
@@ -26,4 +27,19 @@ export const updateWaitingScreenSettingsFn = createServerFn({ method: "POST" })
     const { updateWaitingScreenSettings } = await import("@/server/settings.server");
     const { accessToken, ...input } = data;
     return updateWaitingScreenSettings(accessToken, input);
+  });
+
+export const updateBrandingSettingsFn = createServerFn({ method: "POST" })
+  .validator(
+    accessTokenSchema.extend({
+      cmsLogoMediaId: nullableUuid,
+      faviconMediaId: nullableUuid,
+      playerBrandIconMediaId: nullableUuid,
+      apkLauncherIconMediaId: nullableUuid,
+    }),
+  )
+  .handler(async ({ data }): Promise<OrganizationSettingsDto> => {
+    const { updateBrandingSettings } = await import("@/server/settings.server");
+    const { accessToken, ...input } = data;
+    return updateBrandingSettings(accessToken, input);
   });

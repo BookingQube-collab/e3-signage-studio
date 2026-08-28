@@ -19,6 +19,7 @@ import { Route as ShellScheduleRouteImport } from './routes/_shell.schedule'
 import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
 import { Route as ShellUsersRouteImport } from './routes/_shell.users'
 import { Route as ApiPublicConfigRouteImport } from './routes/api.public-config'
+import { Route as ApiBrandingRouteImport } from './routes/api.branding'
 import { Route as ApiAuthLoginAttemptRouteImport } from './routes/api.auth.login-attempt'
 import { Route as ShellCampaignsIndexRouteImport } from './routes/_shell.campaigns.index'
 import { Route as ShellCampaignsIdRouteImport } from './routes/_shell.campaigns.$id'
@@ -89,6 +90,11 @@ const ShellUsersRoute = ShellUsersRouteImport.update({
 const ApiPublicConfigRoute = ApiPublicConfigRouteImport.update({
   id: '/api/public-config',
   path: '/api/public-config',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiBrandingRoute = ApiBrandingRouteImport.update({
+  id: '/api/branding',
+  path: '/api/branding',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAuthLoginAttemptRoute = ApiAuthLoginAttemptRouteImport.update({
@@ -218,6 +224,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof ShellSettingsRoute
   '/users': typeof ShellUsersRoute
   '/api/public-config': typeof ApiPublicConfigRoute
+  '/api/branding': typeof ApiBrandingRoute
   '/api/auth/login-attempt': typeof ApiAuthLoginAttemptRoute
   '/campaigns/$id': typeof ShellCampaignsIdRoute
   '/campaigns/new': typeof ShellCampaignsNewRoute
@@ -251,6 +258,7 @@ export interface FileRoutesByTo {
   '/settings': typeof ShellSettingsRoute
   '/users': typeof ShellUsersRoute
   '/api/public-config': typeof ApiPublicConfigRoute
+  '/api/branding': typeof ApiBrandingRoute
   '/api/auth/login-attempt': typeof ApiAuthLoginAttemptRoute
   '/campaigns/$id': typeof ShellCampaignsIdRoute
   '/campaigns/new': typeof ShellCampaignsNewRoute
@@ -286,6 +294,7 @@ export interface FileRoutesById {
   '/_shell/settings': typeof ShellSettingsRoute
   '/_shell/users': typeof ShellUsersRoute
   '/api/public-config': typeof ApiPublicConfigRoute
+  '/api/branding': typeof ApiBrandingRoute
   '/api/auth/login-attempt': typeof ApiAuthLoginAttemptRoute
   '/_shell/campaigns/$id': typeof ShellCampaignsIdRoute
   '/_shell/campaigns/new': typeof ShellCampaignsNewRoute
@@ -321,6 +330,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/users'
     | '/api/public-config'
+    | '/api/branding'
     | '/api/auth/login-attempt'
     | '/campaigns/$id'
     | '/campaigns/new'
@@ -354,6 +364,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/users'
     | '/api/public-config'
+    | '/api/branding'
     | '/api/auth/login-attempt'
     | '/campaigns/$id'
     | '/campaigns/new'
@@ -388,6 +399,7 @@ export interface FileRouteTypes {
     | '/_shell/settings'
     | '/_shell/users'
     | '/api/public-config'
+    | '/api/branding'
     | '/api/auth/login-attempt'
     | '/_shell/campaigns/$id'
     | '/_shell/campaigns/new'
@@ -417,6 +429,7 @@ export interface RootRouteChildren {
   ShellRoute: typeof ShellRouteWithChildren
   LoginRoute: typeof LoginRoute
   ApiPublicConfigRoute: typeof ApiPublicConfigRoute
+  ApiBrandingRoute: typeof ApiBrandingRoute
   ApiAuthLoginAttemptRoute: typeof ApiAuthLoginAttemptRoute
   ApiDevicesActivateRoute: typeof ApiDevicesActivateRoute
   ApiDevicesPairRoute: typeof ApiDevicesPairRoute
@@ -498,6 +511,13 @@ declare module '@tanstack/react-router' {
       path: '/api/public-config'
       fullPath: '/api/public-config'
       preLoaderRoute: typeof ApiPublicConfigRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/branding': {
+      id: '/api/branding'
+      path: '/api/branding'
+      fullPath: '/api/branding'
+      preLoaderRoute: typeof ApiBrandingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/auth/login-attempt': {
@@ -708,6 +728,7 @@ const rootRouteChildren: RootRouteChildren = {
   ShellRoute: ShellRouteWithChildren,
   LoginRoute: LoginRoute,
   ApiPublicConfigRoute: ApiPublicConfigRoute,
+  ApiBrandingRoute: ApiBrandingRoute,
   ApiAuthLoginAttemptRoute: ApiAuthLoginAttemptRoute,
   ApiDevicesActivateRoute: ApiDevicesActivateRoute,
   ApiDevicesPairRoute: ApiDevicesPairRoute,

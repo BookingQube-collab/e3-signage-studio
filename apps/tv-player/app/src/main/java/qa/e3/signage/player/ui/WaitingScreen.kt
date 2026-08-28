@@ -44,6 +44,7 @@ import java.io.File
 
 enum class WaitingKind {
     FIRST_PUBLISH,
+    LOADING_CONTENT,
     EMPTY_PLAYLIST,
     OFF_HOURS,
 }
@@ -58,6 +59,8 @@ data class WaitingCopy(
 data class WaitingOverrides(
     val brand: WaitingScreenBrand = WaitingScreenBrand.FULL_LOGO,
     val localImagePath: String? = null,
+    /** Synced in-app brand icon; used when brand is ICON. Not the APK launcher icon. */
+    val localBrandIconPath: String? = null,
     val title: String? = null,
     val message: String? = null,
 )
@@ -73,6 +76,17 @@ fun waitingCopy(kind: WaitingKind, overrides: WaitingOverrides = WaitingOverride
                 "We passed the vibe check. Content is still in makeup.",
                 "Standing by like a bouncer with an empty guest list.",
                 "We'll play anything you publish. Even the birthday slide.",
+            ),
+        )
+        WaitingKind.LOADING_CONTENT -> WaitingCopy(
+            kicker = "LOADING CONTENT",
+            headline = "Preparing your playlist",
+            body = "New campaign media is downloading and verifying. Playback starts as soon as the package is ready.",
+            quips = listOf(
+                "Fetching the goods. Almost showtime.",
+                "Downloading slides and clips. Hang tight.",
+                "Verifying files so the loop does not hiccup mid-play.",
+                "Content is on the way from the studio.",
             ),
         )
         WaitingKind.EMPTY_PLAYLIST -> WaitingCopy(
@@ -151,7 +165,7 @@ fun WaitingScreen(kind: WaitingKind, overrides: WaitingOverrides = WaitingOverri
         } else {
             E3BrandStage {
                 WaitingCopyColumn(copy, quip, showTextBrand = false) {
-                    WaitingBrandMark(brand)
+                    WaitingBrandMark(brand, overrides.localBrandIconPath)
                 }
             }
         }
@@ -159,10 +173,37 @@ fun WaitingScreen(kind: WaitingKind, overrides: WaitingOverrides = WaitingOverri
 }
 
 @Composable
-private fun WaitingBrandMark(brand: WaitingScreenBrand) {
+private fun WaitingBrandMark(brand: WaitingScreenBrand, localBrandIconPath: String?) {
+    val useCustomIcon =
+        brand == WaitingScreenBrand.ICON && !localBrandIconPath.isNullOrBlank()
+    var iconBitmap by remember(localBrandIconPath, useCustomIcon) {
+        mutableStateOf<android.graphics.Bitmap?>(null)
+    }
+    LaunchedEffect(localBrandIconPath, useCustomIcon) {
+        iconBitmap = withContext(Dispatchers.IO) {
+            if (!useCustomIcon) return@withContext null
+            val path = localBrandIconPath ?: return@withContext null
+            val file = File(path)
+            if (file.isFile) BitmapFactory.decodeFile(file.path) else null
+        }
+    }
+
+    val maxHeight = if (brand == WaitingScreenBrand.ICON) 140.dp else 120.dp
+    if (useCustomIcon && iconBitmap != null) {
+        Image(
+            bitmap = iconBitmap!!.asImageBitmap(),
+            contentDescription = "Brand",
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(maxHeight)
+                .padding(horizontal = 24.dp),
+        )
+        return
+    }
+
     val resId =
         if (brand == WaitingScreenBrand.ICON) R.drawable.e3_icon else R.drawable.e3_full_logo
-    val maxHeight = if (brand == WaitingScreenBrand.ICON) 140.dp else 120.dp
     Image(
         painter = painterResource(resId),
         contentDescription = "E3",

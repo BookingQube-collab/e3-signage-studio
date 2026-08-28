@@ -7,6 +7,7 @@ import type { WaitingScreenBrand } from "@e3/shared-types";
 
 import fullLogo from "@/assets/e3-full-logo.png";
 import e3Icon from "@/assets/e3-icon.png";
+import { PUBLIC_BRANDING_QUERY_KEY } from "@/components/branding/CmsBranding";
 import { PermissionDenied } from "@/components/auth/PermissionDenied";
 import {
   E3Button,
@@ -36,6 +37,7 @@ import {
 import { hasPermission } from "@/lib/rbac";
 import {
   getOrganizationSettingsFn,
+  updateBrandingSettingsFn,
   updateWaitingScreenSettingsFn,
 } from "@/lib/settings-functions";
 import { getBrowserAccessToken } from "@/lib/supabase";
@@ -49,10 +51,17 @@ const WAITING_BRAND_OPTIONS: ReadonlyArray<{
   label: string;
   hint: string;
 }> = [
-  { value: "FULL_LOGO", label: "Full logo", hint: "E3 mark + company wordmark" },
-  { value: "ICON", label: "E3 icon", hint: "Monogram only" },
-  { value: "CUSTOM", label: "Custom image", hint: "From media library" },
+  { value: "FULL_LOGO", label: "Full logo", hint: "Built-in E3 mark + wordmark" },
+  { value: "ICON", label: "Brand icon", hint: "Player brand icon, or built-in E3 monogram" },
+  { value: "CUSTOM", label: "Custom image", hint: "Full-bleed waiting background from media" },
 ];
+
+type BrandingSlot =
+  | "cmsLogo"
+  | "favicon"
+  | "playerBrandIcon"
+  | "apkLauncherIcon"
+  | "waiting";
 
 export const Route = createFileRoute("/_shell/settings")({
   head: () => ({
@@ -60,19 +69,19 @@ export const Route = createFileRoute("/_shell/settings")({
       { title: "Settings — E3 Digital Signage" },
       {
         name: "description",
-        content: "Organisation, playback, sync and notification settings for the E3 signage network.",
+        content: "Organisation, branding, playback, sync and notification settings for the E3 signage network.",
       },
       { property: "og:title", content: "Settings — E3 Digital Signage" },
       {
         property: "og:description",
-        content: "Organisation, playback, sync and notification settings for the E3 signage network.",
+        content: "Organisation, branding, playback, sync and notification settings for the E3 signage network.",
       },
     ],
   }),
   component: SettingsPage,
 });
 
-const TABS = ["Organization", "Playback", "Sync", "Notifications"] as const;
+const TABS = ["Organization", "Branding", "Playback", "Sync", "Notifications"] as const;
 
 function SettingsPage() {
   const { auth } = Route.useRouteContext();
@@ -103,7 +112,21 @@ function SettingsEditor({ canManage }: { canManage: boolean }) {
   const [waitingMediaId, setWaitingMediaId] = useState<string | null>(null);
   const [waitingThumb, setWaitingThumb] = useState<string | null>(null);
   const [waitingMediaName, setWaitingMediaName] = useState<string | null>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const [cmsLogoId, setCmsLogoId] = useState<string | null>(null);
+  const [cmsLogoThumb, setCmsLogoThumb] = useState<string | null>(null);
+  const [cmsLogoName, setCmsLogoName] = useState<string | null>(null);
+  const [faviconId, setFaviconId] = useState<string | null>(null);
+  const [faviconThumb, setFaviconThumb] = useState<string | null>(null);
+  const [faviconName, setFaviconName] = useState<string | null>(null);
+  const [playerIconId, setPlayerIconId] = useState<string | null>(null);
+  const [playerIconThumb, setPlayerIconThumb] = useState<string | null>(null);
+  const [playerIconName, setPlayerIconName] = useState<string | null>(null);
+  const [apkIconId, setApkIconId] = useState<string | null>(null);
+  const [apkIconThumb, setApkIconThumb] = useState<string | null>(null);
+  const [apkIconName, setApkIconName] = useState<string | null>(null);
+
+  const [pickerSlot, setPickerSlot] = useState<BrandingSlot | null>(null);
 
   const orgSettingsQuery = useQuery({
     queryKey: ["organization-settings"],
@@ -116,12 +139,12 @@ function SettingsEditor({ canManage }: { canManage: boolean }) {
   const mediaQuery = useQuery({
     queryKey: ["media"],
     queryFn: () => mediaService.list(),
-    enabled: pickerOpen,
+    enabled: pickerSlot != null,
   });
   const foldersQuery = useQuery({
     queryKey: ["media-folders"],
     queryFn: () => mediaService.listFolders(),
-    enabled: pickerOpen,
+    enabled: pickerSlot != null,
   });
 
   const imageMedia = useMemo(
@@ -138,13 +161,29 @@ function SettingsEditor({ canManage }: { canManage: boolean }) {
 
   useEffect(() => {
     const waiting = orgSettingsQuery.data?.waitingScreen;
-    if (!waiting) return;
-    setWaitingBrand(waiting.brand ?? "FULL_LOGO");
-    setWaitingTitle(waiting.title ?? "");
-    setWaitingMessage(waiting.message ?? "");
-    setWaitingMediaId(waiting.mediaId);
-    setWaitingThumb(waiting.thumbnailUrl);
-    setWaitingMediaName(waiting.mediaName);
+    if (waiting) {
+      setWaitingBrand(waiting.brand ?? "FULL_LOGO");
+      setWaitingTitle(waiting.title ?? "");
+      setWaitingMessage(waiting.message ?? "");
+      setWaitingMediaId(waiting.mediaId);
+      setWaitingThumb(waiting.thumbnailUrl);
+      setWaitingMediaName(waiting.mediaName);
+    }
+    const branding = orgSettingsQuery.data?.branding;
+    if (branding) {
+      setCmsLogoId(branding.cmsLogo.mediaId);
+      setCmsLogoThumb(branding.cmsLogo.thumbnailUrl);
+      setCmsLogoName(branding.cmsLogo.mediaName);
+      setFaviconId(branding.favicon.mediaId);
+      setFaviconThumb(branding.favicon.thumbnailUrl);
+      setFaviconName(branding.favicon.mediaName);
+      setPlayerIconId(branding.playerBrandIcon.mediaId);
+      setPlayerIconThumb(branding.playerBrandIcon.thumbnailUrl);
+      setPlayerIconName(branding.playerBrandIcon.mediaName);
+      setApkIconId(branding.apkLauncherIcon.mediaId);
+      setApkIconThumb(branding.apkLauncherIcon.thumbnailUrl);
+      setApkIconName(branding.apkLauncherIcon.mediaName);
+    }
   }, [orgSettingsQuery.data]);
 
   const saveWaiting = useMutation({
@@ -169,6 +208,29 @@ function SettingsEditor({ canManage }: { canManage: boolean }) {
     },
   });
 
+  const saveBranding = useMutation({
+    mutationFn: async () => {
+      const accessToken = await getBrowserAccessToken();
+      return updateBrandingSettingsFn({
+        data: {
+          accessToken,
+          cmsLogoMediaId: cmsLogoId,
+          faviconMediaId: faviconId,
+          playerBrandIconMediaId: playerIconId,
+          apkLauncherIconMediaId: apkIconId,
+        },
+      });
+    },
+    onSuccess: (data) => {
+      void qc.setQueryData(["organization-settings"], data);
+      void qc.invalidateQueries({ queryKey: PUBLIC_BRANDING_QUERY_KEY });
+      toast.success("Branding saved");
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || "Could not save branding");
+    },
+  });
+
   function saveLocal() {
     const next = saveCmsSettings(settings);
     setSettings(next);
@@ -185,34 +247,100 @@ function SettingsEditor({ canManage }: { canManage: boolean }) {
       saveWaiting.mutate();
       return;
     }
+    if (tab === "Branding") {
+      if (!canManage) {
+        toast.error("Permission denied");
+        return;
+      }
+      saveBranding.mutate();
+      return;
+    }
     saveLocal();
   }
 
+  const saving =
+    (tab === "Playback" && saveWaiting.isPending) ||
+    (tab === "Branding" && saveBranding.isPending);
+
   function pickMedia(item: Media) {
-    setWaitingMediaId(item.id);
-    setWaitingMediaName(item.filename);
-    setWaitingThumb(item.thumbnailUrl ?? item.previewUrl ?? null);
-    setPickerOpen(false);
+    const thumb = item.thumbnailUrl ?? item.previewUrl ?? null;
+    const name = item.filename;
+    switch (pickerSlot) {
+      case "cmsLogo":
+        setCmsLogoId(item.id);
+        setCmsLogoThumb(thumb);
+        setCmsLogoName(name);
+        break;
+      case "favicon":
+        setFaviconId(item.id);
+        setFaviconThumb(thumb);
+        setFaviconName(name);
+        break;
+      case "playerBrandIcon":
+        setPlayerIconId(item.id);
+        setPlayerIconThumb(thumb);
+        setPlayerIconName(name);
+        break;
+      case "apkLauncherIcon":
+        setApkIconId(item.id);
+        setApkIconThumb(thumb);
+        setApkIconName(name);
+        break;
+      case "waiting":
+        setWaitingMediaId(item.id);
+        setWaitingMediaName(name);
+        setWaitingThumb(thumb);
+        break;
+      default:
+        break;
+    }
+    setPickerSlot(null);
   }
 
-  function clearMedia() {
+  function clearWaitingMedia() {
     setWaitingMediaId(null);
     setWaitingMediaName(null);
     setWaitingThumb(null);
   }
 
+  const pickerSelectedId =
+    pickerSlot === "cmsLogo"
+      ? cmsLogoId
+      : pickerSlot === "favicon"
+        ? faviconId
+        : pickerSlot === "playerBrandIcon"
+          ? playerIconId
+          : pickerSlot === "apkLauncherIcon"
+            ? apkIconId
+            : pickerSlot === "waiting"
+              ? waitingMediaId
+              : null;
+
+  const pickerTitle =
+    pickerSlot === "cmsLogo"
+      ? "Choose CMS logo"
+      : pickerSlot === "favicon"
+        ? "Choose favicon"
+        : pickerSlot === "playerBrandIcon"
+          ? "Choose player brand icon"
+          : pickerSlot === "apkLauncherIcon"
+            ? "Choose APK launcher icon reference"
+            : "Choose waiting screen image";
+
   return (
     <div>
       <E3PageHeader
         title="Settings"
-        description="Network-wide defaults for the E3 signage admin panel."
+        description="Network-wide defaults for the E3 signage admin panel and TV players."
         actions={
           <E3Button
             variant="primary"
             onClick={save}
-            disabled={tab === "Playback" && (!canManage || saveWaiting.isPending)}
+            disabled={
+              ((tab === "Playback" || tab === "Branding") && !canManage) || saving
+            }
           >
-            {saveWaiting.isPending ? "Saving…" : "Save changes"}
+            {saving ? "Saving…" : "Save changes"}
           </E3Button>
         }
       />
@@ -303,6 +431,75 @@ function SettingsEditor({ canManage }: { canManage: boolean }) {
             </div>
           ) : null}
 
+          {tab === "Branding" ? (
+            <div className="space-y-5">
+              <p className="text-sm text-muted-foreground">
+                Manage CMS and player brand assets from the media library. Falls back to the built-in
+                E3 icon when empty.
+              </p>
+
+              <BrandAssetRow
+                title="CMS logo"
+                description="Sidebar, login, and headers in the admin panel."
+                thumb={cmsLogoThumb}
+                name={cmsLogoName}
+                fallbackSrc={e3Icon}
+                disabled={!canManage || orgSettingsQuery.isLoading}
+                onChoose={() => setPickerSlot("cmsLogo")}
+                onClear={() => {
+                  setCmsLogoId(null);
+                  setCmsLogoThumb(null);
+                  setCmsLogoName(null);
+                }}
+              />
+
+              <BrandAssetRow
+                title="Favicon"
+                description="Browser tab icon for the CMS, applied site-wide."
+                thumb={faviconThumb}
+                name={faviconName}
+                fallbackSrc="/favicon.png"
+                disabled={!canManage || orgSettingsQuery.isLoading}
+                onChoose={() => setPickerSlot("favicon")}
+                onClear={() => {
+                  setFaviconId(null);
+                  setFaviconThumb(null);
+                  setFaviconName(null);
+                }}
+              />
+
+              <BrandAssetRow
+                title="Player brand icon (in-app)"
+                description="Synced to paired TVs for waiting / idle screens when on-screen brand is Brand icon. Does not change the Android home-screen launcher icon at runtime."
+                thumb={playerIconThumb}
+                name={playerIconName}
+                fallbackSrc={e3Icon}
+                disabled={!canManage || orgSettingsQuery.isLoading}
+                onChoose={() => setPickerSlot("playerBrandIcon")}
+                onClear={() => {
+                  setPlayerIconId(null);
+                  setPlayerIconThumb(null);
+                  setPlayerIconName(null);
+                }}
+              />
+
+              <BrandAssetRow
+                title="APK launcher icon (rebuild reference)"
+                description="Stored for the next Android TV APK build. Installing a new APK is required for the home-screen launcher icon to change — runtime launcher replacement is not supported on Android TV."
+                thumb={apkIconThumb}
+                name={apkIconName}
+                fallbackSrc={e3Icon}
+                disabled={!canManage || orgSettingsQuery.isLoading}
+                onChoose={() => setPickerSlot("apkLauncherIcon")}
+                onClear={() => {
+                  setApkIconId(null);
+                  setApkIconThumb(null);
+                  setApkIconName(null);
+                }}
+              />
+            </div>
+          ) : null}
+
           {tab === "Playback" ? (
             <div className="space-y-5">
               <div className="grid gap-4 sm:grid-cols-2">
@@ -363,8 +560,8 @@ function SettingsEditor({ canManage }: { canManage: boolean }) {
                 <div>
                   <p className="text-sm font-medium">Default waiting screen</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Shown on paired TVs until an active campaign package is playing. Choose the
-                    on-screen brand mark, or upload a custom image from the media library.
+                    Default image and content shown on paired TVs until an active campaign is playing.
+                    Manage on-screen brand, optional headline/message, and a custom full-bleed image.
                   </p>
                 </div>
 
@@ -405,7 +602,11 @@ function SettingsEditor({ canManage }: { canManage: boolean }) {
                       />
                     ) : waitingBrand === "ICON" ? (
                       <div className="flex size-full items-center justify-center p-6">
-                        <img src={e3Icon} alt="E3 icon" className="max-h-full w-auto object-contain" />
+                        <img
+                          src={playerIconThumb || e3Icon}
+                          alt="Brand icon"
+                          className="max-h-full w-auto object-contain"
+                        />
                       </div>
                     ) : waitingBrand === "FULL_LOGO" ? (
                       <div className="flex size-full items-center justify-center p-4">
@@ -428,16 +629,16 @@ function SettingsEditor({ canManage }: { canManage: boolean }) {
                         type="button"
                         variant="secondary"
                         disabled={!canManage || orgSettingsQuery.isLoading}
-                        onClick={() => setPickerOpen(true)}
+                        onClick={() => setPickerSlot("waiting")}
                       >
-                        Choose image
+                        Choose default image
                       </E3Button>
                       {waitingMediaId ? (
                         <E3Button
                           type="button"
                           variant="ghost"
                           disabled={!canManage}
-                          onClick={clearMedia}
+                          onClick={clearWaitingMedia}
                         >
                           <X className="size-4" /> Clear image
                         </E3Button>
@@ -452,6 +653,11 @@ function SettingsEditor({ canManage }: { canManage: boolean }) {
                         </p>
                       )}
                     </div>
+                  ) : waitingBrand === "ICON" ? (
+                    <p className="max-w-xs text-xs text-muted-foreground">
+                      Uses the Player brand icon from the Branding tab when set; otherwise the built-in
+                      E3 monogram.
+                    </p>
                   ) : null}
                 </div>
 
@@ -468,7 +674,7 @@ function SettingsEditor({ canManage }: { canManage: boolean }) {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="w-msg">Message (optional)</Label>
+                    <Label htmlFor="w-msg">Message / content (optional)</Label>
                     <Input
                       id="w-msg"
                       maxLength={500}
@@ -572,19 +778,74 @@ function SettingsEditor({ canManage }: { canManage: boolean }) {
       </E3Card>
 
       <E3Modal
-        open={pickerOpen}
-        onOpenChange={setPickerOpen}
-        title="Choose waiting screen image"
+        open={pickerSlot != null}
+        onOpenChange={(open) => {
+          if (!open) setPickerSlot(null);
+        }}
+        title={pickerTitle}
         description="Pick an image from the media library. Videos are not supported here."
         className="sm:max-w-2xl"
       >
         <MediaPicker
           media={imageMedia}
           folders={foldersQuery.data ?? []}
-          {...(waitingMediaId ? { selectedIds: new Set([waitingMediaId]) } : {})}
+          {...(pickerSelectedId ? { selectedIds: new Set([pickerSelectedId]) } : {})}
           onPick={pickMedia}
         />
       </E3Modal>
+    </div>
+  );
+}
+
+function BrandAssetRow({
+  title,
+  description,
+  thumb,
+  name,
+  fallbackSrc,
+  disabled,
+  onChoose,
+  onClear,
+}: {
+  title: string;
+  description: string;
+  thumb: string | null;
+  name: string | null;
+  fallbackSrc: string;
+  disabled: boolean;
+  onChoose: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-start gap-4 rounded-xl border border-border p-4">
+      <div className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-muted/40 p-2">
+        <img
+          src={thumb || fallbackSrc}
+          alt={name ?? title}
+          className="max-h-full max-w-full object-contain"
+        />
+      </div>
+      <div className="min-w-0 flex-1 space-y-2">
+        <div>
+          <p className="text-sm font-medium">{title}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <E3Button type="button" variant="secondary" disabled={disabled} onClick={onChoose}>
+            Choose image
+          </E3Button>
+          {thumb ? (
+            <E3Button type="button" variant="ghost" disabled={disabled} onClick={onClear}>
+              <X className="size-4" /> Clear
+            </E3Button>
+          ) : null}
+        </div>
+        {name ? (
+          <p className="truncate text-xs text-muted-foreground">{name}</p>
+        ) : (
+          <p className="text-xs text-muted-foreground">Using built-in default</p>
+        )}
+      </div>
     </div>
   );
 }

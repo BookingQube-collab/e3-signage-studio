@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
-import logo from "@/assets/e3-icon.png";
+import { useCmsLogoSrc } from "@/components/branding/CmsBranding";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -78,16 +78,17 @@ function initialsFor(name: string): string {
 }
 
 function Brand({ collapsed }: { collapsed?: boolean }) {
+  const logoSrc = useCmsLogoSrc();
   return (
     <Link to="/dashboard" preload={false} className="flex items-center gap-3 px-2 py-1">
       <img
-        src={logo}
+        src={logoSrc}
         alt="E3"
         width={40}
         height={29}
         fetchPriority="high"
         decoding="async"
-        className="h-7 w-auto shrink-0"
+        className="h-7 w-auto shrink-0 object-contain"
       />
       {!collapsed ? (
         <span className="font-display min-w-0 truncate text-sm font-semibold uppercase tracking-[0.16em]">

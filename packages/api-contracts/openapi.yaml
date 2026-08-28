@@ -140,6 +140,16 @@ components:
       required: [code]
       properties:
         code: { type: string }
+    DeviceBrandAsset:
+      type: object
+      required: [mediaId, version, checksum, fileSize, mimeType, downloadUrl]
+      properties:
+        mediaId: { type: string, format: uuid }
+        version: { type: integer }
+        checksum: { type: string }
+        fileSize: { type: integer }
+        mimeType: { type: string }
+        downloadUrl: { type: string, format: uri }
     DeviceWaitingScreen:
       type: object
       required: [brand, mediaId, version, checksum, fileSize, mimeType, downloadUrl, title, message, configVersion]
@@ -157,6 +167,13 @@ components:
         title: { type: string, nullable: true }
         message: { type: string, nullable: true }
         configVersion: { type: integer }
+        brandIcon:
+          allOf:
+            - $ref: '#/components/schemas/DeviceBrandAsset'
+          nullable: true
+          description: >
+            Admin-managed in-app brand icon synced to players for waiting/idle screens.
+            Does not replace the Android TV launcher icon at runtime — that requires an APK rebuild.
     DeviceSyncStatus:
       type: object
       required: [manifestVersion, configVersion, syncRequested]
