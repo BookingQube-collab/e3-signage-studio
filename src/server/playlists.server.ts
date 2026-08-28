@@ -349,8 +349,12 @@ export async function savePlaylist(
     try {
       const { republishScreensUsingPlaylist } = await import("./campaigns.server");
       await republishScreensUsingPlaylist(accessToken, playlistId);
-    } catch {
-      // Playlist is saved. A later save or device poll can still bump the package.
+    } catch (error) {
+      console.error(
+        "[playlists] republish after save failed",
+        playlistId,
+        error instanceof Error ? error.message : error,
+      );
     }
   }
   return saved;

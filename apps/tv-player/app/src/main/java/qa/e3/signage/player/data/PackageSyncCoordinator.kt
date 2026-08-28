@@ -21,6 +21,7 @@ import qa.e3.signage.player.core.persistRotatedToken
 import qa.e3.signage.player.core.planDownloads
 import qa.e3.signage.player.core.progressPercent
 import qa.e3.signage.player.core.pruneUnusedStorage
+import qa.e3.signage.player.core.playlistSequenceKey
 import qa.e3.signage.player.core.shouldFetchManifest
 import qa.e3.signage.player.core.versionedManifestFile
 import java.io.File
@@ -66,8 +67,9 @@ class PackageSyncCoordinator(
             return
         }
 
+        val forceNetwork = status.syncRequested || status.manifestVersion > activeVersion
         val manifest = try {
-            loadOrFetchManifest(live, status.manifestVersion, inflight) ?: return
+            loadOrFetchManifest(live, status.manifestVersion, inflight, forceNetwork) ?: return
         } catch (_: ScreenDisabledException) {
             Log.w(TAG, "screen disabled; keeping previous ACTIVE")
             val path = inflight?.manifestPath.orEmpty()
@@ -78,6 +80,15 @@ class PackageSyncCoordinator(
         }
 
         if (manifest.manifestVersion == activeVersion && inflight == null) {
+            val activePlaylistKey = packages.loadActive()?.first?.let { playlistSequenceKey(it.playlist) }
+            val incomingKey = playlistSequenceKey(manifest.playlist)
+            if (status.syncRequested && activePlaylistKey != incomingKey) {
+                Log.i(TAG, "same version but playlist sequence changed; refreshing ACTIVE package")
+                val path = packages.writeManifestFile(manifest).canonicalPath
+                packages.persistPackage(manifest.manifestVersion, ContentPackageState.READY, path)
+                activate(live, manifest, path)
+                return
+            }
             confirm(live, manifest.manifestVersion, ContentPackageState.ACTIVE)
             return
         }
@@ -131,15 +142,24 @@ class PackageSyncCoordinator(
         credentials: DeviceCredentials,
         version: Int,
         inflight: ContentPackageEntity?,
+        forceNetwork: Boolean,
     ): ContentManifest? {
-        val localFile = inflight?.manifestPath?.let { File(it) }?.takeIf { it.isFile }
-            ?: versionedManifestFile(File(filesDir, "manifests"), version).takeIf { it.isFile }
-        if (localFile != null) {
-            packages.readManifestFile(localFile)?.let { return it }
+        if (!forceNetwork) {
+            val localFile = inflight?.manifestPath?.let { File(it) }?.takeIf { it.isFile }
+                ?: versionedManifestFile(File(filesDir, "manifests"), version).takeIf { it.isFile }
+            if (localFile != null) {
+                packages.readManifestFile(localFile)?.let { return it }
+            }
         }
         return try {
             val fetched = api.manifest(credentials.deviceId, credentials.deviceToken)
-            packages.writePendingManifest(fetched)
+            val existing = packages.findByVersion(fetched.manifestVersion)
+            val existingState = existing?.state?.let { runCatching { ContentPackageState.valueOf(it) }.getOrNull() }
+            if (existingState == ContentPackageState.ACTIVE) {
+                packages.writeManifestFile(fetched)
+            } else {
+                packages.writePendingManifest(fetched)
+            }
             fetched
         } catch (error: DeviceHttpException) {
             if (error.httpCode == 403) throw ScreenDisabledException()

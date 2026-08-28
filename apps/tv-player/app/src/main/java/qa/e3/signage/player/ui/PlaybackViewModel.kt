@@ -23,10 +23,12 @@ import qa.e3.signage.player.core.PlaybackResult
 import qa.e3.signage.player.core.PlaylistItemKind
 import qa.e3.signage.player.core.PlaylistSequencer
 import qa.e3.signage.player.core.ResolvedPlaylistItem
+import qa.e3.signage.player.core.SYNC_STATUS_INTERVAL_MS
 import qa.e3.signage.player.core.ScheduleEngine
 import qa.e3.signage.player.core.ZonePlan
 import qa.e3.signage.player.core.ZoneSource
 import qa.e3.signage.player.core.completePlayback
+import qa.e3.signage.player.core.isPreparingNewerPackage
 import qa.e3.signage.player.core.planZones
 import qa.e3.signage.player.core.resolvePlaylistItems
 import qa.e3.signage.player.core.startPlayback
@@ -167,6 +169,23 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     closeOpenPlay(PlaybackResult.INTERRUPTED)
                     break
                 }
+                if (isPreparingNewerPackage(
+                        packages.cloudManifestVersion(),
+                        manifest.manifestVersion,
+                        packages.currentPackageState(),
+                    )
+                ) {
+                    closeOpenPlay(PlaybackResult.INTERRUPTED)
+                    _ui.value = PlaybackUiState(
+                        playing = false,
+                        background = plan.background,
+                        waitingKind = WaitingKind.LOADING_CONTENT,
+                        waitingOverrides = waitingOverrides(),
+                        timezone = tz,
+                    )
+                    withTimeoutOrNull(2_000) { app.container.sync.activations.first() }
+                    break
+                }
                 val item = sequencer.current() ?: break
                 if (item.kind == PlaylistItemKind.VIDEO) {
                     videoGeneration += 1
@@ -181,13 +200,24 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 _ui.value = buildUi(plan, item, tz, videoGeneration)
                 val result = when (item.kind) {
                     PlaylistItemKind.IMAGE -> {
-                        delay((item.durationSeconds * 1000).toLong().coerceAtLeast(100L))
-                        PlaybackResult.COMPLETED
+                        awaitItemHold(
+                            (item.durationSeconds * 1000).toLong().coerceAtLeast(100L),
+                            manifest.manifestVersion,
+                        )
                     }
                     PlaylistItemKind.VIDEO -> {
                         val cap = (item.durationSeconds * 1000).toLong().coerceAtLeast(250L)
-                        val ended = withTimeoutOrNull(cap) { videoFinished.await() }
+                        val ended = withTimeoutOrNull(cap) {
+                            while (!videoFinished.isCompleted) {
+                                if (shouldShowLoadingForNewerPackage(manifest.manifestVersion)) {
+                                    return@withTimeoutOrNull null
+                                }
+                                withTimeoutOrNull(2_000) { videoFinished.await() }
+                            }
+                        }
                         when {
+                            shouldShowLoadingForNewerPackage(manifest.manifestVersion) ->
+                                PlaybackResult.INTERRUPTED
                             videoFailed -> PlaybackResult.ERROR
                             ended == null -> PlaybackResult.INTERRUPTED
                             else -> PlaybackResult.COMPLETED
@@ -195,6 +225,20 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     }
                 }
                 closeOpenPlay(result)
+                if (packages.activeVersion() != manifest.manifestVersion) {
+                    break
+                }
+                if (shouldShowLoadingForNewerPackage(manifest.manifestVersion)) {
+                    _ui.value = PlaybackUiState(
+                        playing = false,
+                        background = plan.background,
+                        waitingKind = WaitingKind.LOADING_CONTENT,
+                        waitingOverrides = waitingOverrides(),
+                        timezone = tz,
+                    )
+                    withTimeoutOrNull(2_000) { app.container.sync.activations.first() }
+                    break
+                }
                 if (sequencer.advance() == null) {
                     while (viewModelScope.isActive && ScheduleEngine.shouldPlay(manifest.schedules)) {
                         delay(15_000)
@@ -203,6 +247,25 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 }
             }
         }
+    }
+
+    private suspend fun shouldShowLoadingForNewerPackage(activeVersion: Int): Boolean =
+        isPreparingNewerPackage(
+            packages.cloudManifestVersion(),
+            activeVersion,
+            packages.currentPackageState(),
+        )
+
+    private suspend fun awaitItemHold(totalMs: Long, activeVersion: Int): PlaybackResult {
+        var waited = 0L
+        while (waited < totalMs) {
+            if (shouldShowLoadingForNewerPackage(activeVersion)) return PlaybackResult.INTERRUPTED
+            if (packages.activeVersion() != activeVersion) return PlaybackResult.INTERRUPTED
+            val slice = minOf(2_000L, totalMs - waited)
+            delay(slice)
+            waited += slice
+        }
+        return PlaybackResult.COMPLETED
     }
 
     private suspend fun waitingKindWhilePreparing(
@@ -297,8 +360,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     private suspend fun pollLoop() {
         while (viewModelScope.isActive) {
             pollSyncStatus()
-            val idle = !_ui.value.playing
-            delay(if (idle) 15_000 else 120_000)
+            delay(SYNC_STATUS_INTERVAL_MS)
         }
     }
 

@@ -34,7 +34,7 @@ Open **`apps/tv-player`** (not the repo root) in Android Studio, or point Cursor
 
 ## Sync / download / switch (Phase 11)
 
-- Poll `GET /api/devices/:id/sync-status` about every 2 minutes (plus a 15-minute WorkManager backup). Fetch `GET /api/devices/:id/manifest` only on a version bump or `syncRequested`.
+- Poll `GET /api/devices/:id/sync-status` about every **15 seconds** while the player is in the foreground (plus a 15-minute WorkManager backup). Fetch `GET /api/devices/:id/manifest` only on a version bump or `syncRequested`.
 - Differential plan: keep files whose Room `MediaAsset` id+version+checksum still match; download only missing or mismatched files into `files/temp/{localFilename}.tmp` with HTTP Range resume, then SHA-256 verify and atomic move to `files/media/{image|video}/`.
 - Package states: PENDING → DOWNLOADING → VERIFYING → READY → ACTIVE. FAILED never becomes ACTIVE. The current ACTIVE playlist keeps playing until the new package is fully downloaded and verified.
 - After READY, `manifests/vN.json` is already on disk; `manifests/active.json` and the Room ACTIVE row update together. The previous package is kept as READY for rollback.

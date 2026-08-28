@@ -173,5 +173,20 @@ class PairingCoordinatorTest {
         assertFalse(shouldFetchManifest(4, 4, syncRequested = false))
         assertTrue(shouldFetchManifest(5, 4, syncRequested = false))
         assertTrue(shouldFetchManifest(4, 4, syncRequested = true))
+        assertEquals(
+            "ver-a:10.0:FADE|ver-b:8.0:WIPE",
+            playlistSequenceKey(
+                ManifestPlaylist(
+                    id = "pl-1",
+                    version = 1,
+                    loop = true,
+                    items = listOf(
+                        ManifestPlaylistItem("m1", "ver-a", 10.0, "FADE", "a.jpg"),
+                        ManifestPlaylistItem("m2", "ver-b", 8.0, "wipe", "b.jpg"),
+                    ),
+                ),
+            ),
+        )
+        assertEquals("", playlistSequenceKey(null))
     }
 }

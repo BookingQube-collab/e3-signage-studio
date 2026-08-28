@@ -12,7 +12,11 @@ import {
 import { campaignLifecycleStatus, campaignTieBreakStart, isDatedSchedule } from "@/lib/campaign-window";
 import { daysToNumbers, numbersToDays, uiTime } from "@/lib/schedule-days";
 import { toManifestAssets } from "@/lib/manifest-assets";
-import { isPlaylistSnapshotStale } from "@/lib/playlist-snapshot";
+import {
+  isPlaylistSequenceStale,
+  isPlaylistSnapshotStale,
+  type PlaylistSnapshotItem,
+} from "@/lib/playlist-snapshot";
 import {
   campaignIdsTargetingScreen,
   resolveTargetScreenIds,
@@ -401,6 +405,29 @@ async function assertMediaReady(
   }
 }
 
+/** Live playlist items in CMS order (position), including transitions for the frozen package. */
+async function collectPlaylistItems(
+  client: UserClient,
+  playlistId: string | null,
+): Promise<PlaylistSnapshotItem[]> {
+  if (!playlistId || !isUuid(playlistId)) return [];
+  const { data, error } = await client
+    .from("playlist_items")
+    .select("media_id, media_version_id, duration_seconds, transition, position")
+    .eq("playlist_id", playlistId)
+    .order("position");
+  throwIfError(error, "Could not load playlist items.");
+  return (data ?? []).map((raw) => {
+    const row = raw as Record<string, unknown>;
+    return {
+      mediaId: asString(row["media_id"]),
+      mediaVersionId: asString(row["media_version_id"]),
+      durationSeconds: Math.max(0.1, asNumber(row["duration_seconds"], 10)),
+      transition: asString(row["transition"], "FADE"),
+    };
+  });
+}
+
 async function collectAssets(
   client: UserClient,
   organizationId: string,
@@ -409,12 +436,8 @@ async function collectAssets(
 ): Promise<ManifestAsset[]> {
   const mediaIds: string[] = [];
   if (playlistId) {
-    const { data, error } = await client
-      .from("playlist_items")
-      .select("media_id")
-      .eq("playlist_id", playlistId);
-    throwIfError(error, "Could not load playlist items.");
-    for (const row of data ?? []) mediaIds.push(asString((row as { media_id: string }).media_id));
+    const items = await collectPlaylistItems(client, playlistId);
+    for (const item of items) mediaIds.push(item.mediaId);
   } else if (layoutId) {
     const { data, error } = await client
       .from("layout_zones")
@@ -847,7 +870,10 @@ async function writeManifestForScreen(
   screen: ScreenLite,
   winner: ContestRow,
 ): Promise<void> {
-  const assets = await collectAssets(client, organizationId, winner.playlistId, winner.layoutId);
+  const [assets, playlistItems] = await Promise.all([
+    collectAssets(client, organizationId, winner.playlistId, winner.layoutId),
+    collectPlaylistItems(client, winner.playlistId),
+  ]);
   const { data: latest, error: latestError } = await admin
     .from("content_manifests")
     .select("manifest_version")
@@ -870,6 +896,8 @@ async function writeManifestForScreen(
       timezone: winner.schedule.timezone,
       priority: winner.schedule.priority,
     },
+    /** Frozen CMS order + transitions so devices do not depend on a later live DB read. */
+    playlistItems,
     assets: assets.map((asset) => ({
       mediaId: asset.mediaId,
       mediaVersionId: asset.mediaVersionId,
@@ -1115,10 +1143,10 @@ function winnerForScreen(
   return contest.find((campaign) => campaign.id === pick.campaignId) ?? null;
 }
 
-async function frozenAssetVersionIds(
+async function frozenManifestSnapshot(
   admin: ReturnType<typeof getServiceRoleClient>,
   screenId: string,
-): Promise<string[]> {
+): Promise<{ versionIds: string[]; playlistItems: PlaylistSnapshotItem[] }> {
   const { data: sync } = await admin
     .from("device_sync_states")
     .select("pending_manifest_id, active_manifest_id")
@@ -1141,12 +1169,33 @@ async function frozenAssetVersionIds(
       .maybeSingle();
     manifestId = asNullableString((latest as { id?: string } | null)?.id);
   }
-  if (!manifestId) return [];
-  const { data: rows } = await admin
-    .from("manifest_assets")
-    .select("media_version_id")
-    .eq("manifest_id", manifestId);
-  return (rows ?? []).map((row) => asString((row as { media_version_id: string }).media_version_id));
+  if (!manifestId) return { versionIds: [], playlistItems: [] };
+
+  const [{ data: rows }, { data: manifestRow }] = await Promise.all([
+    admin.from("manifest_assets").select("media_version_id").eq("manifest_id", manifestId),
+    admin.from("content_manifests").select("payload").eq("id", manifestId).maybeSingle(),
+  ]);
+  const versionIds = (rows ?? []).map((row) =>
+    asString((row as { media_version_id: string }).media_version_id),
+  );
+  const payload = (manifestRow as { payload?: unknown } | null)?.payload;
+  const playlistItems = parseFrozenPlaylistItems(payload);
+  return { versionIds, playlistItems };
+}
+
+function parseFrozenPlaylistItems(payload: unknown): PlaylistSnapshotItem[] {
+  if (!payload || typeof payload !== "object") return [];
+  const raw = (payload as { playlistItems?: unknown }).playlistItems;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((entry) => {
+    const row = (entry ?? {}) as Record<string, unknown>;
+    return {
+      mediaId: asString(row["mediaId"]),
+      mediaVersionId: asString(row["mediaVersionId"]),
+      durationSeconds: Math.max(0.1, asNumber(row["durationSeconds"], 10)),
+      transition: asString(row["transition"], "FADE"),
+    };
+  });
 }
 
 /** Rebuild packages for live campaigns that use this playlist so screens get new items. */
@@ -1173,8 +1222,8 @@ export async function republishScreensUsingPlaylist(
 }
 
 /**
- * If the live playlist has assets the frozen package does not ship, bump a new
- * manifest version. Sync Now alone cannot invent those missing files.
+ * If the live playlist has new assets OR a different order/transition/duration than the
+ * frozen package, bump a new manifest version so TVs pick up CMS edits.
  */
 export async function republishScreenIfPlaylistStale(
   screenId: string,
@@ -1189,14 +1238,22 @@ export async function republishScreenIfPlaylistStale(
   const contest = await loadContest(admin, organizationId);
   const winner = winnerForScreen(screen, contest, groups);
   if (!winner) return false;
-  const live = await collectAssets(admin, organizationId, winner.playlistId, winner.layoutId);
-  const frozen = await frozenAssetVersionIds(admin, screenId);
-  if (
-    !isPlaylistSnapshotStale(
-      live.map((asset) => asset.mediaVersionId),
-      frozen,
-    )
-  ) {
+  const [liveAssets, livePlaylistItems, frozen] = await Promise.all([
+    collectAssets(admin, organizationId, winner.playlistId, winner.layoutId),
+    collectPlaylistItems(admin, winner.playlistId),
+    frozenManifestSnapshot(admin, screenId),
+  ]);
+  const assetsStale = isPlaylistSnapshotStale(
+    liveAssets.map((asset) => asset.mediaVersionId),
+    frozen.versionIds,
+  );
+  const sequenceStale =
+    Boolean(winner.playlistId) &&
+    (frozen.playlistItems.length === 0
+      ? // Older packages had no frozen sequence — republish once so order/transitions ship.
+        livePlaylistItems.length > 0
+      : isPlaylistSequenceStale(livePlaylistItems, frozen.playlistItems));
+  if (!assetsStale && !sequenceStale) {
     return false;
   }
   await writeManifestForScreen(

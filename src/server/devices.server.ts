@@ -114,6 +114,27 @@ function isTransition(value: string): value is Transition {
   return (TRANSITIONS as readonly string[]).includes(value);
 }
 
+/** Playlist order + transitions frozen into content_manifests.payload at publish time. */
+function parseFrozenPlaylistItems(payload: unknown): Array<{
+  mediaId: string;
+  mediaVersionId: string;
+  durationSeconds: number;
+  transition: string;
+}> {
+  if (!payload || typeof payload !== "object") return [];
+  const raw = (payload as { playlistItems?: unknown }).playlistItems;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((entry) => {
+    const row = (entry ?? {}) as Record<string, unknown>;
+    return {
+      mediaId: asString(row["mediaId"]),
+      mediaVersionId: asString(row["mediaVersionId"]),
+      durationSeconds: Math.max(0.1, asNumber(row["durationSeconds"], 10)),
+      transition: asString(row["transition"], "FADE"),
+    };
+  });
+}
+
 function fail<T>(status: number, message: string): JsonResult<T> {
   return { status, body: { error: message } as T };
 }
@@ -540,25 +561,37 @@ async function buildManifest(
   const layoutIds = new Set<string>();
   if (layoutId) layoutIds.add(layoutId);
   if (playlistId) {
-    const { data: items, error: itemError } = await admin
-      .from("playlist_items")
-      .select("media_id, media_version_id, duration_seconds, transition, layout_id, position")
-      .eq("playlist_id", playlistId)
-      .order("position");
-    throwIfError(itemError, "Could not load playlist items.");
-    const loop = await orgLoopsPlaylists(admin, screen.organization_id);
+    const payload = manifestRow["payload"];
+    const frozenItems = parseFrozenPlaylistItems(payload);
+    let draftItems: Array<{
+      mediaId: string;
+      mediaVersionId: string;
+      durationSeconds: number;
+      transition: string;
+    }>;
     const extraLayouts: string[] = [];
-    const draftItems = (items ?? []).map((raw) => {
-      const row = raw as Record<string, unknown>;
-      const extraLayout = asNullableString(row["layout_id"]);
-      if (extraLayout) extraLayouts.push(extraLayout);
-      return {
-        mediaId: asString(row["media_id"]),
-        mediaVersionId: asString(row["media_version_id"]),
-        durationSeconds: Math.max(0.1, asNumber(row["duration_seconds"], 10)),
-        transition: asString(row["transition"], "FADE"),
-      };
-    });
+    if (frozenItems.length > 0) {
+      draftItems = frozenItems;
+    } else {
+      const { data: items, error: itemError } = await admin
+        .from("playlist_items")
+        .select("media_id, media_version_id, duration_seconds, transition, layout_id, position")
+        .eq("playlist_id", playlistId)
+        .order("position");
+      throwIfError(itemError, "Could not load playlist items.");
+      draftItems = (items ?? []).map((raw) => {
+        const row = raw as Record<string, unknown>;
+        const extraLayout = asNullableString(row["layout_id"]);
+        if (extraLayout) extraLayouts.push(extraLayout);
+        return {
+          mediaId: asString(row["media_id"]),
+          mediaVersionId: asString(row["media_version_id"]),
+          durationSeconds: Math.max(0.1, asNumber(row["duration_seconds"], 10)),
+          transition: asString(row["transition"], "FADE"),
+        };
+      });
+    }
+    const loop = await orgLoopsPlaylists(admin, screen.organization_id);
     for (const extra of extraLayouts) layoutIds.add(extra);
     playlist = {
       id: playlistId,

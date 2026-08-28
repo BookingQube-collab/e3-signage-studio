@@ -93,8 +93,8 @@ fun PlaybackScreen(state: PlaybackUiState, onVideoFinished: (Int, Boolean) -> Un
 }
 
 private fun ZonePresentation.layerKey(): String = when (this) {
-    is ZonePresentation.Video -> "v:$fileUri:$generation"
-    is ZonePresentation.Image -> "i:$fileUri:$key"
+    is ZonePresentation.Video -> "v:$fileUri:$generation:$transition"
+    is ZonePresentation.Image -> "i:$fileUri:$key:$transition"
     ZonePresentation.Clock -> "clock"
     ZonePresentation.Date -> "date"
     ZonePresentation.Empty -> "empty"

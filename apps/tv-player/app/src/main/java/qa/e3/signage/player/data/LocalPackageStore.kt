@@ -52,11 +52,16 @@ class LocalPackageStore(
     }
 
     suspend fun writePendingManifest(manifest: ContentManifest): File {
-        manifestsDir.mkdirs()
-        val text = json.encodeToString(ContentManifest.serializer(), manifest)
-        val file = writeVersionedManifest(manifestsDir, manifest.manifestVersion, text)
+        val file = writeManifestFile(manifest)
         persistPackage(manifest.manifestVersion, ContentPackageState.PENDING, file.canonicalPath)
         return file
+    }
+
+    /** Write versioned manifest JSON without changing package state (used for same-version refresh). */
+    fun writeManifestFile(manifest: ContentManifest): File {
+        manifestsDir.mkdirs()
+        val text = json.encodeToString(ContentManifest.serializer(), manifest)
+        return writeVersionedManifest(manifestsDir, manifest.manifestVersion, text)
     }
 
     fun readManifestFile(file: File): ContentManifest? =
@@ -161,6 +166,9 @@ class LocalPackageStore(
     }
 
     suspend fun lastError(): String? = db.syncStateDao().get()?.lastError
+
+    suspend fun cloudManifestVersion(): Int =
+        db.syncStateDao().get()?.cloudManifestVersion ?: 0
 
     suspend fun currentPackageState(): ContentPackageState? {
         val raw = db.syncStateDao().get()?.packageState ?: return null

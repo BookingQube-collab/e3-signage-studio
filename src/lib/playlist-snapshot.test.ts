@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { toManifestAssets } from "./manifest-assets.ts";
-import { bindPlaylistItemsToAssets, isPlaylistSnapshotStale } from "./playlist-snapshot.ts";
+import {
+  bindPlaylistItemsToAssets,
+  isPlaylistSequenceStale,
+  isPlaylistSnapshotStale,
+  playlistSequenceFingerprint,
+} from "./playlist-snapshot.ts";
 
 test("two-item playlist keeps both READY assets and both bound items", () => {
   const assets = toManifestAssets(
@@ -81,4 +86,27 @@ test("frozen one-asset snapshot drops the second live playlist item", () => {
   );
   assert.equal(isPlaylistSnapshotStale(["ver-rajan", "ver-wireframe"], ["ver-rajan"]), true);
   assert.equal(isPlaylistSnapshotStale(["ver-rajan"], ["ver-rajan"]), false);
+});
+
+test("playlist sequence fingerprint changes on reorder or transition", () => {
+  const a = {
+    mediaVersionId: "ver-a",
+    durationSeconds: 10,
+    transition: "FADE",
+  };
+  const b = {
+    mediaVersionId: "ver-b",
+    durationSeconds: 10,
+    transition: "WIPE",
+  };
+  assert.equal(playlistSequenceFingerprint([a, b]), "ver-a:10:FADE|ver-b:10:WIPE");
+  assert.equal(isPlaylistSequenceStale([a, b], [a, b]), false);
+  assert.equal(isPlaylistSequenceStale([b, a], [a, b]), true);
+  assert.equal(
+    isPlaylistSequenceStale(
+      [a, { ...b, transition: "ZOOM" }],
+      [a, b],
+    ),
+    true,
+  );
 });
