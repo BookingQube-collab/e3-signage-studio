@@ -19,7 +19,11 @@ export type TargetLite = {
 };
 
 export function isScreenEligible(screen: ScreenLite): boolean {
-  return !screen.archivedAt && screen.operationalStatus !== "DISABLED";
+  return (
+    Boolean(screen.locationId) &&
+    !screen.archivedAt &&
+    screen.operationalStatus !== "DISABLED"
+  );
 }
 
 export function resolveTargetScreenIds(

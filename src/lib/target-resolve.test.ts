@@ -66,6 +66,27 @@ test("offline screens still receive the campaign independently of disabled ones"
   );
 });
 
+test("screens without a location are not eligible campaign targets", () => {
+  const mixed = [
+    ...screens,
+    {
+      id: "s-orphan",
+      locationId: "",
+      organizationId: "org-1",
+      operationalStatus: "READY",
+      archivedAt: null,
+    },
+  ];
+  assert.deepEqual(
+    resolveTargetScreenIds([{ type: "SCREEN", targetId: "s-orphan" }], mixed, groups),
+    [],
+  );
+  assert.deepEqual(
+    resolveTargetScreenIds([{ type: "ORGANIZATION", targetId: "org-1" }], mixed, groups).sort(),
+    ["s1", "s3"],
+  );
+});
+
 test("finds campaigns that include a screen via any target type", () => {
   const ids = campaignIdsTargetingScreen(
     screens[0]!,

@@ -234,15 +234,33 @@ async function assertSelectedScreens(
   if (unique.length === 0) return;
   const { data, error } = await client
     .from("screens")
-    .select("id, location_id")
+    .select("id, location_id, archived_at, operational_status")
     .eq("organization_id", profile.organizationId)
     .in("id", unique);
   throwIfError(error, "Could not load target screens.");
-  const rows = (data ?? []) as Array<{ id: string; location_id: string }>;
+  const rows = (data ?? []) as Array<{
+    id: string;
+    location_id: string | null;
+    archived_at: string | null;
+    operational_status: string;
+  }>;
   if (rows.length !== unique.length) {
     throw new Error("One or more target screens were not found.");
   }
-  const locationIds = [...new Set(rows.map((row) => row.location_id))];
+  for (const row of rows) {
+    if (asNullableString(row.archived_at)) {
+      throw new Error("Campaigns can only target active screens assigned to a location.");
+    }
+    if (asString(row.operational_status, "READY") === "DISABLED") {
+      throw new Error("Campaigns cannot target disabled screens.");
+    }
+    if (!asString(row.location_id)) {
+      throw new Error("Campaigns can only target screens assigned to a location.");
+    }
+  }
+  const locationIds = [
+    ...new Set(rows.map((row) => asString(row.location_id)).filter(Boolean)),
+  ];
   const { data: locations, error: locError } = await client
     .from("locations")
     .select("id, type")
@@ -254,8 +272,12 @@ async function assertSelectedScreens(
       asString((row as { type: string }).type),
     ]),
   );
+  if (types.size !== locationIds.length) {
+    throw new Error("One or more target screens are not assigned to a valid location.");
+  }
   for (const row of rows) {
-    assertScreenAccess(profile, row.location_id, types.get(row.location_id) ?? "");
+    const locationId = asString(row.location_id);
+    assertScreenAccess(profile, locationId, types.get(locationId) ?? "");
   }
 }
 

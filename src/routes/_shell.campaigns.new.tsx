@@ -141,10 +141,12 @@ function NewCampaignPage() {
 
   useEffect(() => {
     if (presetApplied.current || mode !== "create" || !presetLocationId || !screens.data) return;
-    const ids = screens.data.filter((s) => s.locationId === presetLocationId).map((s) => s.id);
+    const ids = screens.data
+      .filter((s) => Boolean(s.locationId) && s.locationId === presetLocationId)
+      .map((s) => s.id);
     setDraft((current) => ({
       ...current,
-      locationIds: [presetLocationId],
+      locationIds: ids.length > 0 ? [presetLocationId] : [],
       screenIds: ids,
     }));
     presetApplied.current = true;
@@ -187,7 +189,12 @@ function NewCampaignPage() {
   });
 
   const targetLocations = (locations.data ?? []).filter((l) =>
-    (screens.data ?? []).some((s) => draft.screenIds.includes(s.id) && s.locationId === l.id),
+    (screens.data ?? []).some(
+      (s) =>
+        Boolean(s.locationId) &&
+        draft.screenIds.includes(s.id) &&
+        s.locationId === l.id,
+    ),
   );
 
   const contentOptions =
