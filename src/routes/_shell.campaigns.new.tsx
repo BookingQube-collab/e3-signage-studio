@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { TargetSelector } from "@/features/campaigns/TargetSelector";
+import { CampaignContentPreview } from "@/features/campaigns/CampaignContentPreview";
 import { cn } from "@/lib/utils";
 import { isEvergreenSchedule } from "@/lib/campaign-window";
 import { addDaysIso, localIsoDate } from "@/lib/schedule-days";
@@ -509,14 +510,22 @@ function NewCampaignPage() {
 
           {step >= 4 ? (
             <div className="space-y-5">
-              <div className="e3-gradient-border rounded-2xl bg-background p-6">
-                <h3 className="font-display text-xl font-bold uppercase tracking-wide">
+              <CampaignContentPreview
+                contentType={draft.contentType}
+                contentId={draft.contentId}
+                contentName={draft.contentName}
+              />
+
+              <div className="rounded-2xl border border-border bg-card/60 p-5">
+                <h3 className="font-display text-lg font-bold uppercase tracking-wide">
                   {draft.name || "Untitled campaign"}
                 </h3>
-                <dl className="mt-5 grid gap-4 sm:grid-cols-2">
+                <dl className="mt-4 grid gap-4 sm:grid-cols-2">
                   <div>
                     <dt className="text-xs uppercase tracking-wide text-muted-foreground">Content</dt>
-                    <dd className="mt-1 text-sm font-medium">{draft.contentName}</dd>
+                    <dd className="mt-1 text-sm font-medium">
+                      {draft.contentType}: {draft.contentName}
+                    </dd>
                   </div>
                   <div>
                     <dt className="text-xs uppercase tracking-wide text-muted-foreground">Target</dt>
