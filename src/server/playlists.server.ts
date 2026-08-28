@@ -199,14 +199,16 @@ async function toRecords(
 export async function listPlaylists(accessToken: string): Promise<PlaylistRecord[]> {
   const auth = await requireCmsPermission(accessToken, "playlists.view");
   const client = getUserClient(accessToken);
-  const { data, error } = await client
-    .from("playlists")
-    .select(PLAYLIST_SELECT)
-    .eq("organization_id", auth.profile.organizationId)
-    .is("archived_at", null)
-    .order("updated_at", { ascending: false });
+  const [{ data, error }, usage] = await Promise.all([
+    client
+      .from("playlists")
+      .select(PLAYLIST_SELECT)
+      .eq("organization_id", auth.profile.organizationId)
+      .is("archived_at", null)
+      .order("updated_at", { ascending: false }),
+    loadScopedContentUsage(client, auth.profile),
+  ]);
   throwIfError(error, "Could not load playlists.");
-  const usage = await loadScopedContentUsage(client, auth.profile);
   const rows = ((data ?? []) as Array<Record<string, unknown>>).filter((row) =>
     contentVisibleToProfile(
       auth.profile,

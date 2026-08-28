@@ -190,25 +190,20 @@ function defaultSchedule(row?: {
 async function loadGroups(client: UserClient, organizationId: string): Promise<GroupLite[]> {
   const { data: groups, error } = await client
     .from("screen_groups")
-    .select("id")
+    .select("id, screen_group_members(screen_id)")
     .eq("organization_id", organizationId);
   throwIfError(error, "Could not load screen groups.");
-  const ids = (groups ?? []).map((row) => asString((row as { id: string }).id)).filter(Boolean);
-  if (ids.length === 0) return [];
-  const { data: members, error: memberError } = await client
-    .from("screen_group_members")
-    .select("screen_group_id, screen_id")
-    .in("screen_group_id", ids);
-  throwIfError(memberError, "Could not load screen group members.");
-  const byGroup = new Map<string, string[]>();
-  for (const raw of members ?? []) {
-    const groupId = asString((raw as { screen_group_id: string }).screen_group_id);
-    const screenId = asString((raw as { screen_id: string }).screen_id);
-    const list = byGroup.get(groupId) ?? [];
-    list.push(screenId);
-    byGroup.set(groupId, list);
-  }
-  return ids.map((id) => ({ id, screenIds: byGroup.get(id) ?? [] }));
+  return (groups ?? []).map((raw) => {
+    const row = raw as {
+      id: string;
+      screen_group_members?: Array<{ screen_id: string }> | null;
+    };
+    const id = asString(row.id);
+    const screenIds = (row.screen_group_members ?? [])
+      .map((member) => asString(member.screen_id))
+      .filter(Boolean);
+    return { id, screenIds };
+  }).filter((group) => Boolean(group.id));
 }
 
 async function loadOrgScreens(client: UserClient, organizationId: string): Promise<ScreenLite[]> {
@@ -505,10 +500,21 @@ async function toRecords(
 ): Promise<CampaignRecord[]> {
   if (rows.length === 0) return [];
   const ids = rows.map((row) => row.id);
+  const playlistIds = [
+    ...new Set(rows.map((row) => row.playlist_id).filter((id): id is string => Boolean(id))),
+  ];
+  const layoutIds = [
+    ...new Set(rows.map((row) => row.layout_id).filter((id): id is string => Boolean(id))),
+  ];
+  // One parallel wave — previously screens/groups waited on targets/schedules/sync.
   const [
     { data: targetRows, error: targetError },
     { data: scheduleRows, error: scheduleError },
     { data: syncRows, error: syncError },
+    screens,
+    groups,
+    { data: playlists },
+    { data: layouts },
   ] = await Promise.all([
     client.from("campaign_targets").select("campaign_id, type, target_id").in("campaign_id", ids),
     client
@@ -520,22 +526,8 @@ async function toRecords(
     client
       .from("device_sync_states")
       .select("screen_id, sync_state, pending_manifest_id, active_manifest_id"),
-  ]);
-  throwIfError(targetError, "Could not load campaign targets.");
-  throwIfError(scheduleError, "Could not load schedules.");
-  throwIfError(syncError, "Could not load sync state.");
-
-  const screens = await loadOrgScreens(client, profile.organizationId);
-  const groups = await loadGroups(client, profile.organizationId);
-  const locationByScreen = new Map(screens.map((screen) => [screen.id, screen.locationId]));
-
-  const playlistIds = [
-    ...new Set(rows.map((row) => row.playlist_id).filter((id): id is string => Boolean(id))),
-  ];
-  const layoutIds = [
-    ...new Set(rows.map((row) => row.layout_id).filter((id): id is string => Boolean(id))),
-  ];
-  const [{ data: playlists }, { data: layouts }] = await Promise.all([
+    loadOrgScreens(client, profile.organizationId),
+    loadGroups(client, profile.organizationId),
     playlistIds.length
       ? client.from("playlists").select("id, name").in("id", playlistIds)
       : Promise.resolve({ data: [] as Array<{ id: string; name: string }> }),
@@ -543,6 +535,11 @@ async function toRecords(
       ? client.from("layouts").select("id, name").in("id", layoutIds)
       : Promise.resolve({ data: [] as Array<{ id: string; name: string }> }),
   ]);
+  throwIfError(targetError, "Could not load campaign targets.");
+  throwIfError(scheduleError, "Could not load schedules.");
+  throwIfError(syncError, "Could not load sync state.");
+
+  const locationByScreen = new Map(screens.map((screen) => [screen.id, screen.locationId]));
   const playlistNames = new Map(
     (playlists ?? []).map((row) => [asString((row as { id: string }).id), asString((row as { name: string }).name)]),
   );

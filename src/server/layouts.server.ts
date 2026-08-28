@@ -204,12 +204,15 @@ async function toRecords(
 export async function listLayouts(accessToken: string): Promise<LayoutRecord[]> {
   const auth = await requireCmsPermission(accessToken, "layouts.view");
   const client = getUserClient(accessToken);
-  const first = await client
-    .from("layouts")
-    .select(LAYOUT_SELECT)
-    .eq("organization_id", auth.profile.organizationId)
-    .is("archived_at", null)
-    .order("updated_at", { ascending: false });
+  const [first, usage] = await Promise.all([
+    client
+      .from("layouts")
+      .select(LAYOUT_SELECT)
+      .eq("organization_id", auth.profile.organizationId)
+      .is("archived_at", null)
+      .order("updated_at", { ascending: false }),
+    loadScopedContentUsage(client, auth.profile),
+  ]);
   const retry = isUnknownColumn(first.error, "created_by")
     ? await client
         .from("layouts")
@@ -219,7 +222,6 @@ export async function listLayouts(accessToken: string): Promise<LayoutRecord[]> 
         .order("updated_at", { ascending: false })
     : first;
   throwIfError(retry.error, "Could not load layouts.");
-  const usage = await loadScopedContentUsage(client, auth.profile);
   const rows = ((retry.data ?? []) as Array<Record<string, unknown>>).filter((row) =>
     contentVisibleToProfile(
       auth.profile,

@@ -524,15 +524,17 @@ export async function listMedia(accessToken: string): Promise<MediaRecord[]> {
   if (hasPermission(auth.profile.role, "media.manage")) {
     void reconcilePendingUploadsOnce(client, auth.profile.organizationId);
   }
-  const { data, error } = await client
-    .from("media")
-    .select(MEDIA_SELECT)
-    .eq("organization_id", auth.profile.organizationId)
-    .is("archived_at", null)
-    .eq("status", "READY")
-    .order("created_at", { ascending: false });
+  const [{ data, error }, usage] = await Promise.all([
+    client
+      .from("media")
+      .select(MEDIA_SELECT)
+      .eq("organization_id", auth.profile.organizationId)
+      .is("archived_at", null)
+      .eq("status", "READY")
+      .order("created_at", { ascending: false }),
+    loadScopedContentUsage(client, auth.profile),
+  ]);
   throwIfError(error, "Could not load media.");
-  const usage = await loadScopedContentUsage(client, auth.profile);
   const rows = (data ?? [])
     .map((row) => mapMedia(row as Record<string, unknown>))
     .filter((row) =>

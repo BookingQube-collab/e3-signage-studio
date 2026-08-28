@@ -17,6 +17,8 @@ export const DOWNLOAD_URL_TTL_SECONDS = 60 * 60;
 
 /** Re-measure Cloudflare usage at most this often (dashboard polls ~30s). */
 export const CLOUD_STORAGE_CACHE_TTL_MS = 5 * 60 * 1000;
+/** Serve a slightly stale reading while a background remeasure runs (avoids R2 list on click). */
+export const CLOUD_STORAGE_STALE_SERVE_MS = 60 * 60 * 1000;
 /** Default org media quota when settings/env omit one (8 GiB). Alert when used >= this. */
 export const DEFAULT_CLOUD_STORAGE_QUOTA_BYTES = 8 * 1024 * 1024 * 1024;
 
@@ -41,6 +43,7 @@ type MemoryCacheEntry = {
 };
 
 const memoryCloudUsage = new Map<string, MemoryCacheEntry>();
+const cloudUsageRefreshInFlight = new Set<string>();
 
 export function storageBackendName(): "r2" | "supabase" {
   return isR2Configured() ? "r2" : "supabase";
@@ -104,6 +107,8 @@ async function persistCloudUsageCache(
 /**
  * Actual Cloudflare R2 bytes under `{orgId}/` (ListObjects Size sum), cached ~5 minutes.
  * Falls back to summing media_versions when R2 is unavailable.
+ * Stale readings (up to 1h) are returned immediately while a background refresh runs —
+ * so dashboard navigation is never blocked on R2 list (up to ~8s).
  */
 export async function getOrgCloudStorageUsage(input: {
   organizationId: string;
@@ -134,11 +139,12 @@ export async function getOrgCloudStorageUsage(input: {
     typeof input.cachedMeasuredAt === "string" && input.cachedMeasuredAt
       ? Date.parse(input.cachedMeasuredAt)
       : NaN;
-  if (
+
+  const dbFresh =
     cachedUsed != null &&
     Number.isFinite(cachedAtMs) &&
-    nowMs - cachedAtMs < CLOUD_STORAGE_CACHE_TTL_MS
-  ) {
+    nowMs - cachedAtMs < CLOUD_STORAGE_CACHE_TTL_MS;
+  if (dbFresh) {
     memoryCloudUsage.set(orgId, {
       usedBytes: cachedUsed,
       measuredAtMs: cachedAtMs,
@@ -152,6 +158,51 @@ export async function getOrgCloudStorageUsage(input: {
     };
   }
 
+  const staleMem =
+    mem && nowMs - mem.measuredAtMs < CLOUD_STORAGE_STALE_SERVE_MS
+      ? mem
+      : null;
+  const staleDb =
+    cachedUsed != null &&
+    Number.isFinite(cachedAtMs) &&
+    nowMs - cachedAtMs < CLOUD_STORAGE_STALE_SERVE_MS
+      ? { usedBytes: cachedUsed, measuredAtMs: cachedAtMs, source: "cache" as const }
+      : null;
+  const stale = staleMem ?? staleDb;
+  if (stale) {
+    scheduleCloudUsageRefresh(orgId);
+    return {
+      usedBytes: stale.usedBytes,
+      quotaBytes,
+      source: "cache",
+      measuredAt: new Date(stale.measuredAtMs).toISOString(),
+    };
+  }
+
+  return measureAndStoreCloudUsage(orgId, quotaBytes, nowMs, cachedUsed, cachedAtMs);
+}
+
+function scheduleCloudUsageRefresh(orgId: string): void {
+  if (cloudUsageRefreshInFlight.has(orgId)) return;
+  cloudUsageRefreshInFlight.add(orgId);
+  void measureAndStoreCloudUsage(
+    orgId,
+    resolveCloudStorageQuotaBytes(undefined),
+    Date.now(),
+    null,
+    NaN,
+  ).finally(() => {
+    cloudUsageRefreshInFlight.delete(orgId);
+  });
+}
+
+async function measureAndStoreCloudUsage(
+  orgId: string,
+  quotaBytes: number,
+  nowMs: number,
+  cachedUsed: number | null,
+  cachedAtMs: number,
+): Promise<OrgCloudStorageUsage> {
   let usedBytes = 0;
   let source: OrgCloudStorageUsage["source"] = "media_library";
   try {

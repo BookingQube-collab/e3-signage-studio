@@ -39,6 +39,38 @@ const MESSAGES: Record<Exclude<AuthFailure["code"], "UNAUTHENTICATED">, string> 
   CONFIG: "Authentication is not configured. Check Supabase environment variables.",
 };
 
+/** Avoid getUser + resolve_cms_profile on every sidebar list call (~2 PostgREST RTTs). */
+const AUTH_RESULT_TTL_MS = 45_000;
+const AUTH_RESULT_CACHE_MAX = 200;
+const authResultCache = new Map<string, { at: number; result: Extract<AuthSessionResult, { ok: true }> }>();
+
+export function clearAuthResultCache(): void {
+  authResultCache.clear();
+}
+
+function readCachedAuth(accessToken: string): Extract<AuthSessionResult, { ok: true }> | null {
+  if (!accessToken) return null;
+  const hit = authResultCache.get(accessToken);
+  if (!hit) return null;
+  if (Date.now() - hit.at >= AUTH_RESULT_TTL_MS) {
+    authResultCache.delete(accessToken);
+    return null;
+  }
+  return hit.result;
+}
+
+function writeCachedAuth(
+  accessToken: string,
+  result: Extract<AuthSessionResult, { ok: true }>,
+): void {
+  if (!accessToken) return;
+  if (authResultCache.size >= AUTH_RESULT_CACHE_MAX) {
+    const oldest = authResultCache.keys().next().value;
+    if (oldest) authResultCache.delete(oldest);
+  }
+  authResultCache.set(accessToken, { at: Date.now(), result });
+}
+
 function fail(
   code: AuthFailure["code"],
   extra: { userId: string | null; email: string | null },
@@ -136,6 +168,7 @@ export function persistAuthCookies(accessToken: string, refreshToken: string): {
 
 export function clearAuthSession(): { ok: true } {
   clearAuthCookies();
+  clearAuthResultCache();
   return { ok: true };
 }
 
@@ -149,6 +182,9 @@ export async function resolveAuthFromRequest(
   if (!accessToken && !refreshToken) {
     return fail("UNAUTHENTICATED", { userId: null, email: null });
   }
+
+  const cached = readCachedAuth(accessToken);
+  if (cached) return cached;
 
   try {
     const client = getUserClient(accessToken);
@@ -193,13 +229,15 @@ export async function resolveAuthFromRequest(
     const profile = parseProfile(payload.profile);
     if (!profile) return fail("NO_PROFILE", { userId, email });
 
-    return {
-      ok: true,
+    const okResult = {
+      ok: true as const,
       userId,
       email: email ?? profile.email,
       profile,
       permissions: permissionsForRole(profile.role),
     };
+    writeCachedAuth(accessToken, okResult);
+    return okResult;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Authentication failed.";
     if (message.includes("not configured")) {

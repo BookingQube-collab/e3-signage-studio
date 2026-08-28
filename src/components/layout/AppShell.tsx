@@ -81,7 +81,7 @@ function initialsFor(name: string): string {
 function Brand({ collapsed }: { collapsed?: boolean }) {
   const logoSrc = useCmsLogoSrc();
   return (
-    <Link to="/dashboard" preload={false} className="flex items-center gap-3 px-2 py-1">
+    <Link to="/dashboard" preload="intent" className="flex items-center gap-3 px-2 py-1">
       <img
         src={logoSrc}
         alt="E3"
@@ -122,7 +122,7 @@ function NavList({
           <Link
             key={to}
             to={to}
-            preload={false}
+            preload="intent"
             onClick={onNavigate}
             title={collapsed ? label : undefined}
             className={cn(
@@ -267,7 +267,7 @@ export function AppShell({
                 <DropdownMenuSeparator />
                 {showSettings ? (
                   <DropdownMenuItem asChild>
-                    <Link to="/settings" preload={false}>Settings</Link>
+                    <Link to="/settings" preload="intent">Settings</Link>
                   </DropdownMenuItem>
                 ) : null}
                 <DropdownMenuItem onSelect={() => void signOut()} disabled={signingOut}>

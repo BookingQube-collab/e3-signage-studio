@@ -555,7 +555,7 @@ function MediaPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [overlayOpen]);
 
-  const loading = !isClient || mediaQuery.isPending || foldersQuery.isPending;
+  const loading = !isClient || mediaQuery.isPending;
   const errored = mediaQuery.isError || foldersQuery.isError;
   const empty = visibleFolders.length === 0 && items.length === 0;
   const selectionActive = selectedIds.size > 0;
