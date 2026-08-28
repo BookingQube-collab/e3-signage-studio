@@ -34,6 +34,8 @@ export function MediaThumb({ item, className }: { item: Media; className?: strin
         <img
           src={item.thumbnailUrl || item.previewUrl}
           alt=""
+          width={320}
+          height={180}
           loading="lazy"
           decoding="async"
           referrerPolicy="no-referrer"

@@ -1,6 +1,8 @@
 import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { useDebouncedValue } from "@/lib/use-debounced-value";
+
 import { E3EmptyState, E3MediaCard } from "@/components/e3";
 import { Input } from "@/components/ui/input";
 import { FolderCard } from "@/features/media/FolderCard";
@@ -29,9 +31,10 @@ export function MediaPicker({
   className?: string;
 }) {
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search);
   const [folderId, setFolderId] = useState<string | null>(null);
   const current = folders.find((folder) => folder.id === folderId) ?? null;
-  const view = libraryViewFor(search, folderId);
+  const view = libraryViewFor(debouncedSearch, folderId);
   const searching = view.mode === "search";
 
   const visibleFolders = useMemo(

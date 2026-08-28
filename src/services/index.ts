@@ -1,57 +1,19 @@
-import { apiServices } from "./api";
-import { liveCampaignService } from "./campaigns";
-import { liveDashboardService } from "./dashboard";
-import { liveLocationService } from "./locations";
-import { liveLayoutService } from "./layouts";
-import { liveMediaService } from "./media";
-import { mockServices } from "./mock";
-import { livePlaylistService } from "./playlists";
-import { liveReportService } from "./reports";
-import { liveScheduleService } from "./schedules";
-import { liveScreenGroupService } from "./screen-groups";
-import { liveScreenService } from "./screens";
-import type { AppServices } from "./types";
-import { liveUserService } from "./users";
-
 /**
- * Service layer. Pages import these names — never mocks or HTTP clients directly.
- *
- * Locations, screens, screen groups, media, playlists, layouts, campaigns,
- * schedules, users, dashboard, and reports are live. Heartbeats and sync acks
- * drive ONLINE status, alerts, activity, and proof-of-play.
- * VITE_API_MODE=api — unused leftover adapter (all modules are live).
+ * Live service layer. Pages import these names — never mocks or HTTP clients
+ * directly. Re-exports stay tree-shakeable so a dashboard import does not pull
+ * mock data, reports, or the campaign wizard client.
  */
 
-function resolveServices(): AppServices {
-  const base = import.meta.env.VITE_API_MODE === "api" ? apiServices : mockServices;
-  return {
-    ...base,
-    locationService: liveLocationService,
-    screenService: liveScreenService,
-    screenGroupService: liveScreenGroupService,
-    mediaService: liveMediaService,
-    playlistService: livePlaylistService,
-    layoutService: liveLayoutService,
-    campaignService: liveCampaignService,
-    scheduleService: liveScheduleService,
-    userService: liveUserService,
-    dashboardService: liveDashboardService,
-    reportService: liveReportService,
-  };
-}
-
-const services = resolveServices();
-
-export const locationService = services.locationService;
-export const screenService = services.screenService;
-export const screenGroupService = services.screenGroupService;
-export const mediaService = services.mediaService;
-export const playlistService = services.playlistService;
-export const layoutService = services.layoutService;
-export const campaignService = services.campaignService;
-export const scheduleService = services.scheduleService;
-export const userService = services.userService;
-export const dashboardService = services.dashboardService;
-export const reportService = services.reportService;
+export { liveLocationService as locationService } from "./locations";
+export { liveScreenService as screenService } from "./screens";
+export { liveScreenGroupService as screenGroupService } from "./screen-groups";
+export { liveMediaService as mediaService } from "./media";
+export { livePlaylistService as playlistService } from "./playlists";
+export { liveLayoutService as layoutService } from "./layouts";
+export { liveCampaignService as campaignService } from "./campaigns";
+export { liveScheduleService as scheduleService } from "./schedules";
+export { liveUserService as userService } from "./users";
+export { liveDashboardService as dashboardService } from "./dashboard";
+export { liveReportService as reportService } from "./reports";
 
 export type { AppServices } from "./types";

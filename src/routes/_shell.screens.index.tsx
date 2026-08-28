@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/select";
 import { PairScreenDialog } from "@/features/screens/PairScreenDialog";
 import { ScreenRowMenu } from "@/features/screens/ScreenRowMenu";
+import { useDebouncedValue } from "@/lib/use-debounced-value";
 import { cn } from "@/lib/utils";
 import { locationService, screenGroupService, screenService } from "@/services";
 import { ADMIN_MONITORING_REFETCH_MS } from "@/lib/monitoring";
@@ -64,6 +65,7 @@ function ScreensPage() {
   const [groupsOpen, setGroupsOpen] = useState(false);
   const [newGroup, setNewGroup] = useState("");
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search);
   const [locationId, setLocationId] = useState("all");
   const [status, setStatus] = useState("all");
   const [groupId, setGroupId] = useState("all");
@@ -93,14 +95,14 @@ function ScreensPage() {
 
   const rows = useMemo(() => {
     return (screensQuery.data ?? []).filter((s) => {
-      if (search && !s.name.toLowerCase().includes(search.toLowerCase())) return false;
+      if (debouncedSearch && !s.name.toLowerCase().includes(debouncedSearch.toLowerCase())) return false;
       if (locationId !== "all" && s.locationId !== locationId) return false;
       if (status !== "all" && s.status !== status) return false;
       if (groupId !== "all" && !s.groupIds.includes(groupId)) return false;
       if (orientation !== "all" && s.orientation !== orientation) return false;
       return true;
     });
-  }, [screensQuery.data, search, locationId, status, groupId, orientation]);
+  }, [screensQuery.data, debouncedSearch, locationId, status, groupId, orientation]);
 
   const columns: E3Column<Screen>[] = [
     {

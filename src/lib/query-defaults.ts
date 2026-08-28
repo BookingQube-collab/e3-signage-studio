@@ -18,6 +18,7 @@ export function createAppQueryClient(): QueryClient {
         gcTime: ADMIN_QUERY_GC_MS,
         refetchOnWindowFocus: false,
         refetchOnReconnect: true,
+        refetchOnMount: true,
         refetchIntervalInBackground: false,
         retry: 1,
       },

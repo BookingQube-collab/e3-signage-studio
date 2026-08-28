@@ -92,5 +92,20 @@ export default defineConfig({
         ? { "import.meta.env.VITE_SUPABASE_ANON_KEY": JSON.stringify(publicSupabase.anonKey) }
         : {}),
     },
+    build: {
+      assetsInlineLimit: 1024,
+      cssMinify: true,
+      modulePreload: { polyfill: false },
+      rollupOptions: {
+        output: {
+          manualChunks(id: string) {
+            if (id.includes("node_modules/@supabase")) return "vendor-supabase";
+            if (id.includes("node_modules/@radix-ui")) return "vendor-radix";
+            if (id.includes("node_modules/lucide-react")) return "vendor-lucide";
+            return undefined;
+          },
+        },
+      },
+    },
   },
 });

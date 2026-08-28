@@ -7,9 +7,7 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
-
-import { Toaster } from "@/components/ui/sonner";
+import { lazy, Suspense, useEffect, type ReactNode } from "react";
 import { AuthSessionSync } from "@/lib/auth-sync";
 import type { AuthSessionResult } from "@/lib/auth-types";
 import { useIsClient } from "@/lib/use-is-client";
@@ -100,11 +98,19 @@ export const Route = createRootRouteWithContext<{
     ],
     links: [
       { rel: "stylesheet", href: appCss },
-      { rel: "preconnect", href: "https://fonts.googleapis.com" },
-      { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       {
-        rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap",
+        rel: "preload",
+        href: "/fonts/space-grotesk-latin.woff2",
+        as: "font",
+        type: "font/woff2",
+        crossOrigin: "anonymous",
+      },
+      {
+        rel: "preload",
+        href: "/fonts/rajdhani-600-latin.woff2",
+        as: "font",
+        type: "font/woff2",
+        crossOrigin: "anonymous",
       },
       { rel: "icon", type: "image/png", href: "/favicon.png" },
     ],
@@ -129,6 +135,10 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
+const Toaster = lazy(() =>
+  import("@/components/ui/sonner").then((mod) => ({ default: mod.Toaster })),
+);
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const isClient = useIsClient();
@@ -138,7 +148,11 @@ function RootComponent() {
       <AuthSessionSync>
         {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
         <Outlet />
-        {isClient ? <Toaster position="top-right" richColors /> : null}
+        {isClient ? (
+          <Suspense fallback={null}>
+            <Toaster position="top-right" richColors />
+          </Suspense>
+        ) : null}
       </AuthSessionSync>
     </QueryClientProvider>
   );

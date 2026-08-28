@@ -3,7 +3,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import logo from "@/assets/e3-logo.png";
-import { E3Button } from "@/components/e3";
+import { E3Button } from "@/components/e3/E3Button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getAuthSessionFn, persistSessionFn, resolveLoginIdentifierFn } from "@/lib/auth-functions";
@@ -194,7 +194,15 @@ function LoginPage() {
 
       <div className="relative w-full max-w-md">
         <div className="mb-8 text-center">
-          <img src={logo} alt="E3" width={160} height={108} className="mx-auto h-14 w-auto" />
+          <img
+            src={logo}
+            alt="E3"
+            width={160}
+            height={108}
+            fetchPriority="high"
+            decoding="async"
+            className="mx-auto h-14 w-auto"
+          />
           <h1 className="font-display mt-6 text-2xl font-bold uppercase leading-tight tracking-[0.22em]">
             Digital Signage
           </h1>

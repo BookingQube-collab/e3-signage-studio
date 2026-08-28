@@ -1,4 +1,4 @@
-import { formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow } from "date-fns/formatDistanceToNow";
 
 export function formatLastActive(iso: string | null): string {
   if (!iso) return "Never";
