@@ -32,6 +32,28 @@ export function shouldSkipManualStorageResync(): boolean {
   return false;
 }
 
+/**
+ * Manual sync should list the bucket first. HEAD-before-list burns the deadline
+ * and leaves PROCESSING videos (including renamed ones) invisible in the library.
+ */
+export function shouldListBucketBeforeHeadPromote(importOrphans: boolean): boolean {
+  return importOrphans;
+}
+
+/** Incomplete rows with a known media mime can be finalized once ListBucket saw the key. */
+export function canPromoteIncompleteWithoutHead(input: {
+  versionMimeType: string;
+  storageKey: string;
+  keySeenInBucket: boolean;
+}): boolean {
+  if (!input.keySeenInBucket) return false;
+  if (!input.storageKey) return false;
+  return (
+    input.versionMimeType.startsWith("image/") ||
+    input.versionMimeType.startsWith("video/")
+  );
+}
+
 /** Intersect one R2 page with pending storage keys — never send the whole bucket to Postgres. */
 export function storageKeysOnPage(pageKeys: string[], pendingKeys: Iterable<string>): string[] {
   const pending = pendingKeys instanceof Set ? pendingKeys : new Set(pendingKeys);

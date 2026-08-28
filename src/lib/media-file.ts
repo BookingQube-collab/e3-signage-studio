@@ -80,12 +80,17 @@ export function parseMediaStorageKey(key: string): ParsedMediaStorageKey | null 
 export function inferOrphanMediaMime(key: string, contentType?: string | null): AllowedMediaMime | null {
   const parsed = parseMediaStorageKey(key);
   if (parsed?.mime) return parsed.mime;
+  const fromExt = MIME_BY_EXT[fileExtension(key)];
+  if (fromExt) return fromExt;
   const reported = (contentType ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
   if (isAllowedMediaMime(reported)) return reported;
   if (reported.startsWith("video/")) return "video/mp4";
   if (reported === "image/jpg" || reported === "image/pjpeg") return "image/jpeg";
-  const fromExt = MIME_BY_EXT[fileExtension(key)];
-  return fromExt ?? null;
+  // R2 sometimes stores uploads as octet-stream; key extension already checked above.
+  if (reported === "application/octet-stream" || reported === "binary/octet-stream") {
+    return null;
+  }
+  return null;
 }
 
 /** Keep a playable extension after CMS rename so Videos/Images filters still match. */

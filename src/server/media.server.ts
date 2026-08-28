@@ -60,6 +60,7 @@ import {
   shouldSkipCompleteObjectStat,
   shouldSkipLibraryAutoSync,
   shouldSkipManualStorageResync,
+  shouldListBucketBeforeHeadPromote,
   isReadyLibraryCoveredKey,
   STORAGE_LIST_TIMEOUT_MS,
 } from "../lib/media-upload-lifecycle";
@@ -1226,6 +1227,7 @@ async function promotePendingFromR2Pages(
 
   const promoted: MediaRow[] = [];
   const seen = new Set<string>();
+  const listBeforeHead = shouldListBucketBeforeHeadPromote(importOrphans);
 
   function take(rows: MediaRow[]): MediaRow[] {
     const fresh: MediaRow[] = [];
@@ -1259,61 +1261,82 @@ async function promotePendingFromR2Pages(
     }
   }
 
-  await promoteKnownIncomplete(importOrphans ? undefined : options.folderId, importOrphans ? 80 : 20);
-  if (!importOrphans) return promoted;
-
-  let token: string | null = null;
-  let timedOut = false;
-  for (let page = 0; page < options.maxPages; page += 1) {
-    const remainingMs = options.deadlineMs - Date.now();
-    if (remainingMs < 400) {
-      timedOut = true;
-      break;
-    }
-    let listed: { keys: string[]; nextContinuationToken: string | null } | null;
-    try {
-      listed = await listStoredObjectKeysPage(`${organizationId}/`, {
-        maxKeys: RESYNC_R2_PAGE_SIZE,
-        continuationToken: token,
-        timeoutMs: Math.min(STORAGE_LIST_TIMEOUT_MS, remainingMs),
-        throwOnError: true,
-      });
-    } catch {
-      timedOut = true;
-      break;
-    }
-    if (!listed || listed.keys.length === 0) break;
-
-    for (const keyChunk of chunkItems(listed.keys, RESYNC_KEY_IN_CHUNK)) {
-      if (options.deadlineMs - Date.now() < 400) {
+  async function scanBucketPages(): Promise<boolean> {
+    let token: string | null = null;
+    let timedOut = false;
+    for (let page = 0; page < options.maxPages; page += 1) {
+      const remainingMs = options.deadlineMs - Date.now();
+      if (remainingMs < 400) {
         timedOut = true;
         break;
       }
-      const matches = await loadPendingMatchingStorageKeys(client, organizationId, keyChunk);
-      if (matches.length > 0) {
-        promoted.push(...take(await promoteRowsInBatches(client, matches)));
+      let listed: { keys: string[]; nextContinuationToken: string | null } | null;
+      try {
+        listed = await listStoredObjectKeysPage(`${organizationId}/`, {
+          maxKeys: RESYNC_R2_PAGE_SIZE,
+          continuationToken: token,
+          timeoutMs: Math.min(STORAGE_LIST_TIMEOUT_MS, remainingMs),
+          throwOnError: importOrphans,
+        });
+      } catch {
+        timedOut = true;
+        break;
       }
-      const restored = await restoreLibraryRowsForKeys(client, organizationId, keyChunk);
-      if (restored.length > 0) promoted.push(...take(restored));
-      const covered = await loadCoveredStorageKeys(client, organizationId, keyChunk);
-      const orphans = orphanStorageKeysOnPage(keyChunk, covered);
-      if (orphans.length === 0 || !options.createdBy) continue;
-      promoted.push(
-        ...take(
-          await createLibraryRowsForOrphanKeys(
-            client,
-            organizationId,
-            orphans,
-            options.createdBy ?? "",
-            options.locationIds ?? [],
-          ),
-        ),
-      );
-    }
+      if (!listed || listed.keys.length === 0) break;
 
-    if (timedOut) break;
-    if (!listed.nextContinuationToken) break;
-    token = listed.nextContinuationToken;
+      for (const keyChunk of chunkItems(listed.keys, RESYNC_KEY_IN_CHUNK)) {
+        if (options.deadlineMs - Date.now() < 400) {
+          timedOut = true;
+          break;
+        }
+        const matches = await loadPendingMatchingStorageKeys(
+          client,
+          organizationId,
+          keyChunk,
+          importOrphans ? undefined : options.folderId,
+        );
+        if (matches.length > 0) {
+          promoted.push(...take(await promoteRowsInBatches(client, matches)));
+        }
+        if (!importOrphans) continue;
+        const restored = await restoreLibraryRowsForKeys(client, organizationId, keyChunk);
+        if (restored.length > 0) promoted.push(...take(restored));
+        const covered = await loadCoveredStorageKeys(client, organizationId, keyChunk);
+        const orphans = orphanStorageKeysOnPage(keyChunk, covered);
+        if (orphans.length === 0 || !options.createdBy) continue;
+        promoted.push(
+          ...take(
+            await createLibraryRowsForOrphanKeys(
+              client,
+              organizationId,
+              orphans,
+              options.createdBy ?? "",
+              options.locationIds ?? [],
+            ),
+          ),
+        );
+      }
+
+      if (timedOut) break;
+      if (!listed.nextContinuationToken) break;
+      token = listed.nextContinuationToken;
+    }
+    return timedOut;
+  }
+
+  // Manual Sync: list R2 first so PROCESSING videos are promoted from keys on the
+  // page. HEAD-before-list used to burn the deadline and leave renamed videos hidden.
+  let timedOut = false;
+  if (listBeforeHead) {
+    timedOut = await scanBucketPages();
+    if (options.deadlineMs - Date.now() >= 400) {
+      await promoteKnownIncomplete(undefined, 40);
+    }
+  } else {
+    await promoteKnownIncomplete(options.folderId, 20);
+    if (options.deadlineMs - Date.now() >= 400 && promoted.length === 0) {
+      timedOut = await scanBucketPages();
+    }
   }
 
   if (timedOut && promoted.length === 0) {

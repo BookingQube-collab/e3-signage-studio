@@ -14,6 +14,8 @@ import {
   orphanStorageKeysOnPage,
   settleEachUpload,
   shouldSkipManualStorageResync,
+  shouldListBucketBeforeHeadPromote,
+  canPromoteIncompleteWithoutHead,
   shouldDiscardIncompleteMedia,
   shouldImportOrphanStorageKey,
   shouldPromoteIncompleteObject,
@@ -242,6 +244,24 @@ test("library auto-sync skips when no PROCESSING/FAILED rows exist", () => {
   assert.equal(shouldSkipLibraryAutoSync(false), true);
   assert.equal(shouldSkipLibraryAutoSync(true), false);
   assert.equal(shouldSkipManualStorageResync(), false);
+  assert.equal(shouldListBucketBeforeHeadPromote(true), true);
+  assert.equal(shouldListBucketBeforeHeadPromote(false), false);
+  assert.equal(
+    canPromoteIncompleteWithoutHead({
+      versionMimeType: "video/mp4",
+      storageKey: "org/media/v1/abc.mp4",
+      keySeenInBucket: true,
+    }),
+    true,
+  );
+  assert.equal(
+    canPromoteIncompleteWithoutHead({
+      versionMimeType: "video/mp4",
+      storageKey: "org/media/v1/abc.mp4",
+      keySeenInBucket: false,
+    }),
+    false,
+  );
   assert.equal(
     isReadyLibraryCoveredKey({ hasMediaRow: true, status: "READY", archivedAt: null }),
     true,
