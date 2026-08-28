@@ -1,6 +1,14 @@
 import type { Media, MediaType, PlaylistItem, Transition } from "@/types";
 
-export const PREVIEW_FADE_MS = 500;
+/** Enter-transition length. Keep in sync with TV `ITEM_TRANSITION_MS`. */
+export const PREVIEW_FADE_MS = 800;
+
+export type PreviewLayerStyle = {
+  opacity?: string;
+  transform?: string;
+  filter?: string;
+  clipPath?: string;
+};
 
 export type PreviewClip = {
   id: string;
@@ -16,8 +24,11 @@ export type PreviewClip = {
 export type PreviewFrame = {
   index: number;
   nextIndex: number;
+  prevIndex: number;
   clipElapsedMs: number;
-  fadeT: number;
+  /** 0 = previous fully visible, 1 = current fully visible. */
+  progress: number;
+  effect: Transition;
 };
 
 export type PreviewMediaLookup = {
@@ -31,20 +42,109 @@ type PreviewItem = Pick<PlaylistItem, "id" | "mediaId" | "filename" | "type" | "
   thumbnailUrl?: string | null;
 };
 
-function asTransition(value: string): Transition {
-  if (value === "Cut" || value === "Slide") return value;
-  return "Fade";
+export function asTransition(value: string): Transition {
+  switch (value.trim().toLowerCase().replace(/_/g, " ")) {
+    case "cut":
+      return "Cut";
+    case "none":
+      return "None";
+    case "dissolve":
+      return "Dissolve";
+    case "slide":
+    case "slide left":
+      return "Slide";
+    case "slide right":
+      return "Slide right";
+    case "slide up":
+      return "Slide up";
+    case "slide down":
+      return "Slide down";
+    case "zoom":
+      return "Zoom";
+    case "wipe":
+      return "Wipe";
+    default:
+      return "Fade";
+  }
+}
+
+export function isInstantTransition(effect: Transition): boolean {
+  return effect === "Cut" || effect === "None";
+}
+
+function easeOutCubic(t: number): number {
+  const x = Math.min(1, Math.max(0, t));
+  return 1 - (1 - x) ** 3;
+}
+
+function isSlide(effect: Transition): boolean {
+  return effect === "Slide" || effect === "Slide right" || effect === "Slide up" || effect === "Slide down";
+}
+
+/** CSS for compositing previous/current layers. Progress is 0 (previous) → 1 (current). */
+export function previewLayerStyle(
+  role: "current" | "previous",
+  effect: Transition,
+  progress: number,
+): PreviewLayerStyle {
+  const p = Math.min(1, Math.max(0, progress));
+  const t = isSlide(effect) ? easeOutCubic(p) : p;
+  const incoming = role === "current";
+
+  if (isInstantTransition(effect)) {
+    return { opacity: incoming ? "1" : "0" };
+  }
+
+  if (effect === "Fade") {
+    return { opacity: String(incoming ? t : 1 - t) };
+  }
+
+  if (effect === "Dissolve") {
+    const blur = incoming ? (1 - t) * 8 : t * 6;
+    return { opacity: String(incoming ? t : 1 - t), filter: `blur(${blur}px)` };
+  }
+
+  if (effect === "Zoom") {
+    const scale = incoming ? 0.78 + 0.22 * t : 1 + 0.14 * t;
+    return { opacity: String(incoming ? t : 1 - t), transform: `scale(${scale})` };
+  }
+
+  if (effect === "Wipe") {
+    if (incoming) return { opacity: "1", clipPath: `inset(0 ${(1 - t) * 100}% 0 0)` };
+    return { opacity: "1" };
+  }
+
+  if (effect === "Slide") {
+    const x = incoming ? (1 - t) * 100 : -t * 100;
+    return { opacity: "1", transform: `translateX(${x}%)` };
+  }
+  if (effect === "Slide right") {
+    const x = incoming ? (t - 1) * 100 : t * 100;
+    return { opacity: "1", transform: `translateX(${x}%)` };
+  }
+  if (effect === "Slide up") {
+    const y = incoming ? (1 - t) * 100 : -t * 100;
+    return { opacity: "1", transform: `translateY(${y}%)` };
+  }
+  if (effect === "Slide down") {
+    const y = incoming ? (t - 1) * 100 : t * 100;
+    return { opacity: "1", transform: `translateY(${y}%)` };
+  }
+
+  return { opacity: String(incoming ? t : 1 - t) };
 }
 
 export function mediaPreviewKind(type: string): "image" | "video" {
   return type === "Video" || type === "VIDEO" ? "video" : "image";
 }
 
-/** Only pass browser-fetchable URLs to <img>/<video> — storage keys 404 as relative paths. */
+/** Browser-playable URLs only — storage keys 404 as relative paths. */
 export function httpMediaUrl(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
-  return /^https?:\/\//i.test(trimmed) ? trimmed : null;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (/^blob:/i.test(trimmed)) return trimmed;
+  return null;
 }
 
 export function firstHttpUrl(...values: Array<string | null | undefined>): string | null {
@@ -99,8 +199,14 @@ export function playlistItemThumbMedia(
       clip?.previewUrl,
       item.previewUrl,
     ) ?? undefined;
+  const previewUrl =
+    firstHttpUrl(library?.previewUrl, clip?.previewUrl, item.previewUrl, thumbnailUrl) ?? undefined;
   if (library) {
-    return thumbnailUrl ? { ...library, thumbnailUrl } : library;
+    return {
+      ...library,
+      ...(thumbnailUrl ? { thumbnailUrl } : {}),
+      ...(previewUrl ? { previewUrl } : {}),
+    };
   }
   const media: Media = {
     id: item.mediaId,
@@ -119,6 +225,7 @@ export function playlistItemThumbMedia(
     usedIn: { playlists: [], campaigns: [], screens: [] },
   };
   if (thumbnailUrl) media.thumbnailUrl = thumbnailUrl;
+  if (previewUrl) media.previewUrl = previewUrl;
   return media;
 }
 
@@ -140,7 +247,16 @@ export function previewFrameAt(
   if (items.length === 0) return null;
   const durations = items.map((item) => Math.max(1, item.durationSec) * 1000);
   const total = durations.reduce((sum, ms) => sum + ms, 0);
-  if (total <= 0) return { index: 0, nextIndex: 0, clipElapsedMs: 0, fadeT: 0 };
+  if (total <= 0) {
+    return {
+      index: 0,
+      nextIndex: 0,
+      prevIndex: 0,
+      clipElapsedMs: 0,
+      progress: 1,
+      effect: "Cut",
+    };
+  }
 
   const t = loop
     ? ((elapsedMs % total) + total) % total
@@ -150,28 +266,39 @@ export function previewFrameAt(
   for (let i = 0; i < items.length; i++) {
     const duration = durations[i] ?? 1000;
     if (t < acc + duration) {
-      const clipElapsedMs = t - acc;
-      const remaining = duration - clipElapsedMs;
-      const hasNext = loop || i + 1 < items.length;
-      const nextIndex = i + 1 < items.length ? i + 1 : loop ? 0 : i;
-      const fade =
-        asTransition(items[i]?.transition ?? "Fade") === "Fade" &&
-        hasNext &&
-        nextIndex !== i &&
-        remaining <= PREVIEW_FADE_MS;
-      const fadeT = fade ? 1 - remaining / PREVIEW_FADE_MS : 0;
-      return {
-        index: i,
-        nextIndex,
-        clipElapsedMs,
-        fadeT: Math.min(1, Math.max(0, fadeT)),
-      };
+      return frameForIndex(items, durations, i, t - acc, elapsedMs, loop);
     }
     acc += duration;
   }
 
   const last = items.length - 1;
-  return { index: last, nextIndex: loop ? 0 : last, clipElapsedMs: 0, fadeT: 0 };
+  return frameForIndex(items, durations, last, 0, elapsedMs, loop);
+}
+
+function frameForIndex(
+  items: Array<{ durationSec: number; transition: string }>,
+  durations: number[],
+  index: number,
+  clipElapsedMs: number,
+  _elapsedMs: number,
+  loop: boolean,
+): PreviewFrame {
+  const nextIndex = index + 1 < items.length ? index + 1 : loop ? 0 : index;
+  const prevIndex = index > 0 ? index - 1 : loop ? items.length - 1 : index;
+  const effect = asTransition(items[index]?.transition ?? "Fade");
+  const duration = durations[index] ?? 1000;
+  const windowMs = Math.min(PREVIEW_FADE_MS, duration);
+  const hasPrev = prevIndex !== index;
+  const canEnter = hasPrev && !isInstantTransition(effect) && windowMs > 0;
+  const progress = canEnter ? Math.min(1, Math.max(0, clipElapsedMs / windowMs)) : 1;
+  return {
+    index,
+    nextIndex,
+    prevIndex,
+    clipElapsedMs,
+    progress,
+    effect,
+  };
 }
 
 export function clipLabel(type: MediaType | string, filename: string): string {

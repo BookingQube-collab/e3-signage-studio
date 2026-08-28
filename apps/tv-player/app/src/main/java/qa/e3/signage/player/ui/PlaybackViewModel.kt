@@ -57,8 +57,9 @@ sealed class ZonePresentation {
         val key: String,
         val generation: Int,
         val loop: Boolean = false,
+        val transition: String = "CUT",
     ) : ZonePresentation()
-    data class Image(val fileUri: String, val key: String) : ZonePresentation()
+    data class Image(val fileUri: String, val key: String, val transition: String = "CUT") : ZonePresentation()
     data object Clock : ZonePresentation()
     data object Date : ZonePresentation()
     data object Empty : ZonePresentation()
@@ -233,9 +234,15 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     private fun presentationFor(item: ResolvedPlaylistItem?, videoGeneration: Int): ZonePresentation {
         if (item == null) return ZonePresentation.Empty
         return if (item.kind == PlaylistItemKind.VIDEO) {
-            ZonePresentation.Video(item.fileUri, item.mediaId + item.fileUri, videoGeneration, loop = false)
+            ZonePresentation.Video(
+                fileUri = item.fileUri,
+                key = item.mediaId + item.fileUri,
+                generation = videoGeneration,
+                loop = false,
+                transition = item.transition,
+            )
         } else {
-            ZonePresentation.Image(item.fileUri, item.mediaId + item.fileUri)
+            ZonePresentation.Image(item.fileUri, item.mediaId + item.fileUri, item.transition)
         }
     }
 

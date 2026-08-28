@@ -106,7 +106,19 @@ export interface Media {
 }
 
 export type PlaylistStatus = "Draft" | "Active" | "Scheduled" | "Archived";
-export type Transition = "Cut" | "Fade" | "Slide";
+export const UI_TRANSITIONS = [
+  "Cut",
+  "Fade",
+  "Dissolve",
+  "Slide",
+  "Slide right",
+  "Slide up",
+  "Slide down",
+  "Zoom",
+  "Wipe",
+  "None",
+] as const;
+export type Transition = (typeof UI_TRANSITIONS)[number];
 
 export interface PlaylistItem {
   id: string;

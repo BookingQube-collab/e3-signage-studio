@@ -24,6 +24,8 @@ import {
 test("infers mime from extension when the browser omits type", () => {
   assert.equal(inferMediaMime("hero.PNG", ""), "image/png");
   assert.equal(inferMediaMime("loop.mp4", "video/mp4"), "video/mp4");
+  assert.equal(inferMediaMime("WhatsApp Video.mp4", "application/octet-stream"), "video/mp4");
+  assert.equal(inferMediaMime("clip.mp4", ""), "video/mp4");
   assert.equal(inferMediaMime("bad.gif", "image/gif"), null);
 });
 

@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { UI_TRANSITIONS } from "@/types";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
@@ -184,7 +185,7 @@ function SettingsPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {["None", "Fade", "Slide", "Zoom"].map((t) => (
+                      {UI_TRANSITIONS.map((t) => (
                         <SelectItem key={t} value={t}>
                           {t}
                         </SelectItem>

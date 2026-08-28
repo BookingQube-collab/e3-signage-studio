@@ -74,7 +74,18 @@ export type MediaStatus = (typeof MEDIA_STATUSES)[number];
 export const PLAYLIST_STATUSES = ["DRAFT", "ACTIVE", "SCHEDULED", "ARCHIVED"] as const;
 export type PlaylistStatus = (typeof PLAYLIST_STATUSES)[number];
 
-export const TRANSITIONS = ["CUT", "FADE", "SLIDE", "ZOOM", "NONE"] as const;
+export const TRANSITIONS = [
+  "CUT",
+  "FADE",
+  "SLIDE",
+  "SLIDE_RIGHT",
+  "SLIDE_UP",
+  "SLIDE_DOWN",
+  "ZOOM",
+  "WIPE",
+  "DISSOLVE",
+  "NONE",
+] as const;
 export type Transition = (typeof TRANSITIONS)[number];
 
 export const ZONE_CONTENT_TYPES = [

@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 
 import { cn } from "@/lib/utils";
 import {
-  PREVIEW_FADE_MS,
+  elapsedOffsetForMedia,
   firstHttpUrl,
   previewFrameAt,
+  previewLayerStyle,
   type PreviewClip,
   type PreviewFrame,
 } from "@/lib/playlist-preview";
@@ -35,19 +36,21 @@ function FilenameFallback({
 function PreviewMedia({
   clip,
   className,
-  style,
+  active,
 }: {
   clip: PreviewClip;
   className?: string;
-  style?: CSSProperties;
+  active?: boolean;
 }) {
-  const initialSrc =
+  const playable =
     clip.kind === "video"
       ? firstHttpUrl(clip.previewUrl)
       : firstHttpUrl(clip.previewUrl, clip.thumbnailUrl);
-  const [src, setSrc] = useState<string | null>(initialSrc);
+  const [src, setSrc] = useState<string | null>(playable);
   const [failed, setFailed] = useState(false);
+  const [resolving, setResolving] = useState(!playable && isUuid(clip.mediaId));
   const retried = useRef(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     const next =
@@ -57,8 +60,17 @@ function PreviewMedia({
     setSrc(next);
     setFailed(false);
     retried.current = false;
-    if (next || !isUuid(clip.mediaId)) return;
+    if (next) {
+      setResolving(false);
+      return;
+    }
+    if (!isUuid(clip.mediaId)) {
+      setResolving(false);
+      setFailed(true);
+      return;
+    }
     let cancelled = false;
+    setResolving(true);
     void (async () => {
       try {
         const media = await mediaService.get(clip.mediaId);
@@ -68,12 +80,21 @@ function PreviewMedia({
             : firstHttpUrl(media?.previewUrl, media?.thumbnailUrl);
         if (!cancelled && url) {
           setSrc(url);
+          setResolving(false);
           return;
         }
         const fresh = await mediaService.downloadUrl(clip.mediaId);
-        if (!cancelled) setSrc(firstHttpUrl(fresh.url));
+        if (!cancelled) {
+          const signed = firstHttpUrl(fresh.url);
+          setSrc(signed);
+          setFailed(!signed);
+          setResolving(false);
+        }
       } catch {
-        if (!cancelled) setFailed(true);
+        if (!cancelled) {
+          setFailed(true);
+          setResolving(false);
+        }
       }
     })();
     return () => {
@@ -90,30 +111,58 @@ function PreviewMedia({
     try {
       const fresh = await mediaService.downloadUrl(clip.mediaId);
       const url = firstHttpUrl(fresh.url);
-      if (url) setSrc(url);
-      else setFailed(true);
+      if (url) {
+        setSrc(url);
+        setFailed(false);
+      } else {
+        setSrc(null);
+        setFailed(true);
+      }
     } catch {
+      setSrc(null);
       setFailed(true);
     }
   }
 
-  if (!src || failed) {
-    return <FilenameFallback filename={clip.filename} className={className} style={style} />;
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el || clip.kind !== "video") return;
+    if (active) {
+      void el.play().catch(() => undefined);
+    } else {
+      el.pause();
+    }
+  }, [active, src, clip.kind]);
+
+  if (failed && !src) {
+    return <FilenameFallback filename={clip.filename} className={className} />;
+  }
+
+  if (!src) {
+    return (
+      <div className={cn("grid size-full place-items-center bg-black", className)}>
+        {resolving ? <span className="sr-only">Loading preview</span> : null}
+      </div>
+    );
   }
 
   if (clip.kind === "video") {
     return (
       <video
+        ref={videoRef}
         key={`${clip.id}:${src}`}
         src={src}
         poster={firstHttpUrl(clip.thumbnailUrl) ?? undefined}
         className={cn("size-full object-contain", className)}
-        style={style}
         muted
         playsInline
-        autoPlay
+        autoPlay={active}
         loop={false}
+        preload="auto"
         referrerPolicy="no-referrer"
+        onEnded={(event) => {
+          event.currentTarget.pause();
+        }}
         onError={() => void refreshSignedUrl()}
       />
     );
@@ -124,10 +173,25 @@ function PreviewMedia({
       src={src}
       alt=""
       className={cn("size-full object-contain", className)}
-      style={style}
       referrerPolicy="no-referrer"
       onError={() => void refreshSignedUrl()}
     />
+  );
+}
+
+function ClipLayer({
+  clip,
+  style,
+  active,
+}: {
+  clip: PreviewClip;
+  style: CSSProperties;
+  active?: boolean;
+}) {
+  return (
+    <div className="absolute inset-0 will-change-transform" style={style}>
+      <PreviewMedia clip={clip} className="size-full" active={active} />
+    </div>
   );
 }
 
@@ -146,78 +210,82 @@ export function PlaylistLoopPreview({
 }) {
   const originMs = useMemo(() => {
     if (!startMediaId) return 0;
-    let acc = 0;
-    for (const clip of clips) {
-      if (clip.mediaId === startMediaId) return acc;
-      acc += Math.max(1, clip.durationSec) * 1000;
-    }
-    return 0;
+    return elapsedOffsetForMedia(clips, startMediaId);
   }, [clips, startMediaId]);
 
-  const clipKey = clips
-    .map(
-      (clip) =>
-        `${clip.id}:${clip.durationSec}:${clip.transition}:${clip.previewUrl ?? ""}:${clip.thumbnailUrl ?? ""}`,
-    )
-    .join("|");
+  const orderKey = clips.map((clip) => clip.id).join("|");
+  const fxKey = clips.map((clip) => `${clip.id}:${clip.transition}`).join("|");
   const [startedAt, setStartedAt] = useState(() => Date.now() - originMs);
   const [frame, setFrame] = useState<PreviewFrame | null>(() => previewFrameAt(clips, originMs, loop));
+  const orderRef = useRef(orderKey);
+  const fxRef = useRef(fxKey);
+  const countRef = useRef(clips.length);
 
   useEffect(() => {
     setStartedAt(Date.now() - originMs);
-  }, [clipKey, originMs]);
+  }, [originMs]);
+
+  useEffect(() => {
+    if (orderKey !== orderRef.current) {
+      const grew = clips.length > countRef.current;
+      orderRef.current = orderKey;
+      fxRef.current = fxKey;
+      countRef.current = clips.length;
+      const jumpId = grew ? clips[clips.length - 1]?.mediaId : startMediaId;
+      setStartedAt(Date.now() - elapsedOffsetForMedia(clips, jumpId));
+      return;
+    }
+    if (fxKey !== fxRef.current) {
+      const prev = fxRef.current.split("|");
+      fxRef.current = fxKey;
+      const changed = clips.find((clip, index) => prev[index] !== `${clip.id}:${clip.transition}`);
+      if (changed) setStartedAt(Date.now() - elapsedOffsetForMedia(clips, changed.mediaId));
+    }
+  }, [clips, fxKey, orderKey, startMediaId]);
 
   useEffect(() => {
     if (clips.length === 0) {
       setFrame(null);
       return;
     }
-    const tick = () => setFrame(previewFrameAt(clips, Date.now() - startedAt, loop));
+    let raf = 0;
+    const tick = () => {
+      setFrame(previewFrameAt(clips, Date.now() - startedAt, loop));
+      raf = window.requestAnimationFrame(tick);
+    };
     tick();
-    const id = window.setInterval(tick, 80);
-    return () => window.clearInterval(id);
+    return () => window.cancelAnimationFrame(raf);
   }, [clips, loop, startedAt]);
 
   const current = frame ? clips[frame.index] : undefined;
-  const incoming = frame && frame.fadeT > 0 ? clips[frame.nextIndex] : undefined;
+  const previous =
+    frame && frame.progress < 1 && frame.prevIndex !== frame.index ? clips[frame.prevIndex] : undefined;
 
   return (
     <div
       className={cn("relative overflow-hidden rounded-xl border border-border", className)}
       style={{ background: STAGE_BG }}
     >
-      <div className="relative aspect-video w-full bg-black">
-        {clips.length === 0 || !current ? (
+      <div className="relative aspect-video w-full overflow-hidden bg-black">
+        {clips.length === 0 || !current || !frame ? (
           <div className="grid size-full place-items-center text-center">
             <p className="text-sm text-muted-foreground">{emptyLabel}</p>
           </div>
         ) : (
           <>
-            <PreviewMedia
-              clip={current}
-              className="absolute inset-0 transition-opacity"
-              style={{
-                opacity: incoming ? 1 - frame.fadeT : 1,
-                transform:
-                  current.transition === "Slide" && incoming
-                    ? `translateX(${-12 * frame.fadeT}%)`
-                    : undefined,
-                transitionDuration: `${PREVIEW_FADE_MS}ms`,
-              }}
-            />
-            {incoming ? (
-              <PreviewMedia
-                clip={incoming}
-                className="absolute inset-0 transition-opacity"
-                style={{
-                  opacity: frame.fadeT,
-                  transform:
-                    current.transition === "Slide" ? `translateX(${12 * (1 - frame.fadeT)}%)` : undefined,
-                  transitionDuration: `${PREVIEW_FADE_MS}ms`,
-                }}
+            {previous ? (
+              <ClipLayer
+                clip={previous}
+                active={false}
+                style={previewLayerStyle("previous", frame.effect, frame.progress)}
               />
             ) : null}
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-3 py-2">
+            <ClipLayer
+              clip={current}
+              active
+              style={previewLayerStyle("current", frame.effect, frame.progress)}
+            />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/70 to-transparent px-3 py-2">
               <p className="truncate text-xs font-medium text-white">{current.filename}</p>
               <p className="text-[10px] tabular-nums text-white/70">
                 {current.durationSec}s · {current.transition}

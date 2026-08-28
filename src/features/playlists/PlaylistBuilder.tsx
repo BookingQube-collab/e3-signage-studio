@@ -26,12 +26,10 @@ import {
 } from "@/components/ui/select";
 import { mediaService, playlistService } from "@/services";
 import { isUuid } from "@/services/inventory-map";
-import type { Playlist, PlaylistItem, Transition } from "@/types";
+import { UI_TRANSITIONS, type Playlist, type PlaylistItem } from "@/types";
 import { bindPreviewClips, playlistItemThumbMedia } from "@/lib/playlist-preview";
 import { MediaPicker } from "@/features/media/MediaPicker";
 import { PlaylistLoopPreview } from "./PlaylistLoopPreview";
-
-const TRANSITIONS: Transition[] = ["Cut", "Fade", "Slide"];
 
 export function PlaylistBuilder({
   initial,
@@ -149,17 +147,6 @@ export function PlaylistBuilder({
                 Save Draft
               </E3Button>
             ) : null}
-            <E3Button
-              variant="outline"
-              onClick={() =>
-                document.getElementById("playlist-loop-preview")?.scrollIntoView({
-                  behavior: "smooth",
-                  block: "nearest",
-                })
-              }
-            >
-              Preview
-            </E3Button>
             {canManage ? (
               <E3Button
                 variant="primary"
@@ -271,14 +258,16 @@ export function PlaylistBuilder({
                     </div>
                     <Select
                       value={item.transition}
-                      onValueChange={(v) => patchItem(item.id, { transition: v as Transition })}
+                      onValueChange={(v) =>
+                        patchItem(item.id, { transition: v as PlaylistItem["transition"] })
+                      }
                       disabled={!canManage}
                     >
-                      <SelectTrigger className="h-9 w-28" aria-label="Transition">
+                      <SelectTrigger className="h-9 w-32" aria-label="Transition">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {TRANSITIONS.map((t) => (
+                        {UI_TRANSITIONS.map((t) => (
                           <SelectItem key={t} value={t}>
                             {t}
                           </SelectItem>

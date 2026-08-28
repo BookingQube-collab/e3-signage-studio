@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { firstHttpUrl } from "@/lib/playlist-preview";
 import type { Media } from "@/types";
 
 const iconFor = {
@@ -18,8 +19,20 @@ const iconFor = {
   Logo: Sparkles,
 } as const;
 
-export function MediaThumb({ item, className }: { item: Media; className?: string }) {
+export function MediaThumb({
+  item,
+  className,
+  playback = false,
+}: {
+  item: Media;
+  className?: string;
+  playback?: boolean;
+}) {
   const Icon = iconFor[item.type];
+  const poster = firstHttpUrl(item.thumbnailUrl);
+  const videoSrc = item.type === "Video" ? firstHttpUrl(item.previewUrl, item.thumbnailUrl) : null;
+  const imageSrc = item.type === "Video" ? poster : firstHttpUrl(item.thumbnailUrl, item.previewUrl);
+
   return (
     <div
       className={cn("grid place-items-center overflow-hidden rounded-xl bg-muted", className)}
@@ -28,11 +41,24 @@ export function MediaThumb({ item, className }: { item: Media; className?: strin
           (item.thumbnailHue + 60) % 360
         } 45% 14%))`,
       }}
-      aria-hidden
+      aria-hidden={!playback}
     >
-      {item.thumbnailUrl || item.previewUrl ? (
+      {videoSrc ? (
+        <video
+          src={videoSrc}
+          poster={poster && poster !== videoSrc ? poster : undefined}
+          className="size-full object-cover"
+          muted
+          playsInline
+          autoPlay={playback}
+          controls={playback}
+          loop={playback}
+          preload={playback ? "auto" : "metadata"}
+          referrerPolicy="no-referrer"
+        />
+      ) : imageSrc ? (
         <img
-          src={item.thumbnailUrl || item.previewUrl}
+          src={imageSrc}
           alt=""
           width={320}
           height={180}

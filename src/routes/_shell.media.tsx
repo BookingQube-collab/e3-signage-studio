@@ -952,7 +952,7 @@ function MediaPage() {
                 if (file && selected) replace.mutate({ id: selected.id, file });
               }}
             />
-            <MediaThumb item={selected} className="aspect-video w-full" />
+            <MediaThumb item={selected} playback className="aspect-video w-full" />
 
             <div className="flex gap-2">
               <div className="flex-1 space-y-2">

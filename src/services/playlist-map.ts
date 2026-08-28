@@ -1,7 +1,7 @@
 import { invert, UI_LABELS } from "@e3/shared-types";
 import type { MediaType, PlaylistStatus, Transition } from "@e3/shared-types";
 
-import type { Playlist } from "@/types";
+import { UI_TRANSITIONS, type Playlist } from "@/types";
 
 export const PLAYLIST_STATUS_FROM_UI = invert(UI_LABELS.playlistStatus);
 export const TRANSITION_FROM_UI = invert(UI_LABELS.transition);
@@ -48,10 +48,9 @@ export function toUiPlaylist(row: PlaylistRecord): Playlist {
     status: playlistStatusLabel(row?.status),
     items: items.map((item) => {
       const transitionLabel = item?.transition ? UI_LABELS.transition[item.transition] : undefined;
-      const transition =
-        transitionLabel === "Cut" || transitionLabel === "Fade" || transitionLabel === "Slide"
-          ? transitionLabel
-          : "Fade";
+      const transition = (UI_TRANSITIONS as readonly string[]).includes(transitionLabel ?? "")
+        ? (transitionLabel as Playlist["items"][number]["transition"])
+        : "Fade";
       const mapped: Playlist["items"][number] = {
         id: typeof item?.id === "string" ? item.id : "",
         mediaId: typeof item?.mediaId === "string" ? item.mediaId : "",

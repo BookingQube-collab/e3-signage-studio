@@ -118,10 +118,11 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
   });
 }
 
-function localImagePreview(file: File): string | undefined {
+function localMediaPreview(file: File): string | undefined {
   if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") return undefined;
-  if (!(file.type.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(file.name))) return undefined;
-  return URL.createObjectURL(file);
+  if (file.type.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(file.name)) return URL.createObjectURL(file);
+  if (file.type.startsWith("video/") || /\.mp4$/i.test(file.name)) return URL.createObjectURL(file);
+  return undefined;
 }
 
 async function uploadOne(
@@ -191,7 +192,7 @@ async function uploadOne(
       height: probe.height,
       durationMs: probe.durationMs,
       checksumSha256,
-      thumbnailUrl: localImagePreview(file),
+      thumbnailUrl: localMediaPreview(file),
       versionNumber: intent.versionNumber,
     });
     onProgress?.(100, mediaId ? undefined : optimistic);

@@ -529,7 +529,7 @@ export async function listMedia(accessToken: string): Promise<MediaRecord[]> {
         usage.mediaIds.has(row.id),
       ),
     );
-  return toRecords(client, rows);
+  return toRecords(client, rows, true);
 }
 
 export async function getMedia(accessToken: string, id: string): Promise<MediaRecord | null> {

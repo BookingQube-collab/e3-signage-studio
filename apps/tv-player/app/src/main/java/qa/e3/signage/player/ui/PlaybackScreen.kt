@@ -2,7 +2,10 @@ package qa.e3.signage.player.ui
 
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.view.LayoutInflater
 import android.view.ViewGroup
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -20,8 +23,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -39,8 +45,13 @@ import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import qa.e3.signage.player.R
 import qa.e3.signage.player.core.FitMode
+import qa.e3.signage.player.core.ITEM_TRANSITION_MS
+import qa.e3.signage.player.core.ItemTransition
 import qa.e3.signage.player.core.exoResizeMode
+import qa.e3.signage.player.core.isInstant
+import qa.e3.signage.player.core.parseItemTransition
 import qa.e3.signage.player.core.requireLocalPlaybackUri
 import java.io.File
 import java.time.ZoneId
@@ -73,25 +84,140 @@ fun PlaybackScreen(state: PlaybackUiState, onVideoFinished: (Int, Boolean) -> Un
                         .offset { IntOffset(zone.x, zone.y) }
                         .size(widthDp, heightDp),
                 ) {
-                    ZoneContent(zone, state.timezone, onVideoFinished)
+                    TransitioningZone(zone, state.timezone, onVideoFinished)
                 }
             }
         }
     }
 }
 
+private fun ZonePresentation.layerKey(): String = when (this) {
+    is ZonePresentation.Video -> "v:$fileUri:$generation"
+    is ZonePresentation.Image -> "i:$fileUri:$key"
+    ZonePresentation.Clock -> "clock"
+    ZonePresentation.Date -> "date"
+    ZonePresentation.Empty -> "empty"
+}
+
+private fun ZonePresentation.itemTransition(): ItemTransition = when (this) {
+    is ZonePresentation.Video -> parseItemTransition(transition)
+    is ZonePresentation.Image -> parseItemTransition(transition)
+    else -> ItemTransition.CUT
+}
+
 @Composable
-private fun ZoneContent(zone: ZoneUiState, timezone: String, onVideoFinished: (Int, Boolean) -> Unit) {
-    when (val presentation = zone.presentation) {
+private fun TransitioningZone(zone: ZoneUiState, timezone: String, onVideoFinished: (Int, Boolean) -> Unit) {
+    val presentation = zone.presentation
+    var outgoing by remember { mutableStateOf<ZonePresentation?>(null) }
+    var incoming by remember { mutableStateOf(presentation) }
+    val progress = remember { Animatable(1f) }
+
+    LaunchedEffect(presentation.layerKey()) {
+        if (incoming.layerKey() == presentation.layerKey()) {
+            incoming = presentation
+            return@LaunchedEffect
+        }
+        outgoing = incoming
+        incoming = presentation
+        val effect = presentation.itemTransition()
+        if (effect.isInstant() || outgoing == null) {
+            progress.snapTo(1f)
+            outgoing = null
+        } else {
+            progress.snapTo(0f)
+            progress.animateTo(1f, tween(ITEM_TRANSITION_MS))
+            outgoing = null
+        }
+    }
+
+    Box(Modifier.fillMaxSize().clipToBounds()) {
+        val out = outgoing
+        val t = progress.value
+        val effect = incoming.itemTransition()
+        if (out != null) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .itemEnterLayer(LayerRole.PREVIOUS, effect, t),
+            ) {
+                ZoneMedia(out, zone.fit, timezone, onVideoFinished)
+            }
+        }
+        Box(
+            Modifier
+                .fillMaxSize()
+                .itemEnterLayer(LayerRole.CURRENT, effect, t),
+        ) {
+            ZoneMedia(incoming, zone.fit, timezone, onVideoFinished)
+        }
+    }
+}
+
+private enum class LayerRole { CURRENT, PREVIOUS }
+
+private fun Modifier.itemEnterLayer(role: LayerRole, effect: ItemTransition, progress: Float): Modifier {
+    val t = progress.coerceIn(0f, 1f)
+    val eased = 1f - (1f - t) * (1f - t) * (1f - t)
+    val incoming = role == LayerRole.CURRENT
+    val wipe = this.then(
+        if (effect == ItemTransition.WIPE && incoming) {
+            Modifier.drawWithContent {
+                clipRect(left = 0f, top = 0f, right = size.width * t, bottom = size.height) {
+                    this@drawWithContent.drawContent()
+                }
+            }
+        } else {
+            Modifier
+        },
+    )
+    return wipe.graphicsLayer {
+        when (effect) {
+            ItemTransition.CUT -> alpha = if (incoming) 1f else 0f
+            ItemTransition.FADE, ItemTransition.DISSOLVE -> alpha = if (incoming) t else 1f - t
+            ItemTransition.SLIDE -> {
+                alpha = 1f
+                translationX = if (incoming) size.width * (1f - eased) else -size.width * eased
+            }
+            ItemTransition.SLIDE_RIGHT -> {
+                alpha = 1f
+                translationX = if (incoming) -size.width * (1f - eased) else size.width * eased
+            }
+            ItemTransition.SLIDE_UP -> {
+                alpha = 1f
+                translationY = if (incoming) size.height * (1f - eased) else -size.height * eased
+            }
+            ItemTransition.SLIDE_DOWN -> {
+                alpha = 1f
+                translationY = if (incoming) -size.height * (1f - eased) else size.height * eased
+            }
+            ItemTransition.ZOOM -> {
+                alpha = if (incoming) t else 1f - t
+                val s = if (incoming) 0.78f + 0.22f * t else 1f + 0.14f * t
+                scaleX = s
+                scaleY = s
+            }
+            ItemTransition.WIPE -> alpha = 1f
+        }
+    }
+}
+
+@Composable
+private fun ZoneMedia(
+    presentation: ZonePresentation,
+    fit: FitMode,
+    timezone: String,
+    onVideoFinished: (Int, Boolean) -> Unit,
+) {
+    when (presentation) {
         is ZonePresentation.Video -> LocalVideoZone(
             fileUri = presentation.fileUri,
             key = presentation.key,
             generation = presentation.generation,
             loop = presentation.loop,
-            fit = zone.fit,
+            fit = fit,
             onFinished = onVideoFinished,
         )
-        is ZonePresentation.Image -> LocalImageZone(presentation.fileUri, zone.fit)
+        is ZonePresentation.Image -> LocalImageZone(presentation.fileUri, fit)
         ZonePresentation.Clock -> ClockZone(timezone, "HH:mm")
         ZonePresentation.Date -> ClockZone(timezone, "dd MMM yyyy")
         ZonePresentation.Empty -> Box(Modifier.fillMaxSize())
@@ -140,7 +266,7 @@ private fun LocalVideoZone(
     }
     AndroidView(
         factory = { ctx ->
-            PlayerView(ctx).apply {
+            (LayoutInflater.from(ctx).inflate(R.layout.player_texture, null, false) as PlayerView).apply {
                 useController = false
                 controllerAutoShow = false
                 setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
