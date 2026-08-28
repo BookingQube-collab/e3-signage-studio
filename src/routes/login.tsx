@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { clearSessionFn, getAuthSessionFn, persistSessionFn, resolveLoginIdentifierFn } from "@/lib/auth-functions";
 import { getPublicCmsUrl } from "@/lib/cms-settings";
 import {
+  emailAfterUsernameLookup,
   LOGIN_AUTH_WAIT_MS,
   LOGIN_PAGE_CONFIG_WAIT_MS,
   LOGIN_PAGE_SESSION_WAIT_MS,
@@ -19,6 +20,11 @@ import {
   redirectToDashboard,
   shouldSkipLoginSessionRedirect,
 } from "@/lib/login-flow";
+import {
+  peekBrowserAccessToken,
+  seedBrowserAuthSession,
+  signInWithPasswordGrant,
+} from "@/lib/password-grant";
 import { getPublicSupabaseConfigFn } from "@/lib/public-config-functions";
 import { consumeSignedOutFlag, withTimeout } from "@/lib/sign-out";
 import {
@@ -56,7 +62,9 @@ export const Route = createFileRoute("/login")({
       void withTimeout(clearSessionFn(), 800);
       return;
     }
-    const accessToken = (await withTimeout(getBrowserAccessToken(), LOGIN_PAGE_TOKEN_WAIT_MS)) ?? "";
+    const accessToken =
+      peekBrowserAccessToken() ||
+      ((await withTimeout(getBrowserAccessToken(), LOGIN_PAGE_TOKEN_WAIT_MS)) ?? "");
     if (shouldSkipLoginSessionRedirect({ signedOutFlag: false, accessToken })) return;
     const auth = await withTimeout(
       getAuthSessionFn({ data: { accessToken } }),
@@ -73,20 +81,6 @@ export const Route = createFileRoute("/login")({
   },
   component: LoginPage,
 });
-
-function mapLoginError(message: string): string {
-  const lower = message.toLowerCase();
-  if (lower.includes("invalid login") || lower.includes("invalid credentials")) {
-    return "Invalid username, email, or password.";
-  }
-  if (lower.includes("email not confirmed")) {
-    return "Confirm your email before signing in.";
-  }
-  if (lower.includes("failed to fetch") || lower.includes("network")) {
-    return "Network error. Check your connection.";
-  }
-  return message || "Could not sign in.";
-}
 
 function LoginPage() {
   const { publicSupabase } = Route.useLoaderData();
@@ -132,35 +126,18 @@ function LoginPage() {
         setError("Too many sign-in attempts. Try again in a few minutes.");
         return;
       }
-      if (!identity?.email) {
-        setError("Could not look up that username. Try again.");
+      const email = emailAfterUsernameLookup(trimmed, identity);
+      const grant = await signInWithPasswordGrant(config, email, password, LOGIN_AUTH_WAIT_MS);
+      if (!grant.ok) {
+        setError(grant.message);
         return;
       }
-      const authResult = await withTimeout(
-        getSupabase().auth.signInWithPassword({
-          email: identity.email,
-          password,
-        }),
-        LOGIN_AUTH_WAIT_MS,
-      );
-      if (!authResult) {
-        setError("Sign-in timed out. Try again.");
-        return;
-      }
-      const { data, error: signError } = authResult;
-      if (signError) {
-        setError(mapLoginError(signError.message));
-        return;
-      }
-      if (!data.session) {
-        setError("Confirm your email before signing in.");
-        return;
-      }
+      seedBrowserAuthSession(config.url, grant.session);
       await withTimeout(
         persistSessionFn({
           data: {
-            accessToken: data.session.access_token,
-            refreshToken: data.session.refresh_token,
+            accessToken: grant.session.access_token,
+            refreshToken: grant.session.refresh_token,
           },
         }),
         LOGIN_PERSIST_WAIT_MS,

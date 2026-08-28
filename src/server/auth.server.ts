@@ -29,8 +29,9 @@ import {
   looksLikeEmail,
   normalizeUsername,
 } from "@/lib/user-credentials";
-import { clearAuthCookies, readAuthCookies, setAuthCookies } from "./session-cookies.server";
+import { jwtExpiresWithinMs } from "@/lib/jwt-expiry";
 import { ensureSeedLocations } from "./location-seed.server";
+import { clearAuthCookies, readAuthCookies, setAuthCookies } from "./session-cookies.server";
 import { getServiceRoleClient, getUserClient } from "./supabase.server";
 
 const MESSAGES: Record<Exclude<AuthFailure["code"], "UNAUTHENTICATED">, string> = {
@@ -188,7 +189,7 @@ export async function resolveAuthFromRequest(
 
   try {
     const client = getUserClient(accessToken);
-    if (refreshToken) {
+    if (refreshToken && jwtExpiresWithinMs(accessToken, 120_000)) {
       const { data: refreshed, error: refreshError } = await client.auth.setSession({
         access_token: accessToken,
         refresh_token: refreshToken,
