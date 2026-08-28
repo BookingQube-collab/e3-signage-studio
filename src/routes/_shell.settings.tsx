@@ -3,7 +3,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ImageIcon, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import type { WaitingScreenBrand } from "@e3/shared-types";
 
+import fullLogo from "@/assets/e3-full-logo.png";
+import e3Icon from "@/assets/e3-icon.png";
 import { PermissionDenied } from "@/components/auth/PermissionDenied";
 import {
   E3Button,
@@ -40,6 +43,16 @@ import { cn } from "@/lib/utils";
 import { mediaService } from "@/services";
 import { UI_TRANSITIONS } from "@/types";
 import type { Media } from "@/types";
+
+const WAITING_BRAND_OPTIONS: ReadonlyArray<{
+  value: WaitingScreenBrand;
+  label: string;
+  hint: string;
+}> = [
+  { value: "FULL_LOGO", label: "Full logo", hint: "E3 mark + company wordmark" },
+  { value: "ICON", label: "E3 icon", hint: "Monogram only" },
+  { value: "CUSTOM", label: "Custom image", hint: "From media library" },
+];
 
 export const Route = createFileRoute("/_shell/settings")({
   head: () => ({
@@ -84,6 +97,7 @@ function SettingsEditor({ canManage }: { canManage: boolean }) {
   const [settings, setSettings] = useState(DEFAULT_CMS_SETTINGS);
   const { org, playback, sync, notify, publicCmsUrl } = settings;
 
+  const [waitingBrand, setWaitingBrand] = useState<WaitingScreenBrand>("FULL_LOGO");
   const [waitingTitle, setWaitingTitle] = useState("");
   const [waitingMessage, setWaitingMessage] = useState("");
   const [waitingMediaId, setWaitingMediaId] = useState<string | null>(null);
@@ -125,6 +139,7 @@ function SettingsEditor({ canManage }: { canManage: boolean }) {
   useEffect(() => {
     const waiting = orgSettingsQuery.data?.waitingScreen;
     if (!waiting) return;
+    setWaitingBrand(waiting.brand ?? "FULL_LOGO");
     setWaitingTitle(waiting.title ?? "");
     setWaitingMessage(waiting.message ?? "");
     setWaitingMediaId(waiting.mediaId);
@@ -138,7 +153,8 @@ function SettingsEditor({ canManage }: { canManage: boolean }) {
       return updateWaitingScreenSettingsFn({
         data: {
           accessToken,
-          mediaId: waitingMediaId,
+          brand: waitingBrand,
+          mediaId: waitingBrand === "CUSTOM" ? waitingMediaId : null,
           title: waitingTitle.trim() || null,
           message: waitingMessage.trim() || null,
         },
@@ -347,51 +363,96 @@ function SettingsEditor({ canManage }: { canManage: boolean }) {
                 <div>
                   <p className="text-sm font-medium">Default waiting screen</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Shown on paired TVs until an active campaign package is playing. Leave blank to
-                    keep the built-in E3 branded hold screen.
+                    Shown on paired TVs until an active campaign package is playing. Choose the
+                    on-screen brand mark, or upload a custom image from the media library.
                   </p>
                 </div>
 
+                <div className="space-y-2">
+                  <Label>On-screen brand</Label>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {WAITING_BRAND_OPTIONS.map((option) => {
+                      const selected = waitingBrand === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          disabled={!canManage || orgSettingsQuery.isLoading}
+                          onClick={() => setWaitingBrand(option.value)}
+                          className={cn(
+                            "rounded-lg border px-3 py-3 text-left transition-colors",
+                            selected
+                              ? "border-e3-purple bg-e3-purple/10"
+                              : "border-border bg-background hover:border-muted-foreground/40",
+                            !canManage && "cursor-not-allowed opacity-60",
+                          )}
+                        >
+                          <p className="text-sm font-medium">{option.label}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">{option.hint}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 <div className="flex flex-wrap items-start gap-4">
-                  <div className="relative aspect-video w-full max-w-xs overflow-hidden rounded-lg border border-border bg-muted">
-                    {waitingThumb ? (
+                  <div className="relative aspect-video w-full max-w-xs overflow-hidden rounded-lg border border-border bg-black">
+                    {waitingBrand === "CUSTOM" && waitingThumb ? (
                       <img
                         src={waitingThumb}
                         alt={waitingMediaName ?? "Waiting screen"}
                         className="size-full object-cover"
                       />
+                    ) : waitingBrand === "ICON" ? (
+                      <div className="flex size-full items-center justify-center p-6">
+                        <img src={e3Icon} alt="E3 icon" className="max-h-full w-auto object-contain" />
+                      </div>
+                    ) : waitingBrand === "FULL_LOGO" ? (
+                      <div className="flex size-full items-center justify-center p-4">
+                        <img
+                          src={fullLogo}
+                          alt="E3 full logo"
+                          className="max-h-full w-auto object-contain"
+                        />
+                      </div>
                     ) : (
                       <div className="flex size-full flex-col items-center justify-center gap-2 text-muted-foreground">
                         <ImageIcon className="size-8 opacity-60" aria-hidden />
-                        <span className="text-xs">E3 branded default</span>
+                        <span className="text-xs">Choose a custom image</span>
                       </div>
                     )}
                   </div>
-                  <div className="flex flex-col gap-2">
-                    <E3Button
-                      type="button"
-                      variant="secondary"
-                      disabled={!canManage || orgSettingsQuery.isLoading}
-                      onClick={() => setPickerOpen(true)}
-                    >
-                      Choose image
-                    </E3Button>
-                    {waitingMediaId ? (
+                  {waitingBrand === "CUSTOM" ? (
+                    <div className="flex flex-col gap-2">
                       <E3Button
                         type="button"
-                        variant="ghost"
-                        disabled={!canManage}
-                        onClick={clearMedia}
+                        variant="secondary"
+                        disabled={!canManage || orgSettingsQuery.isLoading}
+                        onClick={() => setPickerOpen(true)}
                       >
-                        <X className="size-4" /> Clear image
+                        Choose image
                       </E3Button>
-                    ) : null}
-                    {waitingMediaName ? (
-                      <p className="max-w-xs truncate text-xs text-muted-foreground">
-                        {waitingMediaName}
-                      </p>
-                    ) : null}
-                  </div>
+                      {waitingMediaId ? (
+                        <E3Button
+                          type="button"
+                          variant="ghost"
+                          disabled={!canManage}
+                          onClick={clearMedia}
+                        >
+                          <X className="size-4" /> Clear image
+                        </E3Button>
+                      ) : null}
+                      {waitingMediaName ? (
+                        <p className="max-w-xs truncate text-xs text-muted-foreground">
+                          {waitingMediaName}
+                        </p>
+                      ) : (
+                        <p className="max-w-xs text-xs text-muted-foreground">
+                          Without an image, TVs fall back to the full logo.
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-1">

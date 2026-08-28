@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
-import logo from "@/assets/e3-logo.png";
+import logo from "@/assets/e3-icon.png";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -84,7 +84,7 @@ function Brand({ collapsed }: { collapsed?: boolean }) {
         src={logo}
         alt="E3"
         width={40}
-        height={27}
+        height={29}
         fetchPriority="high"
         decoding="async"
         className="h-7 w-auto shrink-0"

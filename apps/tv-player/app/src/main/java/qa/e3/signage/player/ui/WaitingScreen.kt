@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -26,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -36,6 +38,8 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import qa.e3.signage.player.R
+import qa.e3.signage.player.core.WaitingScreenBrand
 import java.io.File
 
 enum class WaitingKind {
@@ -52,6 +56,7 @@ data class WaitingCopy(
 )
 
 data class WaitingOverrides(
+    val brand: WaitingScreenBrand = WaitingScreenBrand.FULL_LOGO,
     val localImagePath: String? = null,
     val title: String? = null,
     val message: String? = null,
@@ -110,7 +115,9 @@ fun WaitingScreen(kind: WaitingKind, overrides: WaitingOverrides = WaitingOverri
         }
     }
     val quip = copy.quips[quipIndex % copy.quips.size]
-    val imagePath = overrides.localImagePath
+    val useCustom =
+        overrides.brand == WaitingScreenBrand.CUSTOM && !overrides.localImagePath.isNullOrBlank()
+    val imagePath = if (useCustom) overrides.localImagePath else null
     var bitmap by remember(imagePath) { mutableStateOf<android.graphics.Bitmap?>(null) }
     LaunchedEffect(imagePath) {
         bitmap = withContext(Dispatchers.IO) {
@@ -120,8 +127,15 @@ fun WaitingScreen(kind: WaitingKind, overrides: WaitingOverrides = WaitingOverri
         }
     }
 
+    val brand =
+        when {
+            useCustom && bitmap != null -> WaitingScreenBrand.CUSTOM
+            overrides.brand == WaitingScreenBrand.ICON -> WaitingScreenBrand.ICON
+            else -> WaitingScreenBrand.FULL_LOGO
+        }
+
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        if (bitmap != null) {
+        if (brand == WaitingScreenBrand.CUSTOM && bitmap != null) {
             Image(
                 bitmap = bitmap!!.asImageBitmap(),
                 contentDescription = null,
@@ -133,17 +147,40 @@ fun WaitingScreen(kind: WaitingKind, overrides: WaitingOverrides = WaitingOverri
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.45f)),
             )
-            WaitingCopyColumn(copy, quip)
+            WaitingCopyColumn(copy, quip, showTextBrand = false)
         } else {
             E3BrandStage {
-                WaitingCopyColumn(copy, quip)
+                WaitingCopyColumn(copy, quip, showTextBrand = false) {
+                    WaitingBrandMark(brand)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun WaitingCopyColumn(copy: WaitingCopy, quip: String) {
+private fun WaitingBrandMark(brand: WaitingScreenBrand) {
+    val resId =
+        if (brand == WaitingScreenBrand.ICON) R.drawable.e3_icon else R.drawable.e3_full_logo
+    val maxHeight = if (brand == WaitingScreenBrand.ICON) 140.dp else 120.dp
+    Image(
+        painter = painterResource(resId),
+        contentDescription = "E3",
+        contentScale = ContentScale.Fit,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(maxHeight)
+            .padding(horizontal = 24.dp),
+    )
+}
+
+@Composable
+private fun WaitingCopyColumn(
+    copy: WaitingCopy,
+    quip: String,
+    showTextBrand: Boolean,
+    brandSlot: (@Composable () -> Unit)? = null,
+) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
@@ -153,24 +190,28 @@ private fun WaitingCopyColumn(copy: WaitingCopy, quip: String) {
                 contentDescription = "${copy.headline}. ${copy.body}"
             },
     ) {
-        Text(
-            text = "E3",
-            style = TextStyle(
-                brush = E3Gradient,
+        if (brandSlot != null) {
+            brandSlot()
+        } else if (showTextBrand) {
+            Text(
+                text = "E3",
+                style = TextStyle(
+                    brush = E3Gradient,
+                    fontFamily = Rajdhani,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 72.sp,
+                    letterSpacing = 8.sp,
+                ),
+            )
+            Text(
+                text = "DIGITAL SIGNAGE",
+                color = Color.White,
                 fontFamily = Rajdhani,
-                fontWeight = FontWeight.Bold,
-                fontSize = 72.sp,
-                letterSpacing = 8.sp,
-            ),
-        )
-        Text(
-            text = "DIGITAL SIGNAGE",
-            color = Color.White,
-            fontFamily = Rajdhani,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 22.sp,
-            letterSpacing = 10.sp,
-        )
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 22.sp,
+                letterSpacing = 10.sp,
+            )
+        }
         Spacer(Modifier.height(28.dp))
         Text(
             text = copy.kicker,

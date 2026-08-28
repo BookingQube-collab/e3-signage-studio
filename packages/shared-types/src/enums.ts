@@ -161,3 +161,7 @@ export const EVENT_LOCATION_TYPES: readonly LocationType[] = [
   "OUTDOOR_EVENT",
   "ACTIVATION",
 ];
+
+/** Brand mark shown on TV waiting / idle screens when no campaign is playing. */
+export const WAITING_SCREEN_BRANDS = ["FULL_LOGO", "ICON", "CUSTOM"] as const;
+export type WaitingScreenBrand = (typeof WAITING_SCREEN_BRANDS)[number];

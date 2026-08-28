@@ -2,7 +2,7 @@ import { createFileRoute, redirect, useNavigate, useRouter } from "@tanstack/rea
 import { useState } from "react";
 import { toast } from "sonner";
 
-import logo from "@/assets/e3-logo.png";
+import logo from "@/assets/e3-icon.png";
 import { E3Button } from "@/components/e3/E3Button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -198,10 +198,10 @@ function LoginPage() {
             src={logo}
             alt="E3"
             width={160}
-            height={108}
+            height={115}
             fetchPriority="high"
             decoding="async"
-            className="mx-auto h-14 w-auto"
+            className="mx-auto h-16 w-auto"
           />
           <h1 className="font-display mt-6 text-2xl font-bold uppercase leading-tight tracking-[0.22em]">
             Digital Signage

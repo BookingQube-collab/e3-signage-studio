@@ -40,7 +40,15 @@ data class ActivateResponse(
 )
 
 @Serializable
+enum class WaitingScreenBrand {
+    FULL_LOGO,
+    ICON,
+    CUSTOM,
+}
+
+@Serializable
 data class WaitingScreenConfig(
+    val brand: WaitingScreenBrand = WaitingScreenBrand.FULL_LOGO,
     val mediaId: String? = null,
     val version: Int? = null,
     val checksum: String? = null,

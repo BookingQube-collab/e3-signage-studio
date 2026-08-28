@@ -56,7 +56,7 @@ Open **`apps/tv-player`** (not the repo root) in Android Studio, or point Cursor
 - Layout zones scale to the physical display (FIT / FILL / COVER / CONTAIN / STRETCH)
 - Local schedule windows use the campaign timezone (default Asia/Qatar)
 - No admin chrome, titles, or player controls
-- Until an ACTIVE package exists, the player shows a branded E3 waiting screen (not a blank black frame). Admins can override the image and copy from CMS **Settings → Playback → Default waiting screen**; unset fields keep the built-in E3 hold screen.
+- Until an ACTIVE package exists, the player shows a branded E3 waiting screen (not a blank black frame). Admins choose **Full logo** (default), **E3 icon**, or a **custom image** under CMS **Settings → Playback → Default waiting screen**; optional headline/message still apply.
 
 ## Build / sideload
 

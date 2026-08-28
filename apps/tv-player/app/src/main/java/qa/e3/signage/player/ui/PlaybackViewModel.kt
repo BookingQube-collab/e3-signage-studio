@@ -91,6 +91,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             app.container.waitingScreen.state.collect { waiting ->
                 val overrides = WaitingOverrides(
+                    brand = waiting.brand,
                     localImagePath = waiting.localImagePath,
                     title = waiting.title,
                     message = waiting.message,
@@ -215,6 +216,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     private fun waitingOverrides(): WaitingOverrides {
         val waiting = app.container.waitingScreen.state.value
         return WaitingOverrides(
+            brand = waiting.brand,
             localImagePath = waiting.localImagePath,
             title = waiting.title,
             message = waiting.message,

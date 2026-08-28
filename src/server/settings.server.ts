@@ -1,3 +1,6 @@
+import type { WaitingScreenBrand } from "@e3/shared-types";
+import { WAITING_SCREEN_BRANDS } from "@e3/shared-types";
+
 import { requireCmsPermission } from "@/server/auth.server";
 import { DOWNLOAD_URL_TTL_SECONDS, createObjectDownloadUrls } from "@/server/storage.server";
 import { getServiceRoleClient, getUserClient } from "@/server/supabase.server";
@@ -6,6 +9,7 @@ const TITLE_MAX = 120;
 const MESSAGE_MAX = 500;
 
 export type WaitingScreenSettings = {
+  brand: WaitingScreenBrand;
   mediaId: string | null;
   mediaName: string | null;
   thumbnailUrl: string | null;
@@ -26,6 +30,13 @@ function asNullableString(value: unknown): string | null {
 
 function asNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeBrand(value: unknown): WaitingScreenBrand {
+  if (typeof value === "string" && (WAITING_SCREEN_BRANDS as readonly string[]).includes(value)) {
+    return value as WaitingScreenBrand;
+  }
+  return "FULL_LOGO";
 }
 
 function normalizeTitle(value: string | null | undefined): string | null {
@@ -97,20 +108,25 @@ export async function getOrganizationSettings(accessToken: string): Promise<Orga
   const { data, error } = await client
     .from("organization_settings")
     .select(
-      "default_waiting_media_id, default_waiting_title, default_waiting_message, waiting_config_version",
+      "default_waiting_brand, default_waiting_media_id, default_waiting_title, default_waiting_message, waiting_config_version",
     )
     .eq("organization_id", auth.profile.organizationId)
     .maybeSingle();
   if (error) throw new Error(error.message || "Could not load organization settings.");
 
-  const mediaId = asNullableString(
-    (data as { default_waiting_media_id?: string | null } | null)?.default_waiting_media_id,
-  );
+  const brand = normalizeBrand((data as { default_waiting_brand?: string | null } | null)?.default_waiting_brand);
+  const mediaId =
+    brand === "CUSTOM"
+      ? asNullableString(
+          (data as { default_waiting_media_id?: string | null } | null)?.default_waiting_media_id,
+        )
+      : null;
   const admin = getServiceRoleClient();
   const preview = await loadWaitingMediaPreview(admin, mediaId);
 
   return {
     waitingScreen: {
+      brand,
       mediaId,
       mediaName: preview.mediaName,
       thumbnailUrl: preview.thumbnailUrl,
@@ -134,6 +150,7 @@ export async function getOrganizationSettings(accessToken: string): Promise<Orga
 export async function updateWaitingScreenSettings(
   accessToken: string,
   input: {
+    brand: WaitingScreenBrand;
     mediaId: string | null;
     title: string | null;
     message: string | null;
@@ -144,7 +161,8 @@ export async function updateWaitingScreenSettings(
   const organizationId = auth.profile.organizationId;
   await ensureOrgSettingsRow(admin, organizationId);
 
-  const mediaId = input.mediaId;
+  const brand = normalizeBrand(input.brand);
+  let mediaId = brand === "CUSTOM" ? input.mediaId : null;
   if (mediaId) {
     const { data: media, error } = await admin
       .from("media")
@@ -182,6 +200,7 @@ export async function updateWaitingScreenSettings(
   const { error: updateError } = await admin
     .from("organization_settings")
     .update({
+      default_waiting_brand: brand,
       default_waiting_media_id: mediaId,
       default_waiting_title: title,
       default_waiting_message: message,
@@ -214,6 +233,7 @@ export async function updateWaitingScreenSettings(
 }
 
 export type DeviceWaitingScreenPayload = {
+  brand: WaitingScreenBrand;
   mediaId: string | null;
   version: number | null;
   checksum: string | null;
@@ -232,7 +252,7 @@ export async function loadDeviceWaitingScreen(
   const { data } = await admin
     .from("organization_settings")
     .select(
-      "default_waiting_media_id, default_waiting_title, default_waiting_message, waiting_config_version",
+      "default_waiting_brand, default_waiting_media_id, default_waiting_title, default_waiting_message, waiting_config_version",
     )
     .eq("organization_id", organizationId)
     .maybeSingle();
@@ -247,11 +267,13 @@ export async function loadDeviceWaitingScreen(
   const message = asNullableString(
     (data as { default_waiting_message?: string | null } | null)?.default_waiting_message,
   );
+  let brand = normalizeBrand((data as { default_waiting_brand?: string | null } | null)?.default_waiting_brand);
   const mediaId = asNullableString(
     (data as { default_waiting_media_id?: string | null } | null)?.default_waiting_media_id,
   );
 
-  const empty: DeviceWaitingScreenPayload = {
+  const empty = (resolvedBrand: WaitingScreenBrand): DeviceWaitingScreenPayload => ({
+    brand: resolvedBrand,
     mediaId: null,
     version: null,
     checksum: null,
@@ -261,9 +283,10 @@ export async function loadDeviceWaitingScreen(
     title,
     message,
     configVersion,
-  };
+  });
 
-  if (!mediaId) return empty;
+  if (brand !== "CUSTOM") return empty(brand);
+  if (!mediaId) return empty("FULL_LOGO");
 
   const { data: media } = await admin
     .from("media")
@@ -272,30 +295,31 @@ export async function loadDeviceWaitingScreen(
     .eq("organization_id", organizationId)
     .maybeSingle();
   if (!media || asNullableString((media as { archived_at?: string | null }).archived_at)) {
-    return empty;
+    return empty("FULL_LOGO");
   }
 
   const versionId = asNullableString((media as { current_version_id?: string | null }).current_version_id);
-  if (!versionId) return empty;
+  if (!versionId) return empty("FULL_LOGO");
 
   const { data: version } = await admin
     .from("media_versions")
     .select("version_number, storage_key, checksum_sha256, size_bytes, mime_type")
     .eq("id", versionId)
     .maybeSingle();
-  if (!version) return empty;
+  if (!version) return empty("FULL_LOGO");
 
   const storageKey = asNullableString((version as { storage_key?: string }).storage_key);
-  if (!storageKey) return empty;
+  if (!storageKey) return empty("FULL_LOGO");
 
   const urls = await createObjectDownloadUrls([storageKey], DOWNLOAD_URL_TTL_SECONDS);
   const downloadUrl = urls.get(storageKey) ?? null;
-  if (!downloadUrl) return empty;
+  if (!downloadUrl) return empty("FULL_LOGO");
 
   const checksum = (asNullableString((version as { checksum_sha256?: string }).checksum_sha256) ?? "").toLowerCase();
-  if (!/^[a-f0-9]{64}$/.test(checksum)) return empty;
+  if (!/^[a-f0-9]{64}$/.test(checksum)) return empty("FULL_LOGO");
 
   return {
+    brand: "CUSTOM",
     mediaId,
     version: Math.max(1, asNumber((version as { version_number?: number }).version_number, 1)),
     checksum,

@@ -4,6 +4,7 @@ import {
   FIT_MODES,
   MEDIA_TYPES,
   TRANSITIONS,
+  WAITING_SCREEN_BRANDS,
   ZONE_CONTENT_TYPES,
 } from "../../shared-types/src/enums";
 import {
@@ -45,7 +46,10 @@ export const deviceActivateResponseSchema = z.object({
   screenId: uuidSchema.optional(),
 });
 
+export const waitingScreenBrandSchema = enumOf(WAITING_SCREEN_BRANDS);
+
 export const deviceWaitingScreenSchema = z.object({
+  brand: waitingScreenBrandSchema,
   mediaId: uuidSchema.nullable(),
   version: z.number().int().positive().nullable(),
   checksum: sha256Schema.nullable(),

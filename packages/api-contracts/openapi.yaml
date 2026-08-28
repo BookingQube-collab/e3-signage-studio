@@ -142,8 +142,12 @@ components:
         code: { type: string }
     DeviceWaitingScreen:
       type: object
-      required: [mediaId, version, checksum, fileSize, mimeType, downloadUrl, title, message, configVersion]
+      required: [brand, mediaId, version, checksum, fileSize, mimeType, downloadUrl, title, message, configVersion]
       properties:
+        brand:
+          type: string
+          enum: [FULL_LOGO, ICON, CUSTOM]
+          description: Built-in full logo (default), E3 icon, or custom media library image.
         mediaId: { type: string, format: uuid, nullable: true }
         version: { type: integer, nullable: true }
         checksum: { type: string, nullable: true }
