@@ -53,7 +53,7 @@ export function MediaThumb({
           autoPlay={playback}
           controls={playback}
           loop={playback}
-          preload={playback ? "auto" : "metadata"}
+          preload={playback ? "auto" : "none"}
           referrerPolicy="no-referrer"
         />
       ) : imageSrc ? (

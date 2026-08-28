@@ -23,9 +23,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { playlistService, mediaService, screenService } from "@/services";
+import { playlistService, screenService } from "@/services";
 import { NO_LOCATION_ACCESS_MESSAGE } from "@/lib/location-scope";
-import { ADMIN_MONITORING_REFETCH_MS } from "@/lib/monitoring";
+import { adminMonitoringRefetchInterval } from "@/lib/monitoring";
 import { bindPreviewClips } from "@/lib/playlist-preview";
 import { useLiveMonitoring } from "@/lib/use-live-monitoring";
 import { PlaylistLoopPreview } from "@/features/playlists/PlaylistLoopPreview";
@@ -67,10 +67,9 @@ function ScreenDetailPage() {
   const screenQuery = useQuery({
     queryKey: ["screen", id],
     queryFn: () => screenService.get(id),
-    refetchInterval: ADMIN_MONITORING_REFETCH_MS,
+    refetchInterval: adminMonitoringRefetchInterval,
   });
   const playlists = useQuery({ queryKey: ["playlists"], queryFn: playlistService.list });
-  const mediaQuery = useQuery({ queryKey: ["media"], queryFn: mediaService.list });
   const assignedPlaylist = useQuery({
     queryKey: ["playlist", screenQuery.data?.playlistId],
     queryFn: () => playlistService.get(screenQuery.data!.playlistId!),
@@ -147,28 +146,8 @@ function ScreenDetailPage() {
   });
 
   const screen = screenQuery.data;
-  const mediaById = new Map((mediaQuery.data ?? []).map((m) => [m.id, m]));
-  let previewClips = bindPreviewClips(assignedPlaylist.data?.items ?? [], mediaById);
-  if (previewClips.length === 0) {
-    const onAir =
-      (screen?.nowPlayingMediaId ? mediaById.get(screen.nowPlayingMediaId) : undefined) ??
-      (mediaQuery.data ?? []).find((m) => m.filename === screen?.nowPlaying);
-    if (onAir) {
-      previewClips = bindPreviewClips(
-        [
-          {
-            id: onAir.id,
-            mediaId: onAir.id,
-            filename: onAir.filename,
-            type: onAir.type,
-            durationSec: onAir.durationSec ?? 10,
-            transition: "Fade",
-          },
-        ],
-        mediaById,
-      );
-    }
-  }
+  // Playlist.get already signs item preview URLs — no full media library fetch.
+  const previewClips = bindPreviewClips(assignedPlaylist.data?.items ?? [], new Map());
 
   return (
     <div>

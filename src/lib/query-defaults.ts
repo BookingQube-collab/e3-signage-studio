@@ -3,8 +3,8 @@ import { QueryClient } from "@tanstack/react-query";
 import type { AuthSessionResult } from "@/lib/auth-types";
 
 /** Reuse list data when switching sidebar tabs so pages don't flash-refetch. */
-export const ADMIN_QUERY_STALE_MS = 45_000;
-export const ADMIN_QUERY_GC_MS = 5 * 60_000;
+export const ADMIN_QUERY_STALE_MS = 90_000;
+export const ADMIN_QUERY_GC_MS = 10 * 60_000;
 
 /** Skip the shell auth round-trip when the session was just resolved. */
 export const AUTH_SESSION_STALE_MS = 60_000;
@@ -18,6 +18,7 @@ export function createAppQueryClient(): QueryClient {
         gcTime: ADMIN_QUERY_GC_MS,
         refetchOnWindowFocus: false,
         refetchOnReconnect: true,
+        // Fresh cached lists skip a remount refetch; stale ones still refresh.
         refetchOnMount: true,
         refetchIntervalInBackground: false,
         retry: 1,

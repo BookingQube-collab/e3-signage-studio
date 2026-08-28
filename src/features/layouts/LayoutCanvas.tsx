@@ -45,7 +45,7 @@ function ZoneMediaFill({
         playsInline
         autoPlay={playback}
         loop={playback}
-        preload={playback ? "auto" : "metadata"}
+        preload={playback ? "auto" : "none"}
       />
     );
   }

@@ -520,8 +520,9 @@ async function toFolderRecord(
 export async function listMedia(accessToken: string): Promise<MediaRecord[]> {
   const auth = await requireCmsPermission(accessToken, "media.view");
   const client = getUserClient(accessToken);
+  // Do not block the library response on R2 reconcile (up to ~2.5s).
   if (hasPermission(auth.profile.role, "media.manage")) {
-    await reconcilePendingUploadsOnce(client, auth.profile.organizationId);
+    void reconcilePendingUploadsOnce(client, auth.profile.organizationId);
   }
   const { data, error } = await client
     .from("media")
@@ -541,7 +542,8 @@ export async function listMedia(accessToken: string): Promise<MediaRecord[]> {
         usage.mediaIds.has(row.id),
       ),
     );
-  return toRecords(client, rows, true);
+  // List path: image thumbs only. Videos are signed on getMedia / playlist.get.
+  return toRecords(client, rows, false);
 }
 
 export async function getMedia(accessToken: string, id: string): Promise<MediaRecord | null> {
@@ -1894,8 +1896,9 @@ export async function listFolders(accessToken: string): Promise<MediaFolderRecor
   const auth = await requireCmsPermission(accessToken, "media.view");
   const client = getUserClient(accessToken);
   const orgId = auth.profile.organizationId;
+  // Same as listMedia: reconcile in the background so folder list stays snappy.
   if (hasPermission(auth.profile.role, "media.manage")) {
-    await reconcilePendingUploadsOnce(client, orgId);
+    void reconcilePendingUploadsOnce(client, orgId);
   }
   const first = await client
     .from("media_folders")

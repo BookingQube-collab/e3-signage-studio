@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/select";
 import { mediaService, playlistService } from "@/services";
 import { isUuid } from "@/services/inventory-map";
-import { UI_TRANSITIONS, type Playlist, type PlaylistItem } from "@/types";
+import { UI_TRANSITIONS, type Media, type Playlist, type PlaylistItem } from "@/types";
 import { bindPreviewClips, playlistItemThumbMedia } from "@/lib/playlist-preview";
 import { MediaPicker } from "@/features/media/MediaPicker";
 import { PlaylistLoopPreview } from "./PlaylistLoopPreview";
@@ -391,23 +391,45 @@ export function PlaylistBuilder({
                     items: [...current.slice(0, lastIdx), ...current.slice(lastIdx + 1)],
                   };
                 }
+                const nextItem: PlaylistItem = {
+                  id: `pli-${m.id}-${Date.now()}`,
+                  mediaId: m.id,
+                  filename: m.filename,
+                  type: m.type,
+                  durationSec: m.durationSec ?? 10,
+                  transition: "Fade" as const,
+                  ...(m.thumbnailUrl ? { thumbnailUrl: m.thumbnailUrl } : {}),
+                  ...(m.previewUrl || m.thumbnailUrl
+                    ? { previewUrl: m.previewUrl || m.thumbnailUrl }
+                    : {}),
+                };
+                // Library list omits video download URLs; sign just this clip for the loop preview.
+                if (
+                  m.type === "Video" &&
+                  !(typeof m.previewUrl === "string" && /^https?:\/\//i.test(m.previewUrl.trim()))
+                ) {
+                  void mediaService.get(m.id).then((full) => {
+                    if (!full?.previewUrl) return;
+                    setPlaylist((prev) => ({
+                      ...prev,
+                      items: (Array.isArray(prev.items) ? prev.items : []).map((item) =>
+                        item.mediaId === full.id && item.id === nextItem.id
+                          ? {
+                              ...item,
+                              ...(full.thumbnailUrl ? { thumbnailUrl: full.thumbnailUrl } : {}),
+                              previewUrl: full.previewUrl,
+                            }
+                          : item,
+                      ),
+                    }));
+                    qc.setQueryData<Media[]>(["media"], (prev) =>
+                      Array.isArray(prev) ? prev.map((row) => (row.id === full.id ? full : row)) : prev,
+                    );
+                  });
+                }
                 return {
                   ...p,
-                  items: [
-                    ...current,
-                    {
-                      id: `pli-${m.id}-${Date.now()}`,
-                      mediaId: m.id,
-                      filename: m.filename,
-                      type: m.type,
-                      durationSec: m.durationSec ?? 10,
-                      transition: "Fade" as const,
-                      ...(m.thumbnailUrl ? { thumbnailUrl: m.thumbnailUrl } : {}),
-                      ...(m.previewUrl || m.thumbnailUrl
-                        ? { previewUrl: m.previewUrl || m.thumbnailUrl }
-                        : {}),
-                    },
-                  ],
+                  items: [...current, nextItem],
                 };
               })
             }

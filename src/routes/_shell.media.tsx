@@ -525,6 +525,20 @@ function MediaPage() {
     }
     setSelected(item);
     setRenaming(item.filename);
+    // List skips video signing; hydrate preview URL when the detail modal opens.
+    if (item.type === "Video") {
+      const hasPlayable =
+        typeof item.previewUrl === "string" && /^https?:\/\//i.test(item.previewUrl.trim());
+      if (!hasPlayable) {
+        void mediaService.get(item.id).then((full) => {
+          if (!full) return;
+          setSelected((prev) => (prev?.id === full.id ? full : prev));
+          qc.setQueryData<Media[]>(["media"], (prev) =>
+            Array.isArray(prev) ? prev.map((row) => (row.id === full.id ? full : row)) : prev,
+          );
+        });
+      }
+    }
   }
 
   useEffect(() => {

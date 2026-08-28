@@ -35,7 +35,7 @@ import { ScreenRowMenu } from "@/features/screens/ScreenRowMenu";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
 import { cn } from "@/lib/utils";
 import { locationService, screenGroupService, screenService } from "@/services";
-import { ADMIN_MONITORING_REFETCH_MS } from "@/lib/monitoring";
+import { adminMonitoringRefetchInterval } from "@/lib/monitoring";
 import { useLiveMonitoring } from "@/lib/use-live-monitoring";
 import { hasPermission } from "@/lib/rbac";
 import type { Screen, ScreenGroup, ScreenStatus } from "@/types";
@@ -85,7 +85,7 @@ function ScreensPage() {
   const screensQuery = useQuery({
     queryKey: ["screens"],
     queryFn: screenService.list,
-    refetchInterval: ADMIN_MONITORING_REFETCH_MS,
+    refetchInterval: adminMonitoringRefetchInterval,
   });
   useLiveMonitoring([["screens"], ["dashboard"]]);
   const locations = useQuery({ queryKey: ["locations"], queryFn: locationService.list });

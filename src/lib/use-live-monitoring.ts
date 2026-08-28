@@ -5,6 +5,9 @@ import { getSupabase } from "@/lib/supabase";
 
 const TABLES = ["screens", "device_sync_states", "device_heartbeats", "sync_events"] as const;
 
+/** Collapse bursty device events so list pages don't refetch on every heartbeat. */
+const INVALIDATE_DEBOUNCE_MS = 2_500;
+
 /** Invalidate admin monitoring queries when device heartbeats or sync acks arrive. */
 export function useLiveMonitoring(queryKeys: ReadonlyArray<readonly unknown[]>): void {
   const qc = useQueryClient();
@@ -19,12 +22,20 @@ export function useLiveMonitoring(queryKeys: ReadonlyArray<readonly unknown[]>):
       return;
     }
     let active = true;
-    const invalidate = () => {
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const flush = () => {
+      debounceTimer = null;
       if (!active) return;
       if (document.visibilityState === "hidden") return;
       for (const key of queryKeys) {
         void qc.invalidateQueries({ queryKey: [...key] });
       }
+    };
+    const invalidate = () => {
+      if (!active) return;
+      if (document.visibilityState === "hidden") return;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(flush, INVALIDATE_DEBOUNCE_MS);
     };
     const onVisibility = () => {
       if (document.visibilityState === "visible") invalidate();
@@ -41,6 +52,7 @@ export function useLiveMonitoring(queryKeys: ReadonlyArray<readonly unknown[]>):
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       active = false;
+      if (debounceTimer) clearTimeout(debounceTimer);
       document.removeEventListener("visibilitychange", onVisibility);
       void supabase.removeChannel(channel);
     };

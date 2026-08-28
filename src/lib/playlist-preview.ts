@@ -168,10 +168,11 @@ export function bindPreviewClips(
       kind === "image" ? media?.previewUrl : null,
       kind === "image" ? item.previewUrl : null,
     );
+    // Prefer playlist/item signed URLs first so library list can skip video signing.
     const previewUrl =
       kind === "video"
-        ? firstHttpUrl(media?.previewUrl, item.previewUrl)
-        : firstHttpUrl(media?.previewUrl, media?.thumbnailUrl, item.previewUrl, item.thumbnailUrl);
+        ? firstHttpUrl(item.previewUrl, media?.previewUrl)
+        : firstHttpUrl(item.previewUrl, item.thumbnailUrl, media?.previewUrl, media?.thumbnailUrl);
     return {
       id: item.id,
       mediaId: item.mediaId,

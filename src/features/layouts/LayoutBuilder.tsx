@@ -206,6 +206,18 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
       contentRef: media.filename,
       contentType: contentTypeForMedia(media),
     });
+    // List omits video download URLs; sign on assign so canvas/preview can play.
+    if (
+      media.type === "Video" &&
+      !(typeof media.previewUrl === "string" && /^https?:\/\//i.test(media.previewUrl.trim()))
+    ) {
+      void mediaService.get(media.id).then((full) => {
+        if (!full) return;
+        qc.setQueryData<Media[]>(["media"], (prev) =>
+          Array.isArray(prev) ? prev.map((row) => (row.id === full.id ? full : row)) : prev,
+        );
+      });
+    }
   }
 
   return (

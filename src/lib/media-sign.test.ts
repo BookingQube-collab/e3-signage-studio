@@ -3,14 +3,14 @@ import test from "node:test";
 
 import { mediaKeysToSign } from "./media-sign.ts";
 
-test("library list signs image thumbs and video files", () => {
+test("library list signs image thumbs only", () => {
   assert.deepEqual(
     mediaKeysToSign({ previewKey: "img/a.jpg", isImage: true, signAllPreviews: false }),
     ["img/a.jpg"],
   );
   assert.deepEqual(
     mediaKeysToSign({ previewKey: "vid/a.mp4", isImage: false, signAllPreviews: false }),
-    ["vid/a.mp4"],
+    [],
   );
 });
 

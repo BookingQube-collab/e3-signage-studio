@@ -1,8 +1,10 @@
-/** Keys to sign for CMS previews. Videos need HTTPS `src` the same as images. */
+/** Keys to sign when listing the library vs opening a single file. */
 export function mediaKeysToSign(input: {
   previewKey: string | null;
-  isImage?: boolean;
-  signAllPreviews?: boolean;
+  isImage: boolean;
+  signAllPreviews: boolean;
 }): string[] {
-  return input.previewKey ? [input.previewKey] : [];
+  if (!input.previewKey) return [];
+  if (input.signAllPreviews || input.isImage) return [input.previewKey];
+  return [];
 }
