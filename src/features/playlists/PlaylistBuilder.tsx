@@ -64,10 +64,8 @@ export function PlaylistBuilder({
           ? `${p.name} saved · live screens will download the updated loop`
           : `${p.name} saved`,
       );
-      setPlaylist({ ...p, items: Array.isArray(p.items) ? p.items : [] });
-      if (!savedPlaylist) {
-        void navigate({ to: "/playlists/$id", params: { id: p.id } });
-      }
+      // Match LayoutBuilder: leave the editor after a successful save.
+      void navigate({ to: "/playlists" });
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Could not save playlist.");
@@ -368,7 +366,7 @@ export function PlaylistBuilder({
         open={addOpen}
         onOpenChange={setAddOpen}
         title="Add media"
-        description="Open a folder or pick a thumbnail. Search looks across every folder."
+        description="Click a thumbnail to add or remove it. Search looks across every folder."
         className="sm:max-w-3xl"
         footer={
           <E3Button variant="outline" onClick={() => setAddOpen(false)}>
@@ -382,24 +380,36 @@ export function PlaylistBuilder({
             folders={foldersQuery.data ?? []}
             selectedIds={new Set(items.map((item) => item.mediaId))}
             onPick={(m) =>
-              setPlaylist((p) => ({
-                ...p,
-                items: [
-                  ...(Array.isArray(p.items) ? p.items : []),
-                  {
-                    id: `pli-${m.id}-${Date.now()}`,
-                    mediaId: m.id,
-                    filename: m.filename,
-                    type: m.type,
-                    durationSec: m.durationSec ?? 10,
-                    transition: "Fade",
-                    ...(m.thumbnailUrl ? { thumbnailUrl: m.thumbnailUrl } : {}),
-                    ...(m.previewUrl || m.thumbnailUrl
-                      ? { previewUrl: m.previewUrl || m.thumbnailUrl }
-                      : {}),
-                  },
-                ],
-              }))
+              setPlaylist((p) => {
+                const current = Array.isArray(p.items) ? p.items : [];
+                const lastIdx = current.map((item) => item.mediaId).lastIndexOf(m.id);
+                if (lastIdx >= 0) {
+                  // Duplicates stay possible via the row Duplicate control; picker
+                  // toggle removes the last matching instance.
+                  return {
+                    ...p,
+                    items: [...current.slice(0, lastIdx), ...current.slice(lastIdx + 1)],
+                  };
+                }
+                return {
+                  ...p,
+                  items: [
+                    ...current,
+                    {
+                      id: `pli-${m.id}-${Date.now()}`,
+                      mediaId: m.id,
+                      filename: m.filename,
+                      type: m.type,
+                      durationSec: m.durationSec ?? 10,
+                      transition: "Fade" as const,
+                      ...(m.thumbnailUrl ? { thumbnailUrl: m.thumbnailUrl } : {}),
+                      ...(m.previewUrl || m.thumbnailUrl
+                        ? { previewUrl: m.previewUrl || m.thumbnailUrl }
+                        : {}),
+                    },
+                  ],
+                };
+              })
             }
           />
         </div>
