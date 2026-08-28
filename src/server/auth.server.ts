@@ -264,15 +264,14 @@ export async function requireCmsPermission(
 export async function listCmsUsers(accessToken: string): Promise<CmsUserRow[]> {
   await requireCmsPermission(accessToken, "users.view");
   const client = getUserClient(accessToken);
-  const { data: users, error } = await client
-    .from("users")
-    .select("id, organization_id, name, email, username, role, status, last_active_at, created_at")
-    .order("created_at", { ascending: true });
+  const [{ data: users, error }, { data: accessRows, error: accessError }] = await Promise.all([
+    client
+      .from("users")
+      .select("id, organization_id, name, email, username, role, status, last_active_at, created_at")
+      .order("created_at", { ascending: true }),
+    client.from("user_location_access").select("user_id, location_id"),
+  ]);
   if (error) throw new Error(error.message);
-
-  const { data: accessRows, error: accessError } = await client
-    .from("user_location_access")
-    .select("user_id, location_id");
   if (accessError) throw new Error(accessError.message);
 
   const byUser = new Map<string, string[]>();
@@ -296,11 +295,7 @@ export async function listLocationOptions(accessToken: string): Promise<Location
   const auth = await resolveAuthFromRequest(accessToken);
   if (!auth.ok) throw new Error(auth.message);
   if (auth.profile.role === "SUPER_ADMIN") {
-    try {
-      await ensureSeedLocations(auth.profile.organizationId);
-    } catch {
-      // Users page should still load if seed cannot run.
-    }
+    void ensureSeedLocations(auth.profile.organizationId).catch(() => undefined);
   }
   const client = getUserClient(accessToken);
   const { data, error } = await client.from("locations").select("id, name, type").order("name");

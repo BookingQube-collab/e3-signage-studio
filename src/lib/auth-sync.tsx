@@ -4,6 +4,7 @@ import { useEffect, type ReactNode } from "react";
 
 import { clearSessionFn, persistSessionFn } from "@/lib/auth-functions";
 import { clearShellAuth } from "@/lib/query-defaults";
+import { isSigningOut } from "@/lib/sign-out";
 import { ensurePublicSupabaseConfig, getSupabase } from "@/lib/supabase";
 
 /** Keeps httpOnly auth cookies in sync with the browser Supabase session. */
@@ -18,6 +19,7 @@ export function AuthSessionSync({ children }: { children: ReactNode }) {
     void ensurePublicSupabaseConfig().then((config) => {
       if (!config || cancelled) return;
       const { data } = getSupabase().auth.onAuthStateChange((event, session) => {
+        if (isSigningOut()) return;
         if (event === "SIGNED_OUT") {
           clearShellAuth(queryClient);
           void clearSessionFn()

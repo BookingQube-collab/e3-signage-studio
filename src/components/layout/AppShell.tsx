@@ -1,4 +1,5 @@
-import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { Link, useRouterState } from "@tanstack/react-router";
 import {
   BarChart3,
   CalendarClock,
@@ -30,10 +31,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { clearSessionFn } from "@/lib/auth-functions";
 import type { CmsProfile } from "@/lib/auth-types";
 import { hasPermission } from "@/lib/rbac";
-import { ensurePublicSupabaseConfig, getSupabase } from "@/lib/supabase";
+import { completeSignOut, redirectToLogin } from "@/lib/sign-out";
 import { cn } from "@/lib/utils";
 import { UI_ROLE, type AppPermission } from "@e3/shared-types";
 
@@ -151,7 +151,7 @@ export function AppShell({
   profile: CmsProfile | null;
   fallbackEmail: string | null;
 }) {
-  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -164,18 +164,8 @@ export function AppShell({
   async function signOut() {
     if (signingOut) return;
     setSigningOut(true);
-    try {
-      await ensurePublicSupabaseConfig();
-      await getSupabase().auth.signOut();
-    } catch {
-      // still clear server cookies
-    }
-    try {
-      await clearSessionFn();
-    } catch {
-      // ignore
-    }
-    await navigate({ to: "/login" });
+    await completeSignOut(queryClient);
+    redirectToLogin();
   }
 
   return (
@@ -270,7 +260,13 @@ export function AppShell({
                     <Link to="/settings" preload="intent">Settings</Link>
                   </DropdownMenuItem>
                 ) : null}
-                <DropdownMenuItem onSelect={() => void signOut()} disabled={signingOut}>
+                <DropdownMenuItem
+                  disabled={signingOut}
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    void signOut();
+                  }}
+                >
                   {signingOut ? "Signing out…" : "Sign out"}
                 </DropdownMenuItem>
               </DropdownMenuContent>

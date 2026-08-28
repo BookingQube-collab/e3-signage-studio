@@ -6,7 +6,7 @@ import { useCmsLogoSrc } from "@/components/branding/CmsBranding";
 import { E3Button } from "@/components/e3/E3Button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getAuthSessionFn, persistSessionFn, resolveLoginIdentifierFn } from "@/lib/auth-functions";
+import { clearSessionFn, getAuthSessionFn, persistSessionFn, resolveLoginIdentifierFn } from "@/lib/auth-functions";
 import { getPublicCmsUrl } from "@/lib/cms-settings";
 import { getPublicSupabaseConfigFn } from "@/lib/public-config-functions";
 import {
@@ -15,9 +15,16 @@ import {
   getSupabase,
   seedPublicSupabaseConfig,
 } from "@/lib/supabase";
+import { consumeSignedOutFlag, withTimeout } from "@/lib/sign-out";
 import { looksLikeEmail } from "@/lib/user-credentials";
 
 export const Route = createFileRoute("/login")({
+  validateSearch: (search: Record<string, unknown>): { loggedOut?: boolean } => ({
+    loggedOut:
+      search.loggedOut === true || search.loggedOut === "1" || search.loggedOut === "true"
+        ? true
+        : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Sign in — E3 Digital Signage" },
@@ -32,7 +39,11 @@ export const Route = createFileRoute("/login")({
       },
     ],
   }),
-  beforeLoad: async () => {
+  beforeLoad: async ({ search }) => {
+    if (search.loggedOut || consumeSignedOutFlag()) {
+      await withTimeout(clearSessionFn(), 1500);
+      return;
+    }
     const accessToken = await getBrowserAccessToken();
     const auth = await getAuthSessionFn({ data: { accessToken } });
     if (auth.ok) {
