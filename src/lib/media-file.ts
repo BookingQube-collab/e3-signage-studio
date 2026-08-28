@@ -31,6 +31,20 @@ export function safeMediaFilename(filename: string): string {
   return trimmed.slice(0, 255);
 }
 
+/** Keep both files when two uploads share a name — never replace or hide the other. */
+export function uniqueLibraryFilename(existingNames: string[], filename: string): string {
+  const safe = safeMediaFilename(filename);
+  const taken = new Set(existingNames.map((name) => name.toLowerCase()));
+  if (!taken.has(safe.toLowerCase())) return safe;
+  const ext = fileExtension(safe);
+  const stem = ext && safe.toLowerCase().endsWith(ext) ? safe.slice(0, safe.length - ext.length) : safe;
+  for (let n = 2; n < 1000; n += 1) {
+    const candidate = `${stem} (${n})${ext}`;
+    if (!taken.has(candidate.toLowerCase())) return candidate.slice(0, 255);
+  }
+  return `${stem.slice(0, Math.max(1, 240 - String(Date.now()).length))} (${Date.now()})${ext}`.slice(0, 255);
+}
+
 export function inferMediaMime(filename: string, reportedType: string): AllowedMediaMime | null {
   const reported = reportedType.trim().toLowerCase();
   if (isAllowedMediaMime(reported)) return reported;

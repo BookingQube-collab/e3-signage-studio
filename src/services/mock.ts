@@ -186,7 +186,7 @@ export const mockServices: AppServices = {
           f.id === folder.id ? { ...f, fileCount: f.fileCount + added.length } : f,
         );
       }
-      return delay(added, 400);
+      return delay({ uploaded: added, failed: [] }, 400);
     },
     replace: (id: string, file: File, onProgress) => {
       const existing = store.media.find((m) => m.id === id);

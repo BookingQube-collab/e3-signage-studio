@@ -1,5 +1,3 @@
-import { toast } from "sonner";
-
 import {
   completeMediaUploadFn,
   createMediaFolderFn,
@@ -150,14 +148,7 @@ async function uploadOne(
       throw error;
     }
     if (!intent) throw new Error("Upload session not found.");
-    const row = await completeMediaUploadFn({
-      data: {
-        accessToken: await accessToken(),
-        mediaVersionId: intent.mediaVersionId,
-        checksumSha256,
-      },
-    });
-    return toUiMedia(row);
+    return completeAfterPut(intent, checksumSha256);
   })();
 
   inFlightUploads.set(key, run);
@@ -166,6 +157,31 @@ async function uploadOne(
   } finally {
     inFlightUploads.delete(key);
   }
+}
+
+async function completeAfterPut(
+  intent: { mediaVersionId: string },
+  checksumSha256: string,
+): Promise<Media> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      const row = await completeMediaUploadFn({
+        data: {
+          accessToken: await accessToken(),
+          mediaVersionId: intent.mediaVersionId,
+          checksumSha256,
+        },
+      });
+      return toUiMedia(row);
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Could not finish uploading this file. Try that file again.");
 }
 
 export const liveMediaService: MediaService = {
@@ -195,11 +211,7 @@ export const liveMediaService: MediaService = {
           `Could not finish uploading ${fileName}. The file was not added to the library. Try that file again.`,
         ),
     );
-    if (uploaded.length === 0 && failed.length > 0) {
-      throw new Error(failed[0]?.message ?? "Upload failed.");
-    }
-    for (const item of failed) toast.error(item.message);
-    return uploaded;
+    return { uploaded, failed };
   },
   replace: async (id, file, onProgress) => uploadOne(file, id, onProgress),
   rename: async (id, filename) => {

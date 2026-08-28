@@ -125,17 +125,40 @@ export function r2CreateDownloadUrl(key: string, expiresIn: number): string {
   return signedUrl({ method: "GET", key, expiresIn }).url;
 }
 
+function sizeFromObjectHeaders(headers: Headers): { sizeBytes: number } {
+  const range = headers.get("content-range");
+  if (range) {
+    const total = range.split("/")[1];
+    const fromRange = total ? Number(total) : NaN;
+    if (Number.isFinite(fromRange)) return { sizeBytes: fromRange };
+  }
+  const length = headers.get("content-length");
+  const fromLength = length ? Number(length) : NaN;
+  if (Number.isFinite(fromLength)) return { sizeBytes: fromLength };
+  return { sizeBytes: -1 };
+}
+
+async function r2ProbeObjectViaGet(key: string): Promise<{ sizeBytes: number } | null> {
+  const { url } = signedUrl({ method: "GET", key, expiresIn: 60 });
+  const response = await fetch(url, { method: "GET", headers: { Range: "bytes=0-0" } });
+  if (response.status === 404) return null;
+  if (response.status === 200 || response.status === 206) {
+    return sizeFromObjectHeaders(response.headers);
+  }
+  throw new Error(`Could not verify uploaded object (${response.status}).`);
+}
+
 export async function r2HeadObject(key: string): Promise<{ sizeBytes: number } | null> {
   const { url } = signedUrl({ method: "HEAD", key, expiresIn: 60 });
   const response = await fetch(url, { method: "HEAD" });
   if (response.status === 404) return null;
-  if (!response.ok) {
-    throw new Error(`Could not verify uploaded object (${response.status}).`);
+  if (response.ok) {
+    return sizeFromObjectHeaders(response.headers);
   }
-  const length = response.headers.get("content-length");
-  const sizeBytes = length ? Number(length) : NaN;
-  if (!Number.isFinite(sizeBytes)) return null;
-  return { sizeBytes };
+  if (response.status === 400 || response.status === 403 || response.status === 405) {
+    return r2ProbeObjectViaGet(key);
+  }
+  throw new Error(`Could not verify uploaded object (${response.status}).`);
 }
 
 export async function r2DeleteObjects(keys: string[]): Promise<void> {

@@ -84,6 +84,11 @@ export type ScreenGroupService = {
 
 export type MediaUploadProgress = (fileName: string, percent: number) => void;
 
+export type MediaUploadResult = {
+  uploaded: Media[];
+  failed: Array<{ name: string; message: string }>;
+};
+
 export type MediaService = {
   list: () => Promise<Media[]>;
   get: (id: string) => Promise<Media | null>;
@@ -91,7 +96,7 @@ export type MediaService = {
     files: File[],
     onProgress?: MediaUploadProgress,
     folderId?: string | null,
-  ) => Promise<Media[]>;
+  ) => Promise<MediaUploadResult>;
   replace: (id: string, file: File, onProgress?: (percent: number) => void) => Promise<Media>;
   rename: (id: string, filename: string) => Promise<Media>;
   archive: (id: string) => Promise<Media>;

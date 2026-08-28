@@ -17,6 +17,7 @@ import {
   mediaTypeFromMime,
   normalizeChecksum,
   safeMediaFilename,
+  uniqueLibraryFilename,
   uploadLimitsHint,
 } from "./media-file.ts";
 
@@ -76,4 +77,13 @@ test("normalizes filenames and checksums", () => {
   assert.equal(fileExtension("Welcome Loop.MP4"), ".mp4");
   assert.equal(normalizeChecksum("Ab"), "ab");
   assert.equal(hueFromChecksum("ff00aa11"), Number.parseInt("ff00aa11", 16) % 360);
+});
+
+test("duplicate filenames in a folder get a suffix instead of replacing the first", () => {
+  assert.equal(uniqueLibraryFilename(["birthdat.jpeg"], "birthdat.jpeg"), "birthdat (2).jpeg");
+  assert.equal(
+    uniqueLibraryFilename(["birthdat.jpeg", "birthdat (2).jpeg"], "Birthdat.JPEG"),
+    "Birthdat (3).jpeg",
+  );
+  assert.equal(uniqueLibraryFilename(["party.png"], "birthdat.jpeg"), "birthdat.jpeg");
 });

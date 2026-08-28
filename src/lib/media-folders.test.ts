@@ -50,6 +50,16 @@ test("list by folder returns only that folder’s files", () => {
   assert.deepEqual(mediaInLibraryView(items, view), [rajan]);
 });
 
+test("two files in the same folder both list even when filenames collide", () => {
+  const colliding = [
+    { id: "m-a", filename: "birthdat.jpeg", folderId: "f-inflata" },
+    { id: "m-b", filename: "birthdat.jpeg", folderId: "f-inflata" },
+  ];
+  const view = libraryViewFor("", "f-inflata");
+  assert.equal(mediaInLibraryView(colliding, view).length, 2);
+  assert.equal(mergeLibraryMedia(colliding.slice(0, 1), colliding.slice(1)).length, 2);
+});
+
 test("unfiled items stay at the library root", () => {
   const view = libraryViewFor("", null);
   assert.deepEqual(mediaInLibraryView(items, view), [unfiled]);

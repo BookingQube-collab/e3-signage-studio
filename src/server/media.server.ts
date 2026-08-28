@@ -25,6 +25,7 @@ import {
   mediaTypeFromMime,
   normalizeChecksum,
   safeMediaFilename,
+  uniqueLibraryFilename,
 } from "../lib/media-file";
 import { mediaKeysToSign } from "../lib/media-sign";
 import { describeCanceledStatement } from "../lib/media-upload-error";
@@ -36,9 +37,11 @@ import {
   uniqueFoldersByName,
 } from "../lib/media-folders";
 import {
+  completeStatOutcome,
   incompleteVersionReusable,
   isVisibleLibraryStatus,
   shouldDiscardIncompleteMedia,
+  shouldPromoteIncompleteObject,
   shouldPurgeAbandonedUpload,
 } from "../lib/media-upload-lifecycle";
 import { requireCmsPermission } from "./auth.server";
@@ -445,6 +448,27 @@ async function requireFolderId(
   return folder.id;
 }
 
+async function uniqueNameInFolder(
+  client: ReturnType<typeof getUserClient>,
+  organizationId: string,
+  folderId: string | null,
+  filename: string,
+  exceptMediaId?: string,
+): Promise<string> {
+  let query = client
+    .from("media")
+    .select("id, name")
+    .eq("organization_id", organizationId)
+    .is("archived_at", null);
+  query = folderId ? query.eq("folder_id", folderId) : query.is("folder_id", null);
+  const { data, error } = await query;
+  if (error) return safeMediaFilename(filename);
+  const existing = (data ?? [])
+    .filter((row) => asString((row as { id: string }).id) !== exceptMediaId)
+    .map((row) => asString((row as { name: string }).name));
+  return uniqueLibraryFilename(existing, filename);
+}
+
 async function visibleFileCount(
   client: ReturnType<typeof getUserClient>,
   folderId: string,
@@ -476,7 +500,7 @@ export async function listMedia(accessToken: string): Promise<MediaRecord[]> {
   const auth = await requireCmsPermission(accessToken, "media.view");
   const client = getUserClient(accessToken);
   if (hasPermission(auth.profile.role, "media.manage")) {
-    await purgeAbandonedUploads(client, auth.profile.organizationId);
+    await reconcileAndPurgeAbandonedUploads(client, auth.profile.organizationId);
   }
   const { data, error } = await client
     .from("media")
@@ -620,42 +644,94 @@ async function failOrDiscardUpload(
     .eq("id", media.id);
 }
 
-async function purgeAbandonedUploads(
+async function markUploadReady(
+  client: ReturnType<typeof getUserClient>,
+  media: MediaRow,
+  version: MediaVersionRow,
+): Promise<void> {
+  const thumbnailKey = version.mime_type.startsWith("image/") ? version.storage_key : null;
+  const { error: versionUpdateError } = await client
+    .from("media_versions")
+    .update({ status: "READY", thumbnail_key: thumbnailKey })
+    .eq("id", version.id);
+  throwIfError(versionUpdateError, "Could not finalize media version.");
+  const { error: mediaUpdateError } = await client
+    .from("media")
+    .update({
+      status: "READY",
+      current_version_id: version.id,
+      mime_type: version.mime_type,
+    })
+    .eq("id", media.id);
+  throwIfError(mediaUpdateError, "Could not finalize media.");
+}
+
+function pickIncompleteVersion(versions: MediaVersionRow[], media: MediaRow): MediaVersionRow | null {
+  const current = versions.find((version) => version.id === media.current_version_id);
+  if (current && (current.status === "PROCESSING" || current.status === "FAILED")) return current;
+  const incomplete = versions
+    .filter((version) => version.status === "PROCESSING" || version.status === "FAILED")
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  return incomplete[0] ?? null;
+}
+
+async function reconcileAndPurgeAbandonedUploads(
   client: ReturnType<typeof getUserClient>,
   organizationId: string,
 ): Promise<void> {
   const { data, error } = await client
     .from("media")
-    .select("id, status, created_at, current_version_id")
+    .select(MEDIA_SELECT)
     .eq("organization_id", organizationId)
     .in("status", ["PROCESSING", "FAILED"])
     .is("archived_at", null)
     .limit(50);
   if (error || !data) return;
+  const mediaRows = data.map((row) => mapMedia(row as Record<string, unknown>));
+  if (mediaRows.length === 0) return;
+
+  const { data: versionRaw, error: versionError } = await client
+    .from("media_versions")
+    .select(VERSION_SELECT)
+    .in(
+      "media_id",
+      mediaRows.map((row) => row.id),
+    );
+  if (versionError) return;
+  const versionsByMedia = new Map<string, MediaVersionRow[]>();
+  for (const raw of versionRaw ?? []) {
+    const version = mapVersion(raw as Record<string, unknown>);
+    const list = versionsByMedia.get(version.media_id) ?? [];
+    list.push(version);
+    versionsByMedia.set(version.media_id, list);
+  }
+
   const nowMs = Date.now();
   const processingTtlMs = UPLOAD_URL_TTL_SECONDS * 1000;
-  for (const raw of data) {
-    const id = asString((raw as { id: string }).id);
-    const status = asString((raw as { status: string }).status);
-    const createdAt = asString((raw as { created_at: string }).created_at);
-    const currentVersionId = asNullableString(
-      (raw as { current_version_id: string | null }).current_version_id,
-    );
-    if (currentVersionId) continue;
-    if (
-      !shouldPurgeAbandonedUpload({
-        status,
-        createdAtIso: createdAt,
-        nowMs,
-        processingTtlMs,
-      })
-    ) {
-      continue;
-    }
+  for (const media of mediaRows) {
+    const version = pickIncompleteVersion(versionsByMedia.get(media.id) ?? [], media);
+    if (!version) continue;
     try {
-      await purgeMediaRow(client, id);
+      const inspected = await inspectUploadedObject(version.storage_key, version.size_bytes);
+      if (shouldPromoteIncompleteObject(inspected.outcome)) {
+        await markUploadReady(client, media, version);
+        continue;
+      }
+      if (inspected.outcome === "retry") continue;
+      if (media.current_version_id && media.current_version_id !== version.id) continue;
+      if (
+        !shouldPurgeAbandonedUpload({
+          status: media.status,
+          createdAtIso: media.created_at,
+          nowMs,
+          processingTtlMs,
+        })
+      ) {
+        continue;
+      }
+      await purgeMediaRow(client, media.id);
     } catch {
-      // Listing must still succeed if one abandoned row cannot be deleted.
+      // Listing must still succeed if one abandoned row cannot be completed or deleted.
     }
   }
 }
@@ -668,7 +744,6 @@ export async function createUploadIntent(
   const client = getUserClient(accessToken);
   assertUploadSize(input.mimeType, input.sizeBytes, serverUploadLimits());
   const checksum = normalizeChecksum(input.checksumSha256);
-  const filename = safeMediaFilename(input.filename);
   const type = mediaTypeFromMime(input.mimeType);
   const orgId = auth.profile.organizationId;
 
@@ -721,6 +796,13 @@ export async function createUploadIntent(
     if (reusable) {
       assertCanMutateOwnedContent(auth.profile, reusable.media.created_by);
       const folderId = await requireFolderId(client, orgId, input.folderId);
+      const filename = await uniqueNameInFolder(
+        client,
+        orgId,
+        folderId,
+        input.filename,
+        reusable.media.id,
+      );
       const { error: reuseError } = await client
         .from("media")
         .update({
@@ -762,6 +844,7 @@ export async function createUploadIntent(
     }
 
     const folderId = await requireFolderId(client, orgId, input.folderId);
+    const filename = await uniqueNameInFolder(client, orgId, folderId, input.filename);
     const { data, error } = await client
       .from("media")
       .insert({
@@ -824,13 +907,35 @@ export async function createUploadIntent(
   };
 }
 
-async function statWithRetry(key: string): Promise<{ sizeBytes: number } | null> {
+async function inspectUploadedObject(
+  key: string,
+  expectedSizeBytes: number,
+): Promise<{ outcome: ReturnType<typeof completeStatOutcome>; sizeBytes: number }> {
+  let objectFound = false;
+  let sizeBytes = -1;
+  let statErrored = false;
   for (let attempt = 0; attempt < 4; attempt += 1) {
-    const stat = await statObject(key);
-    if (stat) return stat;
+    try {
+      const stat = await statObject(key);
+      if (stat) {
+        objectFound = true;
+        sizeBytes = stat.sizeBytes;
+        break;
+      }
+    } catch {
+      statErrored = true;
+    }
     await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
   }
-  return null;
+  return {
+    outcome: completeStatOutcome({
+      objectFound,
+      sizeBytes,
+      expectedSizeBytes,
+      statErrored,
+    }),
+    sizeBytes,
+  };
 }
 
 export async function completeUpload(
@@ -863,32 +968,16 @@ export async function completeUpload(
     return ready;
   }
 
-  const stat = await statWithRetry(version.storage_key);
-  if (!stat) {
+  const inspected = await inspectUploadedObject(version.storage_key, version.size_bytes);
+  if (inspected.outcome === "missing") {
     await failOrDiscardUpload(client, media, version);
     throw new Error("Upload did not reach storage. Try again.");
   }
-  if (stat.sizeBytes >= 0 && stat.sizeBytes !== version.size_bytes) {
-    await failOrDiscardUpload(client, media, version);
-    throw new Error("Uploaded file size does not match.");
+  if (inspected.outcome === "retry") {
+    throw new Error("Could not verify the uploaded file yet. Try that file again.");
   }
 
-  const thumbnailKey = version.mime_type.startsWith("image/") ? version.storage_key : null;
-  const { error: versionUpdateError } = await client
-    .from("media_versions")
-    .update({ status: "READY", thumbnail_key: thumbnailKey })
-    .eq("id", version.id);
-  throwIfError(versionUpdateError, "Could not finalize media version.");
-
-  const { error: mediaUpdateError } = await client
-    .from("media")
-    .update({
-      status: "READY",
-      current_version_id: version.id,
-      mime_type: version.mime_type,
-    })
-    .eq("id", media.id);
-  throwIfError(mediaUpdateError, "Could not finalize media.");
+  await markUploadReady(client, media, version);
 
   const updated = await getMediaRow(client, media.id, auth.profile.organizationId);
   if (!updated) throw new Error("Media not found.");
@@ -1122,6 +1211,9 @@ export async function listFolders(accessToken: string): Promise<MediaFolderRecor
   const auth = await requireCmsPermission(accessToken, "media.view");
   const client = getUserClient(accessToken);
   const orgId = auth.profile.organizationId;
+  if (hasPermission(auth.profile.role, "media.manage")) {
+    await reconcileAndPurgeAbandonedUploads(client, orgId);
+  }
   const first = await client
     .from("media_folders")
     .select(FOLDER_SELECT)

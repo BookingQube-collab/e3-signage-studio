@@ -65,20 +65,79 @@ export type SettledUpload<T> = {
   failed: Array<{ name: string; message: string }>;
 };
 
+export type UploadBatchToast = {
+  tone: "success" | "warning" | "error";
+  title: string;
+  details: string[];
+};
+
+/** Toast copy must match what actually landed, including mixed success/failure. */
+export function describeUploadBatchToast(
+  uploaded: number,
+  failed: Array<{ name: string; message: string }>,
+): UploadBatchToast {
+  if (failed.length === 0) {
+    return {
+      tone: "success",
+      title: `${uploaded} file${uploaded === 1 ? "" : "s"} uploaded`,
+      details: [],
+    };
+  }
+  if (uploaded === 0) {
+    return {
+      tone: "error",
+      title: failed.length === 1 ? (failed[0]?.message ?? "Upload failed.") : `${failed.length} files failed to upload`,
+      details: failed.length === 1 ? [] : failed.map((item) => item.message),
+    };
+  }
+  return {
+    tone: "warning",
+    title: `${uploaded} uploaded, ${failed.length} failed`,
+    details: failed.map((item) => item.message),
+  };
+}
+
+export type CompleteStatOutcome = "ready" | "missing" | "retry" | "size-mismatch";
+
+/** After PUT: promote if the object exists; never discard a sibling because HEAD was flaky. */
+export function completeStatOutcome(input: {
+  objectFound: boolean;
+  sizeBytes: number;
+  expectedSizeBytes: number;
+  statErrored: boolean;
+}): CompleteStatOutcome {
+  if (input.objectFound) {
+    if (input.sizeBytes >= 0 && input.sizeBytes !== input.expectedSizeBytes) return "size-mismatch";
+    return "ready";
+  }
+  if (input.statErrored) return "retry";
+  return "missing";
+}
+
+export function shouldPromoteIncompleteObject(outcome: CompleteStatOutcome): boolean {
+  return outcome === "ready" || outcome === "size-mismatch";
+}
+
 /** Run each file on its own. A failure must not skip or abort the rest of the batch. */
 export async function settleEachUpload<TFile extends { name: string }, TResult>(
   files: TFile[],
   uploadOne: (file: TFile) => Promise<TResult>,
   describeError: (error: unknown, fileName: string) => string,
 ): Promise<SettledUpload<TResult>> {
+  const rows = await Promise.all(
+    files.map(async (file) => {
+      try {
+        return { uploaded: await uploadOne(file) };
+      } catch (error) {
+        return { failed: { name: file.name, message: describeError(error, file.name) } };
+      }
+    }),
+  );
   const uploaded: TResult[] = [];
   const failed: Array<{ name: string; message: string }> = [];
-  for (const file of files) {
-    try {
-      uploaded.push(await uploadOne(file));
-    } catch (error) {
-      failed.push({ name: file.name, message: describeError(error, file.name) });
-    }
+  for (const row of rows) {
+    if ("uploaded" in row) uploaded.push(row.uploaded);
+    else failed.push(row.failed);
   }
   return { uploaded, failed };
 }

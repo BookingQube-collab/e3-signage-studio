@@ -3,10 +3,13 @@ import test from "node:test";
 
 import {
   clientUploadDedupeKey,
+  completeStatOutcome,
+  describeUploadBatchToast,
   incompleteVersionReusable,
   isVisibleLibraryStatus,
   settleEachUpload,
   shouldDiscardIncompleteMedia,
+  shouldPromoteIncompleteObject,
   shouldPurgeAbandonedUpload,
 } from "./media-upload-lifecycle.ts";
 
@@ -110,10 +113,102 @@ test("a failed file does not cancel the rest of a multi-upload batch", async () 
         ? `Could not finish uploading ${fileName}. Try that file again.`
         : `Could not upload ${fileName}.`,
   );
-  assert.deepEqual(attempted, ["one.jpg", "two.jpg", "three.jpg"]);
+  assert.deepEqual(attempted.sort(), ["one.jpg", "three.jpg", "two.jpg"]);
   assert.deepEqual(result.uploaded, ["one.jpg", "three.jpg"]);
   assert.equal(result.failed.length, 1);
   assert.equal(result.failed[0]?.name, "two.jpg");
   assert.match(result.failed[0]?.message ?? "", /two\.jpg/);
   assert.doesNotMatch(result.failed[0]?.message ?? "", /canceling statement/i);
+});
+
+test("a hung file does not skip a sibling that can still complete", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started: string[] = [];
+  const finished: string[] = [];
+  const pending = settleEachUpload(
+    [{ name: "one.jpg" }, { name: "two.jpg" }],
+    async (file) => {
+      started.push(file.name);
+      if (file.name === "one.jpg") await gate;
+      finished.push(file.name);
+      return file.name;
+    },
+    () => "failed",
+  );
+  const startedBoth = await new Promise<boolean>((resolve) => {
+    const check = () => {
+      if (started.length === 2) {
+        resolve(true);
+        return;
+      }
+      setTimeout(check, 5);
+    };
+    check();
+    setTimeout(() => resolve(started.length === 2), 500);
+  });
+  assert.equal(startedBoth, true);
+  assert.deepEqual(finished, ["two.jpg"]);
+  release();
+  const result = await pending;
+  assert.deepEqual(result.uploaded.sort(), ["one.jpg", "two.jpg"]);
+  assert.equal(result.failed.length, 0);
+});
+
+test("partial batch toast names the failure instead of claiming only the successes", () => {
+  const mixed = describeUploadBatchToast(1, [
+    { name: "party.jpeg", message: "Could not finish uploading party.jpeg. Try that file again." },
+  ]);
+  assert.equal(mixed.tone, "warning");
+  assert.equal(mixed.title, "1 uploaded, 1 failed");
+  assert.match(mixed.details[0] ?? "", /party\.jpeg/);
+  const ok = describeUploadBatchToast(2, []);
+  assert.equal(ok.tone, "success");
+  assert.equal(ok.title, "2 files uploaded");
+  const none = describeUploadBatchToast(0, [{ name: "a.jpg", message: "Could not upload a.jpg." }]);
+  assert.equal(none.tone, "error");
+  assert.match(none.title, /a\.jpg/);
+});
+
+test("an object that landed in storage is completed even when HEAD size is unknown", () => {
+  assert.equal(
+    completeStatOutcome({
+      objectFound: true,
+      sizeBytes: -1,
+      expectedSizeBytes: 640_000,
+      statErrored: false,
+    }),
+    "ready",
+  );
+  assert.equal(
+    shouldPromoteIncompleteObject(
+      completeStatOutcome({
+        objectFound: true,
+        sizeBytes: 12,
+        expectedSizeBytes: 640_000,
+        statErrored: false,
+      }),
+    ),
+    true,
+  );
+  assert.equal(
+    completeStatOutcome({
+      objectFound: false,
+      sizeBytes: -1,
+      expectedSizeBytes: 1,
+      statErrored: true,
+    }),
+    "retry",
+  );
+  assert.equal(
+    completeStatOutcome({
+      objectFound: false,
+      sizeBytes: -1,
+      expectedSizeBytes: 1,
+      statErrored: false,
+    }),
+    "missing",
+  );
 });

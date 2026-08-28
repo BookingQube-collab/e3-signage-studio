@@ -7,6 +7,7 @@ import { ACCEPT_MEDIA, collectUploadableFiles, uploadLimitsHint } from "@/lib/me
 import { cn } from "@/lib/utils";
 
 interface PendingUpload {
+  id: string;
   name: string;
   progress: number;
 }
@@ -43,12 +44,22 @@ export function UploadDropzone({
       if (inputRef.current) inputRef.current.value = "";
       return;
     }
-    setPending(accepted.map((file) => ({ name: file.name, progress: 0 })));
+    setPending(
+      accepted.map((file, index) => ({
+        id: `${index}:${file.name}:${file.size}:${file.lastModified}`,
+        name: file.name,
+        progress: 0,
+      })),
+    );
     try {
       await onUpload(accepted, (fileName, percent) => {
-        setPending((prev) =>
-          prev.map((item) => (item.name === fileName ? { ...item, progress: percent } : item)),
-        );
+        setPending((prev) => {
+          const index = prev.findIndex((item) => item.name === fileName && item.progress < 100);
+          if (index < 0) {
+            return prev.map((item) => (item.name === fileName ? { ...item, progress: percent } : item));
+          }
+          return prev.map((item, i) => (i === index ? { ...item, progress: percent } : item));
+        });
       });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Upload failed.");
@@ -106,7 +117,7 @@ export function UploadDropzone({
         <div className="mt-4 space-y-3 rounded-2xl border border-border bg-card p-4">
           {pending.map((p) => (
             <E3Progress
-              key={p.name}
+              key={p.id}
               value={p.progress}
               label={p.progress === 0 ? `Preparing ${p.name}` : p.name}
             />

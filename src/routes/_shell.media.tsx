@@ -55,6 +55,7 @@ import {
   upsertFolder,
 } from "@/lib/media-folders";
 import { describeCanceledStatement } from "@/lib/media-upload-error";
+import { describeUploadBatchToast } from "@/lib/media-upload-lifecycle";
 import { useIsClient } from "@/lib/use-is-client";
 import { cn } from "@/lib/utils";
 import { mediaService } from "@/services";
@@ -144,15 +145,22 @@ function MediaPage() {
       targetFolderId: string | null;
     }) => mediaService.upload(files, onProgress, resolveUploadFolderId(targetFolderId)),
     retry: 0,
-    onSuccess: (added) => {
+    onSuccess: (result) => {
+      const added = result.uploaded;
       const ids = added.map((item) => item.id);
       setHiddenMediaIds((prev) => withoutIds(prev, ids));
-      const currentMedia = qc.getQueryData<Media[]>(["media"]) ?? [];
-      const currentFolders = qc.getQueryData<MediaFolder[]>(["media-folders"]) ?? [];
-      const next = applyUploadedMedia(currentMedia, currentFolders, added);
-      qc.setQueryData(["media"], next.media);
-      qc.setQueryData(["media-folders"], next.folders);
-      toast.success(`${added.length} file${added.length > 1 ? "s" : ""} uploaded`);
+      if (added.length > 0) {
+        const currentMedia = qc.getQueryData<Media[]>(["media"]) ?? [];
+        const currentFolders = qc.getQueryData<MediaFolder[]>(["media-folders"]) ?? [];
+        const next = applyUploadedMedia(currentMedia, currentFolders, added);
+        qc.setQueryData(["media"], next.media);
+        qc.setQueryData(["media-folders"], next.folders);
+      }
+      const notice = describeUploadBatchToast(added.length, result.failed);
+      if (notice.tone === "success") toast.success(notice.title);
+      else if (notice.tone === "warning") toast.warning(notice.title);
+      else toast.error(notice.title);
+      for (const detail of notice.details) toast.error(detail);
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: ["media"] });
