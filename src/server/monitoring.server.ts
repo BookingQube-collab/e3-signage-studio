@@ -580,11 +580,7 @@ function asUiCampaignStatus(value: string): CampaignStatus {
  */
 export async function getDashboardSummary(accessToken: string): Promise<DashboardSummary> {
   const auth = await requireCmsPermission(accessToken, "dashboard.view");
-  try {
-    await ensureSeedLocations(auth.profile.organizationId);
-  } catch {
-    // Listing should still work if seed cannot run.
-  }
+  void ensureSeedLocations(auth.profile.organizationId).catch(() => undefined);
   const client = getUserClient(accessToken);
   const orgId = auth.profile.organizationId;
   const nowMs = Date.now();

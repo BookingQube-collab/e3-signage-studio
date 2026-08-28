@@ -45,6 +45,20 @@ export function looksLikeEmail(identifier: string): boolean {
   return identifier.trim().includes("@");
 }
 
+/** Map a login field to the Auth email without a second Admin API round-trip. */
+export function loginEmailForIdentifier(
+  identifier: string,
+  profileEmail?: string | null,
+): string {
+  const trimmed = identifier.trim();
+  if (!trimmed) return syntheticEmailForUsername("unknown");
+  if (looksLikeEmail(trimmed)) return trimmed.toLowerCase();
+  return authEmailForUser({
+    username: normalizeUsername(trimmed) || "unknown",
+    email: profileEmail,
+  });
+}
+
 export function authEmailForUser(input: { username: string; email?: string | null }): string {
   const email = input.email?.trim() ?? "";
   if (email) return email;

@@ -1,4 +1,4 @@
-import { createFileRoute, redirect, useNavigate, useRouter } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -8,14 +8,25 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { clearSessionFn, getAuthSessionFn, persistSessionFn, resolveLoginIdentifierFn } from "@/lib/auth-functions";
 import { getPublicCmsUrl } from "@/lib/cms-settings";
+import {
+  LOGIN_AUTH_WAIT_MS,
+  LOGIN_PAGE_CONFIG_WAIT_MS,
+  LOGIN_PAGE_SESSION_WAIT_MS,
+  LOGIN_PAGE_TOKEN_WAIT_MS,
+  LOGIN_PERSIST_WAIT_MS,
+  LOGIN_RATE_LIMIT_WAIT_MS,
+  LOGIN_RESOLVE_WAIT_MS,
+  redirectToDashboard,
+  shouldSkipLoginSessionRedirect,
+} from "@/lib/login-flow";
 import { getPublicSupabaseConfigFn } from "@/lib/public-config-functions";
+import { consumeSignedOutFlag, withTimeout } from "@/lib/sign-out";
 import {
   ensurePublicSupabaseConfig,
   getBrowserAccessToken,
   getSupabase,
   seedPublicSupabaseConfig,
 } from "@/lib/supabase";
-import { consumeSignedOutFlag, withTimeout } from "@/lib/sign-out";
 import { looksLikeEmail } from "@/lib/user-credentials";
 
 export const Route = createFileRoute("/login")({
@@ -40,24 +51,25 @@ export const Route = createFileRoute("/login")({
     ],
   }),
   beforeLoad: async ({ search }) => {
-    if (search.loggedOut || consumeSignedOutFlag()) {
-      await withTimeout(clearSessionFn(), 1500);
+    const signedOutFlag = consumeSignedOutFlag();
+    if (search.loggedOut || signedOutFlag) {
+      void withTimeout(clearSessionFn(), 800);
       return;
     }
-    const accessToken = await getBrowserAccessToken();
-    const auth = await getAuthSessionFn({ data: { accessToken } });
-    if (auth.ok) {
+    const accessToken = (await withTimeout(getBrowserAccessToken(), LOGIN_PAGE_TOKEN_WAIT_MS)) ?? "";
+    if (shouldSkipLoginSessionRedirect({ signedOutFlag: false, accessToken })) return;
+    const auth = await withTimeout(
+      getAuthSessionFn({ data: { accessToken } }),
+      LOGIN_PAGE_SESSION_WAIT_MS,
+    );
+    if (auth?.ok) {
       throw redirect({ to: "/dashboard" });
     }
   },
   loader: async () => {
-    try {
-      const config = await getPublicSupabaseConfigFn();
-      seedPublicSupabaseConfig(config);
-      return { publicSupabase: config };
-    } catch {
-      return { publicSupabase: null };
-    }
+    const config = await withTimeout(getPublicSupabaseConfigFn(), LOGIN_PAGE_CONFIG_WAIT_MS);
+    if (config) seedPublicSupabaseConfig(config);
+    return { publicSupabase: config ?? null };
   },
   component: LoginPage,
 });
@@ -79,8 +91,6 @@ function mapLoginError(message: string): string {
 function LoginPage() {
   const { publicSupabase } = Route.useLoaderData();
   seedPublicSupabaseConfig(publicSupabase);
-  const navigate = useNavigate();
-  const router = useRouter();
   const [identifier, setIdentifier] = useState("rajan@e3.qa");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -94,7 +104,7 @@ function LoginPage() {
       setError("Enter your username or email, and password to continue.");
       return;
     }
-    const config = await ensurePublicSupabaseConfig();
+    const config = await withTimeout(ensurePublicSupabaseConfig(), LOGIN_PAGE_CONFIG_WAIT_MS);
     if (!config) {
       setError("Supabase is not configured on the server.");
       return;
@@ -102,22 +112,42 @@ function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      const limited = await fetch("/api/auth/login-attempt", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ identifier }),
-      });
-      if (limited.status === 429) {
+      const trimmed = identifier.trim();
+      const rateLimit = withTimeout(
+        fetch("/api/auth/login-attempt", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ identifier: trimmed }),
+        }).then((res) => res.status),
+        LOGIN_RATE_LIMIT_WAIT_MS,
+      );
+      const resolved = looksLikeEmail(trimmed)
+        ? Promise.resolve({ email: trimmed })
+        : resolveLoginIdentifierFn({ data: { identifier: trimmed } });
+      const [limitedStatus, identity] = await Promise.all([
+        rateLimit,
+        withTimeout(resolved, LOGIN_RESOLVE_WAIT_MS),
+      ]);
+      if (limitedStatus === 429) {
         setError("Too many sign-in attempts. Try again in a few minutes.");
         return;
       }
-      const resolved = looksLikeEmail(identifier)
-        ? { email: identifier.trim() }
-        : await resolveLoginIdentifierFn({ data: { identifier: identifier.trim() } });
-      const { data, error: signError } = await getSupabase().auth.signInWithPassword({
-        email: resolved.email,
-        password,
-      });
+      if (!identity?.email) {
+        setError("Could not look up that username. Try again.");
+        return;
+      }
+      const authResult = await withTimeout(
+        getSupabase().auth.signInWithPassword({
+          email: identity.email,
+          password,
+        }),
+        LOGIN_AUTH_WAIT_MS,
+      );
+      if (!authResult) {
+        setError("Sign-in timed out. Try again.");
+        return;
+      }
+      const { data, error: signError } = authResult;
       if (signError) {
         setError(mapLoginError(signError.message));
         return;
@@ -126,15 +156,17 @@ function LoginPage() {
         setError("Confirm your email before signing in.");
         return;
       }
-      await persistSessionFn({
-        data: {
-          accessToken: data.session.access_token,
-          refreshToken: data.session.refresh_token,
-        },
-      });
+      await withTimeout(
+        persistSessionFn({
+          data: {
+            accessToken: data.session.access_token,
+            refreshToken: data.session.refresh_token,
+          },
+        }),
+        LOGIN_PERSIST_WAIT_MS,
+      );
       toast.success("Signed in");
-      await router.invalidate();
-      await navigate({ to: "/dashboard" });
+      redirectToDashboard();
     } catch {
       setError("Network error. Check your connection.");
     } finally {
@@ -152,7 +184,7 @@ function LoginPage() {
       setError("Password reset needs an email address. Ask a Super Admin if this account has none.");
       return;
     }
-    const config = await ensurePublicSupabaseConfig();
+    const config = await withTimeout(ensurePublicSupabaseConfig(), LOGIN_PAGE_CONFIG_WAIT_MS);
     if (!config) {
       setError("Supabase is not configured on the server.");
       return;
@@ -160,12 +192,15 @@ function LoginPage() {
     setError(null);
     setResetting(true);
     try {
-      const limited = await fetch("/api/auth/login-attempt", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ identifier }),
-      });
-      if (limited.status === 429) {
+      const limitedStatus = await withTimeout(
+        fetch("/api/auth/login-attempt", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ identifier }),
+        }).then((res) => res.status),
+        LOGIN_RATE_LIMIT_WAIT_MS,
+      );
+      if (limitedStatus === 429) {
         setError("Too many password reset attempts. Try again in a few minutes.");
         return;
       }

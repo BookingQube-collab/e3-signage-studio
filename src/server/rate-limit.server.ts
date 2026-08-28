@@ -27,13 +27,23 @@ async function hitDurable(key: string, name: RateLimitName): Promise<RateLimitDe
   const rule = RATE_LIMITS[name];
   try {
     const admin = getServiceRoleClient();
-    const { data, error } = await admin.rpc("consume_rate_limit", {
-      p_key: key,
-      p_limit: rule.limit,
-      p_window_seconds: rule.windowSeconds,
-    });
-    if (error) return null;
-    return asDecision(data);
+    const rpc = admin
+      .rpc("consume_rate_limit", {
+        p_key: key,
+        p_limit: rule.limit,
+        p_window_seconds: rule.windowSeconds,
+      })
+      .then(({ data, error }) => {
+        if (error) return null;
+        return asDecision(data);
+      });
+    const timed = await Promise.race([
+      rpc,
+      new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), 400);
+      }),
+    ]);
+    return timed;
   } catch {
     return null;
   }

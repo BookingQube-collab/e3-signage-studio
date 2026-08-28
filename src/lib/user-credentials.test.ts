@@ -6,6 +6,7 @@ import {
   assertUsername,
   authEmailForUser,
   isSyntheticLoginEmail,
+  loginEmailForIdentifier,
   looksLikeEmail,
   normalizeUsername,
   passwordError,
@@ -47,4 +48,10 @@ test("username-only accounts use a reserved synthetic email", () => {
 test("login identifier with @ is treated as email", () => {
   assert.equal(looksLikeEmail("rajan@e3.qa"), true);
   assert.equal(looksLikeEmail("booth_ops"), false);
+});
+
+test("username login uses the profile email or the synthetic Auth email", () => {
+  assert.equal(loginEmailForIdentifier("waqar"), `waqar@${SYNTHETIC_LOGIN_DOMAIN}`);
+  assert.equal(loginEmailForIdentifier("Waqar", "waqar@e3.qa"), "waqar@e3.qa");
+  assert.equal(loginEmailForIdentifier("rajan@e3.qa"), "rajan@e3.qa");
 });

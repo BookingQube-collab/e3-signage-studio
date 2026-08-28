@@ -25,9 +25,9 @@ import {
   assertPassword,
   assertUsername,
   authEmailForUser,
+  loginEmailForIdentifier,
   looksLikeEmail,
   normalizeUsername,
-  syntheticEmailForUsername,
 } from "@/lib/user-credentials";
 import { clearAuthCookies, readAuthCookies, setAuthCookies } from "./session-cookies.server";
 import { ensureSeedLocations } from "./location-seed.server";
@@ -501,27 +501,18 @@ export async function createCmsUser(input: {
 
 export async function resolveLoginIdentifier(identifier: string): Promise<{ email: string }> {
   const trimmed = identifier.trim();
-  if (!trimmed) return { email: syntheticEmailForUsername("unknown") };
-  if (looksLikeEmail(trimmed)) return { email: trimmed.toLowerCase() };
+  if (!trimmed) return { email: loginEmailForIdentifier(trimmed) };
+  if (looksLikeEmail(trimmed)) return { email: loginEmailForIdentifier(trimmed) };
 
   const username = normalizeUsername(trimmed);
   try {
     const admin = getServiceRoleClient();
-    const { data } = await admin
-      .from("users")
-      .select("id, email")
-      .eq("username", username)
-      .maybeSingle();
-    if (!data) return { email: syntheticEmailForUsername(username || "unknown") };
-
-    const { data: authUser } = await admin.auth.admin.getUserById((data as { id: string }).id);
-    const authEmail = authUser.user?.email;
-    if (authEmail) return { email: authEmail };
-    const profileEmail = (data as { email: string | null }).email;
-    if (profileEmail) return { email: profileEmail };
-    return { email: syntheticEmailForUsername(username) };
+    const { data } = await admin.from("users").select("email").eq("username", username).maybeSingle();
+    return {
+      email: loginEmailForIdentifier(username, (data as { email: string | null } | null)?.email),
+    };
   } catch {
-    return { email: syntheticEmailForUsername(username || "unknown") };
+    return { email: loginEmailForIdentifier(username) };
   }
 }
 
