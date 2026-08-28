@@ -1,5 +1,6 @@
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, FileImage, FolderInput, MoreVertical, Pencil, PlayCircle, QrCode, Sparkles, Trash2 } from "lucide-react";
-import type { MouseEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type RefObject } from "react";
 
 import {
   DropdownMenu,
@@ -8,8 +9,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { cn } from "@/lib/utils";
+import { ADMIN_QUERY_STALE_MS } from "@/lib/query-defaults";
 import { firstHttpUrl } from "@/lib/playlist-preview";
+import { cn } from "@/lib/utils";
+import { isImageStillUrl, seekVideoToStillFrame, videoStillNeedsHydration } from "@/lib/video-poster";
+import { mediaService } from "@/services";
 import type { Media } from "@/types";
 
 const iconFor = {
@@ -28,35 +32,32 @@ export function MediaThumb({
   className?: string;
   playback?: boolean;
 }) {
-  const Icon = iconFor[item.type];
-  const poster = firstHttpUrl(item.thumbnailUrl);
-  const videoSrc = item.type === "Video" ? firstHttpUrl(item.previewUrl, item.thumbnailUrl) : null;
-  const imageSrc = item.type === "Video" ? poster : firstHttpUrl(item.thumbnailUrl, item.previewUrl);
+  const { media: resolved, rootRef } = useHydratedVideoStill(item);
+  const Icon = iconFor[resolved.type];
+  const poster = firstHttpUrl(resolved.thumbnailUrl);
+  const videoSrc =
+    resolved.type === "Video"
+      ? firstHttpUrl(resolved.previewUrl, isImageStillUrl(poster) ? null : poster)
+      : null;
+  const imageSrc =
+    resolved.type === "Video"
+      ? isImageStillUrl(poster)
+        ? poster
+        : null
+      : firstHttpUrl(resolved.thumbnailUrl, resolved.previewUrl);
 
   return (
     <div
+      ref={rootRef}
       className={cn("grid place-items-center overflow-hidden rounded-xl bg-muted", className)}
       style={{
-        backgroundImage: `linear-gradient(135deg, hsl(${item.thumbnailHue} 55% 22%), hsl(${
-          (item.thumbnailHue + 60) % 360
+        backgroundImage: `linear-gradient(135deg, hsl(${resolved.thumbnailHue} 55% 22%), hsl(${
+          (resolved.thumbnailHue + 60) % 360
         } 45% 14%))`,
       }}
       aria-hidden={!playback}
     >
-      {videoSrc ? (
-        <video
-          src={videoSrc}
-          poster={poster && poster !== videoSrc ? poster : undefined}
-          className="size-full object-cover"
-          muted
-          playsInline
-          autoPlay={playback}
-          controls={playback}
-          loop={playback}
-          preload={playback ? "auto" : "none"}
-          referrerPolicy="no-referrer"
-        />
-      ) : imageSrc ? (
+      {imageSrc ? (
         <img
           src={imageSrc}
           alt=""
@@ -70,11 +71,84 @@ export function MediaThumb({
             event.currentTarget.style.display = "none";
           }}
         />
+      ) : videoSrc ? (
+        <video
+          src={videoSrc}
+          className="size-full object-cover"
+          muted
+          playsInline
+          autoPlay={false}
+          controls={playback}
+          loop={false}
+          preload={playback ? "auto" : "metadata"}
+          referrerPolicy="no-referrer"
+          onLoadedMetadata={(event) => seekVideoToStillFrame(event.currentTarget)}
+          onLoadedData={(event) => seekVideoToStillFrame(event.currentTarget)}
+        />
       ) : (
         <Icon className="size-7 text-foreground/70" />
       )}
     </div>
   );
+}
+
+function useHydratedVideoStill(item: Media): {
+  media: Media;
+  rootRef: RefObject<HTMLDivElement | null>;
+} {
+  const qc = useQueryClient();
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [inView, setInView] = useState(false);
+  const needsHydration = videoStillNeedsHydration(item);
+
+  useLayoutEffect(() => {
+    if (!needsHydration || inView) return;
+    const node = rootRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) setInView(true);
+      },
+      { rootMargin: "120px" },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [inView, needsHydration]);
+
+  const previewQuery = useQuery({
+    queryKey: ["media", item.id, "preview"],
+    queryFn: () => mediaService.get(item.id),
+    enabled: needsHydration && inView,
+    staleTime: ADMIN_QUERY_STALE_MS,
+  });
+
+  useEffect(() => {
+    const full = previewQuery.data;
+    if (!full?.id) return;
+    qc.setQueryData<Media[]>(["media"], (prev) => {
+      if (!Array.isArray(prev)) return prev;
+      return prev.map((row) =>
+        row.id === full.id
+          ? {
+              ...row,
+              ...(full.thumbnailUrl ? { thumbnailUrl: full.thumbnailUrl } : {}),
+              ...(full.previewUrl ? { previewUrl: full.previewUrl } : {}),
+            }
+          : row,
+      );
+    });
+  }, [previewQuery.data, qc]);
+
+  const full = previewQuery.data;
+  const media =
+    full && full.id === item.id
+      ? {
+          ...item,
+          ...(full.thumbnailUrl ? { thumbnailUrl: full.thumbnailUrl } : {}),
+          ...(full.previewUrl ? { previewUrl: full.previewUrl } : {}),
+        }
+      : item;
+  return { media, rootRef };
 }
 
 export function E3MediaCard({

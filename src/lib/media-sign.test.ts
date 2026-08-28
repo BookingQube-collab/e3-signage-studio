@@ -14,6 +14,18 @@ test("library list signs image thumbs only", () => {
   );
 });
 
+test("library list still signs a video poster when one exists", () => {
+  assert.deepEqual(
+    mediaKeysToSign({
+      previewKey: "vid/a.mp4",
+      thumbnailKey: "vid/a-poster.jpg",
+      isImage: false,
+      signAllPreviews: false,
+    }),
+    ["vid/a-poster.jpg"],
+  );
+});
+
 test("detail view still signs the preview for any ready file", () => {
   assert.deepEqual(
     mediaKeysToSign({ previewKey: "vid/a.mp4", isImage: false, signAllPreviews: true }),

@@ -1,0 +1,74 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { isImageStillUrl, seekVideoToStillFrame, videoStillNeedsHydration } from "./video-poster.ts";
+
+test("images never need video still hydration", () => {
+  assert.equal(
+    videoStillNeedsHydration({
+      type: "Image",
+      previewUrl: "https://cdn.example/a.jpg",
+    }),
+    false,
+  );
+});
+
+test("videos without a signed poster or preview need hydration", () => {
+  assert.equal(videoStillNeedsHydration({ type: "Video" }), true);
+  assert.equal(
+    videoStillNeedsHydration({ type: "Video", thumbnailUrl: "not-a-url", previewUrl: "" }),
+    true,
+  );
+});
+
+test("videos with a poster or preview already have a still source", () => {
+  assert.equal(
+    videoStillNeedsHydration({
+      type: "Video",
+      thumbnailUrl: "https://cdn.example/poster.jpg",
+    }),
+    false,
+  );
+  assert.equal(
+    videoStillNeedsHydration({
+      type: "Video",
+      previewUrl: "https://cdn.example/clip.mp4",
+    }),
+    false,
+  );
+});
+
+test("isImageStillUrl only treats image files as posters", () => {
+  assert.equal(isImageStillUrl("https://cdn.example/poster.jpg"), true);
+  assert.equal(isImageStillUrl("https://cdn.example/clip.mp4?token=1"), false);
+  assert.equal(isImageStillUrl("blob:https://e3-cms.vercel.app/abc"), false);
+});
+
+test("seekVideoToStillFrame pauses and moves off t=0 so a frame can paint", () => {
+  const video = {
+    readyState: 1,
+    duration: 55,
+    currentTime: 0,
+    pause() {
+      this.paused = true;
+    },
+    paused: false,
+  };
+  seekVideoToStillFrame(video);
+  assert.equal(video.paused, true);
+  assert.equal(video.currentTime > 0, true);
+  assert.equal(video.currentTime <= 0.25, true);
+});
+
+test("seekVideoToStillFrame is a no-op before metadata is available", () => {
+  const video = {
+    readyState: 0,
+    duration: Number.NaN,
+    currentTime: 0,
+    pause() {
+      throw new Error("should not pause");
+    },
+  };
+  seekVideoToStillFrame(video);
+  assert.equal(video.currentTime, 0);
+});

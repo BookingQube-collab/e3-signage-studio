@@ -104,8 +104,7 @@ async function loadSignedMediaUrls(
     const isImage = mime.startsWith("image/");
     const thumbnailKey =
       asNullableString(current?.["thumbnail_key"]) ?? (isImage ? previewKey : null);
-    keys.push(...mediaKeysToSign({ previewKey, isImage, signAllPreviews: true }));
-    if (thumbnailKey && thumbnailKey !== previewKey) keys.push(thumbnailKey);
+    keys.push(...mediaKeysToSign({ previewKey, thumbnailKey, isImage, signAllPreviews: true }));
     return { id, previewKey, thumbnailKey };
   });
 

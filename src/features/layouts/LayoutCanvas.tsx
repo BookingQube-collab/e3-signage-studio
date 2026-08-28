@@ -1,5 +1,6 @@
 import { firstHttpUrl } from "@/lib/playlist-preview";
 import { cn } from "@/lib/utils";
+import { isImageStillUrl, seekVideoToStillFrame } from "@/lib/video-poster";
 import type { FitMode, Layout, LayoutZone, Media } from "@/types";
 
 function fitObjectClass(fit: FitMode | null | undefined): string {
@@ -30,25 +31,17 @@ function ZoneMediaFill({
   playback?: boolean;
 }) {
   const poster = firstHttpUrl(media.thumbnailUrl);
-  const videoSrc = media.type === "Video" ? firstHttpUrl(media.previewUrl, media.thumbnailUrl) : null;
+  const videoSrc =
+    media.type === "Video"
+      ? firstHttpUrl(media.previewUrl, isImageStillUrl(poster) ? null : poster)
+      : null;
   const imageSrc =
-    media.type === "Video" ? poster : firstHttpUrl(media.thumbnailUrl, media.previewUrl);
+    media.type === "Video"
+      ? isImageStillUrl(poster)
+        ? poster
+        : null
+      : firstHttpUrl(media.thumbnailUrl, media.previewUrl);
   const objectClass = fitObjectClass(fit);
-
-  if (videoSrc) {
-    return (
-      <video
-        src={videoSrc}
-        poster={poster && poster !== videoSrc ? poster : undefined}
-        className={cn("absolute inset-0 size-full", objectClass)}
-        muted
-        playsInline
-        autoPlay={playback}
-        loop={playback}
-        preload={playback ? "auto" : "none"}
-      />
-    );
-  }
 
   if (imageSrc) {
     return (
@@ -61,6 +54,26 @@ function ZoneMediaFill({
         referrerPolicy="no-referrer"
         onError={(event) => {
           event.currentTarget.style.display = "none";
+        }}
+      />
+    );
+  }
+
+  if (videoSrc) {
+    return (
+      <video
+        src={videoSrc}
+        className={cn("absolute inset-0 size-full", objectClass)}
+        muted
+        playsInline
+        autoPlay={playback}
+        loop={playback}
+        preload={playback ? "auto" : "metadata"}
+        onLoadedMetadata={(event) => {
+          if (!playback) seekVideoToStillFrame(event.currentTarget);
+        }}
+        onLoadedData={(event) => {
+          if (!playback) seekVideoToStillFrame(event.currentTarget);
         }}
       />
     );

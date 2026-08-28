@@ -354,19 +354,22 @@ async function toRecords(
     const previewKey =
       current && current.status === "READY" && current.storage_key ? current.storage_key : null;
     const image = previewKey && current?.mime_type.startsWith("image/") ? previewKey : null;
+    const thumbnailKey =
+      current && current.status === "READY" ? (current.thumbnail_key ?? image) : image;
     previewKeys.push(
       ...mediaKeysToSign({
         previewKey,
+        thumbnailKey,
         isImage: Boolean(image),
         signAllPreviews,
       }),
     );
-    return { row, current, image, previewKey };
+    return { row, current, image, previewKey, thumbnailKey };
   });
 
   const urls = await createObjectDownloadUrls(previewKeys);
 
-  return picked.map(({ row, current, image, previewKey }) => {
+  return picked.map(({ row, current, image, previewKey, thumbnailKey }) => {
     const type = isMediaType(row.type) ? row.type : "IMAGE";
     const status = isMediaStatus(row.status) ? row.status : "PROCESSING";
     const checksum = current?.checksum_sha256 ?? row.id.replace(/-/g, "").slice(0, 64);
@@ -385,7 +388,7 @@ async function toRecords(
       uploadedAt: dateLabel(row.created_at),
       version: current ? `v${current.version_number}` : "v1",
       thumbnailHue: hueFromChecksum(checksum),
-      thumbnailUrl: image ? (urls.get(image) ?? null) : null,
+      thumbnailUrl: thumbnailKey ? (urls.get(thumbnailKey) ?? null) : null,
       previewUrl: signAllPreviews && previewKey ? (urls.get(previewKey) ?? null) : image ? (urls.get(image) ?? null) : null,
       folderId: row.folder_id,
       folderName: row.folder_id ? (folderNames.get(row.folder_id) ?? null) : null,
@@ -761,7 +764,8 @@ async function toCompletedRecord(
   const type = isMediaType(media.type) ? media.type : "IMAGE";
   const isImage = version.mime_type.startsWith("image/");
   const previewKey = version.storage_key || null;
-  const keys = mediaKeysToSign({ previewKey, isImage, signAllPreviews: true });
+  const thumbnailKey = version.thumbnail_key || (isImage ? previewKey : null);
+  const keys = mediaKeysToSign({ previewKey, thumbnailKey, isImage, signAllPreviews: true });
   const [urls, folderRow] = await Promise.all([
     createObjectDownloadUrls(keys),
     media.folder_id
@@ -784,7 +788,7 @@ async function toCompletedRecord(
     uploadedAt: dateLabel(media.created_at),
     version: `v${version.version_number || 1}`,
     thumbnailHue: hueFromChecksum(checksum),
-    thumbnailUrl: isImage && previewKey ? (urls.get(previewKey) ?? null) : null,
+    thumbnailUrl: thumbnailKey ? (urls.get(thumbnailKey) ?? null) : null,
     previewUrl: previewKey ? (urls.get(previewKey) ?? null) : null,
     folderId: media.folder_id,
     folderName: media.folder_id ? asNullableString((folderRow.data as { name?: string } | null)?.name) : null,
