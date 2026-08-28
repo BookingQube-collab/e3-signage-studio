@@ -27,6 +27,11 @@ export function shouldSkipLibraryAutoSync(pendingExists: boolean): boolean {
   return !pendingExists;
 }
 
+/** Manual Sync from Cloudflare must still scan R2 when nothing is PROCESSING. */
+export function shouldSkipManualStorageResync(): boolean {
+  return false;
+}
+
 /** Intersect one R2 page with pending storage keys — never send the whole bucket to Postgres. */
 export function storageKeysOnPage(pageKeys: string[], pendingKeys: Iterable<string>): string[] {
   const pending = pendingKeys instanceof Set ? pendingKeys : new Set(pendingKeys);
@@ -144,6 +149,17 @@ export function buildOptimisticLibraryMedia(input: {
 
 export function isVisibleLibraryStatus(status: string): boolean {
   return status === "READY";
+}
+
+/** Only a live READY row owns a key. PROCESSING/archived rows must be restorable. */
+export function isReadyLibraryCoveredKey(input: {
+  hasMediaRow: boolean;
+  status: string;
+  archivedAt: string | null | undefined;
+}): boolean {
+  if (!input.hasMediaRow) return false;
+  if (typeof input.archivedAt === "string" && input.archivedAt.length > 0) return false;
+  return isVisibleLibraryStatus(input.status);
 }
 
 export function incompleteVersionReusable(input: {

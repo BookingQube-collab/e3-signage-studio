@@ -19,6 +19,8 @@ import {
   parseMediaStorageKey,
   renameMediaDisplayName,
   restoredLibraryFilename,
+  ensurePlayableFilename,
+  inferOrphanMediaMime,
   safeMediaFilename,
   uniqueLibraryFilename,
   uploadLimitsHint,
@@ -98,6 +100,8 @@ test("rename only changes the display name and keeps a playable extension", () =
   assert.equal(renameMediaDisplayName("party.jpeg", "birthday.png"), "birthday.png");
   assert.equal(renameMediaDisplayName("loop.mp4", "welcome loop"), "welcome loop.mp4");
   assert.equal(renameMediaDisplayName("hero.jpg", "hero.gif"), "hero.jpg");
+  assert.equal(ensurePlayableFilename("Birthday video", "video/mp4"), "Birthday video.mp4");
+  assert.equal(ensurePlayableFilename("loop.mp4", "video/mp4"), "loop.mp4");
 });
 
 test("storage keys round-trip org, media id, version, and checksum", () => {
@@ -119,4 +123,17 @@ test("storage keys round-trip org, media id, version, and checksum", () => {
     restoredLibraryFilename("22222222-2222-4222-8222-222222222222", "image/jpeg"),
     "restored-22222222.jpg",
   );
+  const videoKey = buildStorageKey({
+    organizationId: "11111111-1111-4111-8111-111111111111",
+    mediaId: "22222222-2222-4222-8222-222222222222",
+    versionNumber: 1,
+    checksumSha256: "cd".repeat(32),
+    mime: "video/mp4",
+  });
+  assert.equal(parseMediaStorageKey(videoKey)?.mime, "video/mp4");
+  const extensionless = videoKey.replace(/\.mp4$/i, "");
+  assert.equal(parseMediaStorageKey(extensionless)?.mime, null);
+  assert.equal(parseMediaStorageKey(extensionless)?.checksumSha256, "cd".repeat(32));
+  assert.equal(inferOrphanMediaMime(extensionless, "video/mp4"), "video/mp4");
+  assert.equal(inferOrphanMediaMime(`${extensionless}.webm`, ""), "video/mp4");
 });

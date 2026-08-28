@@ -148,20 +148,21 @@ export function r2CreateDownloadUrl(key: string, expiresIn: number): string {
   return signedUrl({ method: "GET", key, expiresIn }).url;
 }
 
-function sizeFromObjectHeaders(headers: Headers): { sizeBytes: number } {
+function sizeFromObjectHeaders(headers: Headers): { sizeBytes: number; contentType: string | null } {
+  const contentType = headers.get("content-type");
   const range = headers.get("content-range");
   if (range) {
     const total = range.split("/")[1];
     const fromRange = total ? Number(total) : NaN;
-    if (Number.isFinite(fromRange)) return { sizeBytes: fromRange };
+    if (Number.isFinite(fromRange)) return { sizeBytes: fromRange, contentType };
   }
   const length = headers.get("content-length");
   const fromLength = length ? Number(length) : NaN;
-  if (Number.isFinite(fromLength)) return { sizeBytes: fromLength };
-  return { sizeBytes: -1 };
+  if (Number.isFinite(fromLength)) return { sizeBytes: fromLength, contentType };
+  return { sizeBytes: -1, contentType };
 }
 
-async function r2ProbeObjectViaGet(key: string): Promise<{ sizeBytes: number } | null> {
+async function r2ProbeObjectViaGet(key: string): Promise<{ sizeBytes: number; contentType: string | null } | null> {
   const { url } = signedUrl({ method: "GET", key, expiresIn: 60 });
   const response = await fetchWithTimeout(
     url,
@@ -175,7 +176,9 @@ async function r2ProbeObjectViaGet(key: string): Promise<{ sizeBytes: number } |
   throw new Error(`Could not verify uploaded object (${response.status}).`);
 }
 
-export async function r2HeadObject(key: string): Promise<{ sizeBytes: number } | null> {
+export async function r2HeadObject(
+  key: string,
+): Promise<{ sizeBytes: number; contentType: string | null } | null> {
   const { url } = signedUrl({ method: "HEAD", key, expiresIn: 60 });
   const response = await fetchWithTimeout(url, { method: "HEAD" }, COMPLETE_OBJECT_STAT_TIMEOUT_MS);
   if (response.status === 404) return null;

@@ -10,8 +10,10 @@ import {
   describeUploadBatchToast,
   incompleteVersionReusable,
   isVisibleLibraryStatus,
+  isReadyLibraryCoveredKey,
   orphanStorageKeysOnPage,
   settleEachUpload,
+  shouldSkipManualStorageResync,
   shouldDiscardIncompleteMedia,
   shouldImportOrphanStorageKey,
   shouldPromoteIncompleteObject,
@@ -225,6 +227,7 @@ test("resync reattaches R2 objects that have no READY library row", () => {
   const page = ["org/media-a/v1/aaa.jpg", "org/media-b/v1/bbb.jpg", "org/media-c/v1/ccc.jpg"];
   assert.equal(shouldImportOrphanStorageKey("org/media-b/v1/bbb.jpg", ready), true);
   assert.equal(shouldImportOrphanStorageKey("org/media-a/v1/aaa.jpg", ready), false);
+  assert.equal(shouldImportOrphanStorageKey("org/media-v/v1/ccc.mp4", ready), true);
   assert.deepEqual(orphanStorageKeysOnPage(page, ready), [
     "org/media-b/v1/bbb.jpg",
     "org/media-c/v1/ccc.jpg",
@@ -238,6 +241,23 @@ test("resync reattaches R2 objects that have no READY library row", () => {
 test("library auto-sync skips when no PROCESSING/FAILED rows exist", () => {
   assert.equal(shouldSkipLibraryAutoSync(false), true);
   assert.equal(shouldSkipLibraryAutoSync(true), false);
+  assert.equal(shouldSkipManualStorageResync(), false);
+  assert.equal(
+    isReadyLibraryCoveredKey({ hasMediaRow: true, status: "READY", archivedAt: null }),
+    true,
+  );
+  assert.equal(
+    isReadyLibraryCoveredKey({ hasMediaRow: true, status: "PROCESSING", archivedAt: null }),
+    false,
+  );
+  assert.equal(
+    isReadyLibraryCoveredKey({ hasMediaRow: true, status: "READY", archivedAt: "2026-08-28T00:00:00.000Z" }),
+    false,
+  );
+  assert.equal(
+    isReadyLibraryCoveredKey({ hasMediaRow: false, status: "READY", archivedAt: null }),
+    false,
+  );
 });
 
 test("resync matches one R2 page in chunks instead of joining the whole bucket", () => {

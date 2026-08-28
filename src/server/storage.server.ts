@@ -96,17 +96,25 @@ export async function createObjectDownloadUrl(key: string, expiresIn = DOWNLOAD_
 
 export async function listStoredObjectKeysPage(
   prefix: string,
-  options?: { maxKeys?: number; continuationToken?: string | null; timeoutMs?: number },
+  options?: {
+    maxKeys?: number;
+    continuationToken?: string | null;
+    timeoutMs?: number;
+    throwOnError?: boolean;
+  },
 ): Promise<{ keys: string[]; nextContinuationToken: string | null } | null> {
   if (!isR2Configured()) return null;
   try {
     return await r2ListObjectKeysPage(prefix, options);
-  } catch {
+  } catch (error) {
+    if (options?.throwOnError) throw error;
     return null;
   }
 }
 
-export async function statObject(key: string): Promise<{ sizeBytes: number } | null> {
+export async function statObject(
+  key: string,
+): Promise<{ sizeBytes: number; contentType?: string | null } | null> {
   if (isR2Configured()) {
     return r2HeadObject(key);
   }

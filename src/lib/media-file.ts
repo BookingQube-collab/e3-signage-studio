@@ -15,6 +15,7 @@ const MIME_BY_EXT: Record<string, AllowedMediaMime> = {
   ".png": "image/png",
   ".webp": "image/webp",
   ".mp4": "video/mp4",
+  ".webm": "video/mp4",
 };
 
 export function fileExtension(filename: string): string {
@@ -54,18 +55,17 @@ export type ParsedMediaStorageKey = {
   mediaId: string;
   versionNumber: number;
   checksumSha256: string;
-  mime: AllowedMediaMime;
+  mime: AllowedMediaMime | null;
 };
 
 const STORAGE_KEY_RE =
-  /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/v(\d+)\/([a-f0-9]{64})\.(jpg|jpeg|png|webp|mp4)$/i;
+  /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/v(\d+)\/([a-f0-9]{64})(?:\.(jpg|jpeg|png|webp|mp4|webm))?$/i;
 
 export function parseMediaStorageKey(key: string): ParsedMediaStorageKey | null {
   const match = STORAGE_KEY_RE.exec(key.trim());
   if (!match) return null;
-  const ext = `.${(match[5] ?? "").toLowerCase()}`;
-  const mime = MIME_BY_EXT[ext];
-  if (!mime) return null;
+  const ext = match[5] ? `.${match[5].toLowerCase()}` : "";
+  const mime = ext ? (MIME_BY_EXT[ext] ?? null) : null;
   const versionNumber = Number.parseInt(match[3] ?? "", 10);
   if (!Number.isInteger(versionNumber) || versionNumber < 1) return null;
   return {
@@ -75,6 +75,29 @@ export function parseMediaStorageKey(key: string): ParsedMediaStorageKey | null 
     checksumSha256: (match[4] ?? "").toLowerCase(),
     mime,
   };
+}
+
+export function inferOrphanMediaMime(key: string, contentType?: string | null): AllowedMediaMime | null {
+  const parsed = parseMediaStorageKey(key);
+  if (parsed?.mime) return parsed.mime;
+  const reported = (contentType ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
+  if (isAllowedMediaMime(reported)) return reported;
+  if (reported.startsWith("video/")) return "video/mp4";
+  if (reported === "image/jpg" || reported === "image/pjpeg") return "image/jpeg";
+  const fromExt = MIME_BY_EXT[fileExtension(key)];
+  return fromExt ?? null;
+}
+
+/** Keep a playable extension after CMS rename so Videos/Images filters still match. */
+export function ensurePlayableFilename(filename: string, mime: AllowedMediaMime): string {
+  const safe = safeMediaFilename(filename);
+  const neededExt = `.${extensionForMime(mime)}`;
+  const currentExt = fileExtension(safe);
+  if (currentExt && MIME_BY_EXT[currentExt]) return safe;
+  const stem = currentExt && safe.toLowerCase().endsWith(currentExt)
+    ? safe.slice(0, safe.length - currentExt.length)
+    : safe.replace(/\.+$/g, "");
+  return `${(stem.trim() || "media")}${neededExt}`.slice(0, 255);
 }
 
 export function restoredLibraryFilename(mediaId: string, mime: AllowedMediaMime): string {

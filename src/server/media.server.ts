@@ -10,6 +10,7 @@ import {
   MAX_IMAGE_UPLOAD_BYTES,
   MAX_VIDEO_UPLOAD_BYTES,
   parseUploadByteLimit,
+  isAllowedMediaMime,
 } from "@e3/validation";
 
 import type { MediaFolderRecord, MediaRecord } from "@/services/media-map";
@@ -22,16 +23,18 @@ import {
   assertUploadSize,
   buildStorageKey,
   hueFromChecksum,
+  inferOrphanMediaMime,
   mediaTypeFromMime,
   normalizeChecksum,
   parseMediaStorageKey,
   renameMediaDisplayName,
   restoredLibraryFilename,
+  ensurePlayableFilename,
   safeMediaFilename,
   uniqueLibraryFilename,
 } from "../lib/media-file";
 import { mediaKeysToSign } from "../lib/media-sign";
-import { describeCanceledStatement, describeResyncError, isCanceledStatementError } from "../lib/media-upload-error";
+import { describeCanceledStatement, describeResyncError, isCanceledStatementError, RESYNC_TIMEOUT_MESSAGE } from "../lib/media-upload-error";
 import {
   FOLDER_DUPLICATE_MESSAGE,
   assertFolderName,
@@ -56,6 +59,8 @@ import {
   shouldResyncRestoreLibraryRow,
   shouldSkipCompleteObjectStat,
   shouldSkipLibraryAutoSync,
+  shouldSkipManualStorageResync,
+  isReadyLibraryCoveredKey,
   STORAGE_LIST_TIMEOUT_MS,
 } from "../lib/media-upload-lifecycle";
 import { requireCmsPermission } from "./auth.server";
@@ -73,6 +78,7 @@ import {
   createObjectUploadUrl,
   deleteObjects,
   listStoredObjectKeysPage,
+  statObject,
   storageBackendName,
   UPLOAD_URL_TTL_SECONDS,
 } from "./storage.server";
@@ -680,6 +686,43 @@ async function markUploadReady(
   throwIfError(mediaUpdateError, "Could not finalize media.");
 }
 
+function mimeForRestoredRow(mimeType: string, filename: string, key: string): AllowedMediaMime | null {
+  if (isAllowedMediaMime(mimeType)) return mimeType;
+  return inferOrphanMediaMime(key, mimeType) ?? inferOrphanMediaMime(filename, mimeType);
+}
+
+async function applyRestoredLibraryMetadata(
+  client: ReturnType<typeof getUserClient>,
+  organizationId: string,
+  media: MediaRow,
+  mime: AllowedMediaMime,
+): Promise<MediaRow> {
+  const type = mediaTypeFromMime(mime);
+  const filename = await uniqueNameInFolder(
+    client,
+    organizationId,
+    media.folder_id,
+    ensurePlayableFilename(media.name, mime),
+    media.id,
+  );
+  if (filename === media.name && type === media.type && mime === media.mime_type) {
+    return { ...media, status: "READY", archived_at: null, mime_type: mime, type };
+  }
+  const { error } = await client
+    .from("media")
+    .update({ name: filename, type, mime_type: mime })
+    .eq("id", media.id);
+  throwIfError(error, "Could not restore media.");
+  return {
+    ...media,
+    name: filename,
+    type,
+    mime_type: mime,
+    status: "READY",
+    archived_at: null,
+  };
+}
+
 function pickIncompleteVersion(versions: MediaVersionRow[], media: MediaRow): MediaVersionRow | null {
   const current = versions.find((version) => version.id === media.current_version_id);
   if (current && (current.status === "PROCESSING" || current.status === "FAILED")) return current;
@@ -859,6 +902,15 @@ async function promoteRowsInBatches(
       batch.map(async ({ media, version }) => {
         try {
           await markUploadReady(client, media, version);
+          const mime = mimeForRestoredRow(version.mime_type, media.name, version.storage_key);
+          if (mime) {
+            return applyRestoredLibraryMetadata(client, media.organization_id, {
+              ...media,
+              status: "READY",
+              current_version_id: version.id,
+              mime_type: mime,
+            }, mime);
+          }
           return {
             ...media,
             status: "READY",
@@ -897,15 +949,25 @@ async function loadCoveredStorageKeys(
   if (versions.length === 0) return new Set();
   const { data: mediaRaw, error: mediaError } = await client
     .from("media")
-    .select("id")
+    .select("id, status, archived_at")
     .in(
       "id",
       [...new Set(versions.map((row) => row.media_id))],
     )
     .eq("organization_id", organizationId);
   throwIfError(mediaError, "Could not match stored media.");
-  const inOrg = new Set((mediaRaw ?? []).map((row) => asString((row as { id: string }).id)));
-  return new Set(versions.filter((row) => inOrg.has(row.media_id)).map((row) => row.storage_key));
+  const readyIds = new Set(
+    (mediaRaw ?? [])
+      .filter((row) =>
+        isReadyLibraryCoveredKey({
+          hasMediaRow: true,
+          status: asString((row as { status: string }).status),
+          archivedAt: asNullableString((row as { archived_at: string | null }).archived_at),
+        }),
+      )
+      .map((row) => asString((row as { id: string }).id)),
+  );
+  return new Set(versions.filter((row) => readyIds.has(row.media_id)).map((row) => row.storage_key));
 }
 
 async function restoreLibraryRowsForKeys(
@@ -955,6 +1017,16 @@ async function restoreLibraryRowsForKeys(
               .eq("id", media.id);
             throwIfError(clearArchive, "Could not restore media.");
           }
+          const mime = mimeForRestoredRow(version.mime_type, media.name, version.storage_key);
+          if (mime) {
+            return applyRestoredLibraryMetadata(client, organizationId, {
+              ...media,
+              status: "READY",
+              archived_at: null,
+              current_version_id: version.id,
+              mime_type: mime,
+            }, mime);
+          }
           return {
             ...media,
             status: "READY",
@@ -975,6 +1047,27 @@ async function restoreLibraryRowsForKeys(
   return restored;
 }
 
+async function resolveOrphanMime(
+  key: string,
+  existing: MediaRow | null,
+): Promise<{ mime: AllowedMediaMime; sizeBytes: number } | null> {
+  const parsed = parseMediaStorageKey(key);
+  const fromExisting = existing ? mimeForRestoredRow(existing.mime_type, existing.name, key) : null;
+  const fromKey = inferOrphanMediaMime(key);
+  if (fromKey || fromExisting) {
+    return { mime: (fromKey ?? fromExisting) as AllowedMediaMime, sizeBytes: 0 };
+  }
+  try {
+    const stat = await statObject(key);
+    if (!stat) return null;
+    const mime = inferOrphanMediaMime(key, stat.contentType) ?? fromExisting;
+    if (!mime) return null;
+    return { mime, sizeBytes: stat.sizeBytes >= 0 ? stat.sizeBytes : 0 };
+  } catch {
+    return fromExisting ? { mime: fromExisting, sizeBytes: 0 } : null;
+  }
+}
+
 async function createLibraryRowsForOrphanKeys(
   client: ReturnType<typeof getUserClient>,
   organizationId: string,
@@ -990,11 +1083,14 @@ async function createLibraryRowsForOrphanKeys(
         if (!parsed || parsed.organizationId !== organizationId) return null;
         try {
           const existing = await getMediaRow(client, parsed.mediaId, organizationId);
+          const resolved = await resolveOrphanMime(key, existing);
+          if (!resolved) return null;
+          const { mime, sizeBytes } = resolved;
+          const thumbnailKey = mime.startsWith("image/") ? key : null;
           if (existing) {
             const restored = await restoreLibraryRowsForKeys(client, organizationId, [key]);
             if (restored[0]) return restored[0];
             if (isVisibleLibraryStatus(existing.status) && !existing.archived_at) return null;
-            const thumbnailKey = parsed.mime.startsWith("image/") ? key : null;
             const { data: versionRaw, error: versionError } = await client
               .from("media_versions")
               .insert({
@@ -1002,12 +1098,12 @@ async function createLibraryRowsForOrphanKeys(
                 version_number: parsed.versionNumber,
                 storage_key: key,
                 thumbnail_key: thumbnailKey,
-                size_bytes: 0,
+                size_bytes: sizeBytes,
                 width: null,
                 height: null,
                 duration_ms: null,
                 checksum_sha256: parsed.checksumSha256,
-                mime_type: parsed.mime,
+                mime_type: mime,
                 status: "READY",
                 created_by: createdBy,
               })
@@ -1027,20 +1123,19 @@ async function createLibraryRowsForOrphanKeys(
                 .eq("id", existing.id);
               throwIfError(clearArchive, "Could not restore media.");
             }
-            return {
+            return applyRestoredLibraryMetadata(client, organizationId, {
               ...existing,
               status: "READY",
               archived_at: null,
               current_version_id: version.id,
-              mime_type: parsed.mime,
-            };
+              mime_type: mime,
+            }, mime);
           }
-          const type = mediaTypeFromMime(parsed.mime);
           const filename = await uniqueNameInFolder(
             client,
             organizationId,
             null,
-            restoredLibraryFilename(parsed.mediaId, parsed.mime),
+            restoredLibraryFilename(parsed.mediaId, mime),
           );
           const { data: mediaRaw, error: mediaError } = await client
             .from("media")
@@ -1048,8 +1143,8 @@ async function createLibraryRowsForOrphanKeys(
               id: parsed.mediaId,
               organization_id: organizationId,
               name: filename,
-              type,
-              mime_type: parsed.mime,
+              type: mediaTypeFromMime(mime),
+              mime_type: mime,
               status: "PROCESSING",
               folder_id: null,
               location_ids: locationIds,
@@ -1066,7 +1161,6 @@ async function createLibraryRowsForOrphanKeys(
           }
           throwIfError(mediaError, "Could not restore media.");
           const media = mapMedia(mediaRaw as Record<string, unknown>);
-          const thumbnailKey = parsed.mime.startsWith("image/") ? key : null;
           const { data: versionRaw, error: versionError } = await client
             .from("media_versions")
             .insert({
@@ -1074,12 +1168,12 @@ async function createLibraryRowsForOrphanKeys(
               version_number: parsed.versionNumber,
               storage_key: key,
               thumbnail_key: thumbnailKey,
-              size_bytes: 0,
+              size_bytes: sizeBytes,
               width: null,
               height: null,
               duration_ms: null,
               checksum_sha256: parsed.checksumSha256,
-              mime_type: parsed.mime,
+              mime_type: mime,
               status: "READY",
               created_by: createdBy,
             })
@@ -1088,12 +1182,12 @@ async function createLibraryRowsForOrphanKeys(
           throwIfError(versionError, "Could not restore media version.");
           const version = mapVersion(versionRaw as Record<string, unknown>);
           await markUploadReady(client, media, version);
-          return {
+          return applyRestoredLibraryMetadata(client, organizationId, {
             ...media,
             status: "READY",
             current_version_id: version.id,
-            mime_type: parsed.mime,
-          };
+            mime_type: mime,
+          }, mime);
         } catch (error) {
           if (isCanceledStatementError(error instanceof Error ? error.message : "")) throw error;
           return null;
@@ -1122,10 +1216,11 @@ async function promotePendingFromR2Pages(
   options: PromoteFromR2Options,
 ): Promise<MediaRow[]> {
   const importOrphans = Boolean(options.importOrphans);
-  if (
-    !importOrphans &&
-    shouldSkipLibraryAutoSync(await hasIncompleteUploads(client, organizationId, options.folderId))
-  ) {
+  if (!importOrphans) {
+    if (shouldSkipLibraryAutoSync(await hasIncompleteUploads(client, organizationId, options.folderId))) {
+      return [];
+    }
+  } else if (shouldSkipManualStorageResync()) {
     return [];
   }
 
@@ -1142,50 +1237,62 @@ async function promotePendingFromR2Pages(
     return fresh;
   }
 
-  if (options.maxPages <= AUTO_SYNC_R2_MAX_PAGES && !importOrphans) {
-    const pending = await loadIncompleteMediaWithVersions(client, organizationId, options.folderId, 20);
+  async function promoteKnownIncomplete(folderId?: string | null, limit?: number): Promise<void> {
+    const pending = await loadIncompleteMediaWithVersions(client, organizationId, folderId, limit);
     for (const batch of chunkItems(pending, RESYNC_UPDATE_BATCH_SIZE)) {
       const remainingMs = options.deadlineMs - Date.now();
       if (remainingMs < 400) break;
       const found: Array<{ media: MediaRow; version: MediaVersionRow }> = [];
       await Promise.all(
         batch.map(async (row) => {
-          const page = await listStoredObjectKeysPage(row.version.storage_key, {
-            maxKeys: 1,
-            timeoutMs: Math.min(800, remainingMs),
-          });
-          if (page?.keys.includes(row.version.storage_key)) found.push(row);
+          if (seen.has(row.media.id)) return;
+          try {
+            const stat = await statObject(row.version.storage_key);
+            if (stat) found.push(row);
+          } catch {
+            // HEAD can flake; ListBucket orphan scan still has a chance later.
+          }
         }),
       );
       if (found.length === 0) continue;
       promoted.push(...take(await promoteRowsInBatches(client, found)));
     }
-    return promoted;
   }
 
+  await promoteKnownIncomplete(importOrphans ? undefined : options.folderId, importOrphans ? 80 : 20);
+  if (!importOrphans) return promoted;
+
   let token: string | null = null;
+  let timedOut = false;
   for (let page = 0; page < options.maxPages; page += 1) {
     const remainingMs = options.deadlineMs - Date.now();
-    if (remainingMs < 400) break;
-    const listed = await listStoredObjectKeysPage(`${organizationId}/`, {
-      maxKeys: RESYNC_R2_PAGE_SIZE,
-      continuationToken: token,
-      timeoutMs: Math.min(STORAGE_LIST_TIMEOUT_MS, remainingMs),
-    });
+    if (remainingMs < 400) {
+      timedOut = true;
+      break;
+    }
+    let listed: { keys: string[]; nextContinuationToken: string | null } | null;
+    try {
+      listed = await listStoredObjectKeysPage(`${organizationId}/`, {
+        maxKeys: RESYNC_R2_PAGE_SIZE,
+        continuationToken: token,
+        timeoutMs: Math.min(STORAGE_LIST_TIMEOUT_MS, remainingMs),
+        throwOnError: true,
+      });
+    } catch {
+      timedOut = true;
+      break;
+    }
     if (!listed || listed.keys.length === 0) break;
 
     for (const keyChunk of chunkItems(listed.keys, RESYNC_KEY_IN_CHUNK)) {
-      if (options.deadlineMs - Date.now() < 400) break;
-      const matches = await loadPendingMatchingStorageKeys(
-        client,
-        organizationId,
-        keyChunk,
-        options.folderId,
-      );
+      if (options.deadlineMs - Date.now() < 400) {
+        timedOut = true;
+        break;
+      }
+      const matches = await loadPendingMatchingStorageKeys(client, organizationId, keyChunk);
       if (matches.length > 0) {
         promoted.push(...take(await promoteRowsInBatches(client, matches)));
       }
-      if (!importOrphans) continue;
       const restored = await restoreLibraryRowsForKeys(client, organizationId, keyChunk);
       if (restored.length > 0) promoted.push(...take(restored));
       const covered = await loadCoveredStorageKeys(client, organizationId, keyChunk);
@@ -1204,32 +1311,14 @@ async function promotePendingFromR2Pages(
       );
     }
 
+    if (timedOut) break;
     if (!listed.nextContinuationToken) break;
     token = listed.nextContinuationToken;
   }
 
-  if (options.deadlineMs - Date.now() >= 400) {
-    const leftover = (await loadIncompleteMediaWithVersions(client, organizationId, options.folderId)).filter(
-      (row) => !seen.has(row.media.id),
-    );
-    for (const batch of chunkItems(leftover, RESYNC_UPDATE_BATCH_SIZE)) {
-      const remainingMs = options.deadlineMs - Date.now();
-      if (remainingMs < 400) break;
-      const found: Array<{ media: MediaRow; version: MediaVersionRow }> = [];
-      await Promise.all(
-        batch.map(async (row) => {
-          const page = await listStoredObjectKeysPage(row.version.storage_key, {
-            maxKeys: 1,
-            timeoutMs: Math.min(1500, remainingMs),
-          });
-          if (page?.keys.includes(row.version.storage_key)) found.push(row);
-        }),
-      );
-      if (found.length === 0) continue;
-      promoted.push(...take(await promoteRowsInBatches(client, found)));
-    }
+  if (timedOut && promoted.length === 0) {
+    throw new Error(RESYNC_TIMEOUT_MESSAGE);
   }
-
   return promoted;
 }
 
