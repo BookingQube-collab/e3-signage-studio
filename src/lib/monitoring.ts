@@ -110,25 +110,47 @@ export function isStorageAlert(usedGb: number, totalGb: number): boolean {
 }
 
 /** True when Cloudflare / org media usage has reached the configured quota (8 GiB by default). */
-export function isCloudStorageAlert(usedGb: number, totalGb: number): boolean {
-  return storageUsedRatio(usedGb, totalGb) >= CLOUD_STORAGE_ALERT_RATIO;
+export function isCloudStorageAlert(usedBytes: number, totalBytes: number): boolean {
+  return storageUsedRatio(usedBytes, totalBytes) >= CLOUD_STORAGE_ALERT_RATIO;
 }
 
 export type CloudStorageHealth = {
-  usedGb: number;
-  totalGb: number;
+  usedBytes: number;
+  totalBytes: number;
 };
+
+/** Human-readable size for dashboard / alerts (binary KB/MB/GB). */
+export function formatStorageBytes(bytes: number): string {
+  const b = Number.isFinite(bytes) ? Math.max(0, bytes) : 0;
+  if (b < 1024) return `${Math.round(b)} B`;
+  const kb = b / 1024;
+  if (kb < 1024) return `${formatStorageNumber(kb)} KB`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${formatStorageNumber(mb)} MB`;
+  return `${formatStorageNumber(mb / 1024)} GB`;
+}
+
+function formatStorageNumber(n: number): string {
+  if (n >= 100) return n.toFixed(0);
+  if (n >= 10) return Number(n.toFixed(1)).toString();
+  return Number(n.toFixed(2)).toString();
+}
+
+/** e.g. "12 MB / 8 GB" for the Cloud storage dashboard card. */
+export function formatCloudStorageUsage(cloud: CloudStorageHealth): string {
+  return `${formatStorageBytes(cloud.usedBytes)} / ${formatStorageBytes(cloud.totalBytes)}`;
+}
 
 /** Org Cloudflare R2 quota alert — distinct from per-screen device disk. */
 export function deriveCloudStorageAlert(
   cloud: CloudStorageHealth | null | undefined,
   nowLabel = "just now",
 ): AlertItem | null {
-  if (!cloud || !isCloudStorageAlert(cloud.usedGb, cloud.totalGb)) return null;
+  if (!cloud || !isCloudStorageAlert(cloud.usedBytes, cloud.totalBytes)) return null;
   return {
     id: "cloud-storage",
     title: "Storage low",
-    detail: `Cloudflare R2 · ${cloud.usedGb.toFixed(1)} GB of ${cloud.totalGb.toFixed(1)} GB used`,
+    detail: `Cloudflare R2 · ${formatStorageBytes(cloud.usedBytes)} of ${formatStorageBytes(cloud.totalBytes)} used`,
     severity: "warning",
     at: nowLabel,
   };
@@ -184,12 +206,12 @@ export function deriveAlerts(
   return alerts.sort((a, b) => rank[a.severity] - rank[b.severity]).slice(0, MAX_DASHBOARD_ALERTS);
 }
 
-/** Dashboard "Storage Alerts" card — Cloudflare R2 / org media quota only. */
+/** Dashboard cloud-storage alert count — Cloudflare R2 / org media quota only. */
 export function storageAlertCount(
   _screens: ScreenHealth[],
   cloud?: CloudStorageHealth | null,
 ): number {
-  return cloud && isCloudStorageAlert(cloud.usedGb, cloud.totalGb) ? 1 : 0;
+  return cloud && isCloudStorageAlert(cloud.usedBytes, cloud.totalBytes) ? 1 : 0;
 }
 
 export type DashboardNowPlaying = {
@@ -224,6 +246,7 @@ export function summarizeDashboardFleet(input: {
   offline: number;
   syncing: number;
   storageAlerts: number;
+  cloudStorage: CloudStorageHealth | null;
   locationStatus: DashboardLocationStatus[];
   nowPlaying: DashboardNowPlaying[];
   alerts: AlertItem[];
@@ -238,6 +261,7 @@ export function summarizeDashboardFleet(input: {
     offline: screens.filter((s) => s.status === "offline").length,
     syncing: screens.filter((s) => s.status === "syncing").length,
     storageAlerts: storageAlertCount(screens, cloud),
+    cloudStorage: cloud,
     locationStatus: visible.map((location) => ({
       id: location.id,
       name: location.name,

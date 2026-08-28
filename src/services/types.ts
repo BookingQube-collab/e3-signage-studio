@@ -44,6 +44,11 @@ export type DashboardSummary = {
   activeCampaigns: number;
   scheduledCampaigns: number;
   storageAlerts: number;
+  /** Measured Cloudflare R2 usage under the org prefix (null when unavailable). */
+  cloudStorage: {
+    usedBytes: number;
+    totalBytes: number;
+  } | null;
   locationStatus: Array<{
     id: string;
     name: string;

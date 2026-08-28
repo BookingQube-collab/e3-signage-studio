@@ -26,7 +26,10 @@ import {
 } from "@/components/e3";
 import { Skeleton } from "@/components/ui/skeleton";
 import { dashboardService } from "@/services";
-import { adminMonitoringRefetchInterval } from "@/lib/monitoring";
+import {
+  adminMonitoringRefetchInterval,
+  formatCloudStorageUsage,
+} from "@/lib/monitoring";
 import { useIsClient } from "@/lib/use-is-client";
 import { useLiveMonitoring } from "@/lib/use-live-monitoring";
 import type { DashboardSummary } from "@/services/types";
@@ -116,10 +119,17 @@ function DashboardBody({ data }: { data: DashboardSummary }) {
           tone="info"
         />
         <E3StatCard
-          label="Storage Alerts"
-          value={data.storageAlerts}
+          label="Cloud storage"
+          value={
+            data.cloudStorage ? formatCloudStorageUsage(data.cloudStorage) : "—"
+          }
           icon={HardDrive}
-          tone="warning"
+          tone={data.storageAlerts > 0 ? "warning" : "neutral"}
+          sublabel={
+            data.storageAlerts > 0
+              ? `${data.storageAlerts} alert · Cloudflare R2 quota`
+              : "Cloudflare R2"
+          }
         />
       </div>
 

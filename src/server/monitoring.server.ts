@@ -818,8 +818,8 @@ export async function getDashboardSummary(accessToken: string): Promise<Dashboar
     })),
     screens,
     cloudStorage: {
-      usedGb: bytesToGb(cloudUsage.usedBytes),
-      totalGb: bytesToGb(cloudUsage.quotaBytes),
+      usedBytes: cloudUsage.usedBytes,
+      totalBytes: cloudUsage.quotaBytes,
     },
   });
 

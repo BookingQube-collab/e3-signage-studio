@@ -457,6 +457,10 @@ export const mockServices: AppServices = {
         activeCampaigns: store.campaigns.filter((c) => c.status === "Active").length,
         scheduledCampaigns: store.campaigns.filter((c) => c.status === "Scheduled").length,
         storageAlerts: db.alerts.filter((a) => a.title === "Storage low").length,
+        cloudStorage: {
+          usedBytes: 12 * 1024 * 1024,
+          totalBytes: 8 * 1024 * 1024 * 1024,
+        },
         locationStatus: store.locations.map((l) => ({
           id: l.id,
           name: l.shortName,
