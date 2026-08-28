@@ -221,6 +221,41 @@ export async function r2ListObjectKeys(prefix: string, maxPages = 3): Promise<st
   return keys;
 }
 
+/** Sum Size from ListObjectsV2 for an org prefix — used by dashboard cloud storage alerts. */
+export async function r2SumPrefixBytes(
+  prefix: string,
+  options?: { maxPages?: number; pageSize?: number; timeoutMs?: number },
+): Promise<{ usedBytes: number; objectCount: number; truncated: boolean }> {
+  const maxPages = Math.min(Math.max(options?.maxPages ?? 50, 1), 200);
+  const pageSize = Math.min(Math.max(options?.pageSize ?? 1000, 1), 1000);
+  const deadline = Date.now() + Math.max(options?.timeoutMs ?? 8_000, 1_000);
+  let usedBytes = 0;
+  let objectCount = 0;
+  let token: string | null = null;
+  let truncated = false;
+  for (let page = 0; page < maxPages; page += 1) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      truncated = true;
+      break;
+    }
+    const parsed = await r2ListObjectKeysPage(prefix, {
+      maxKeys: pageSize,
+      continuationToken: token,
+      timeoutMs: remaining,
+    });
+    usedBytes += parsed.totalSizeBytes;
+    objectCount += parsed.objects.length;
+    if (!parsed.nextContinuationToken) {
+      truncated = false;
+      break;
+    }
+    truncated = true;
+    token = parsed.nextContinuationToken;
+  }
+  return { usedBytes, objectCount, truncated };
+}
+
 export async function r2DeleteObjects(keys: string[]): Promise<void> {
   await Promise.all(
     keys.map(async (key) => {

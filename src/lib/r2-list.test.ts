@@ -12,6 +12,11 @@ test("ListObjects XML yields storage keys without a HEAD per file", () => {
 </ListBucketResult>`;
   const page = parseS3ListBucketResult(xml);
   assert.deepEqual(page.keys, ["org/media-a/v1/aaa.jpg", "org/media-b/v1/bbb.jpg"]);
+  assert.equal(page.totalSizeBytes, 46);
+  assert.deepEqual(page.objects, [
+    { key: "org/media-a/v1/aaa.jpg", sizeBytes: 12 },
+    { key: "org/media-b/v1/bbb.jpg", sizeBytes: 34 },
+  ]);
   assert.equal(page.nextContinuationToken, null);
 });
 

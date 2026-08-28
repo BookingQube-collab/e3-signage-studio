@@ -456,7 +456,9 @@ export const mockServices: AppServices = {
         syncing: screens.filter((s) => s.status === "syncing").length,
         activeCampaigns: store.campaigns.filter((c) => c.status === "Active").length,
         scheduledCampaigns: store.campaigns.filter((c) => c.status === "Scheduled").length,
-        storageAlerts: db.alerts.filter((a) => a.title === "Storage low").length,
+        storageAlerts: db.alerts.filter(
+          (a) => a.title === "Storage low" || a.title === "Screen storage low",
+        ).length,
         locationStatus: store.locations.map((l) => ({
           id: l.id,
           name: l.shortName,

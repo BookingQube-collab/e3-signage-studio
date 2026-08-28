@@ -106,14 +106,40 @@ export function isStorageAlert(usedGb: number, totalGb: number): boolean {
   return storageUsedRatio(usedGb, totalGb) >= STORAGE_ALERT_RATIO;
 }
 
+export type CloudStorageHealth = {
+  usedGb: number;
+  totalGb: number;
+};
+
+/** Org Cloudflare R2 quota alert — distinct from per-screen device disk. */
+export function deriveCloudStorageAlert(
+  cloud: CloudStorageHealth | null | undefined,
+  nowLabel = "just now",
+): AlertItem | null {
+  if (!cloud || !isStorageAlert(cloud.usedGb, cloud.totalGb)) return null;
+  return {
+    id: "cloud-storage",
+    title: "Storage low",
+    detail: `Cloudflare R2 · ${cloud.usedGb.toFixed(1)} GB of ${cloud.totalGb.toFixed(1)} GB used`,
+    severity: "warning",
+    at: nowLabel,
+  };
+}
+
 function isoDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value.slice(0, 10);
   return date.toISOString().slice(0, 10);
 }
 
-export function deriveAlerts(screens: ScreenHealth[], nowLabel = "just now"): AlertItem[] {
+export function deriveAlerts(
+  screens: ScreenHealth[],
+  nowLabel = "just now",
+  cloud?: CloudStorageHealth | null,
+): AlertItem[] {
   const alerts: AlertItem[] = [];
+  const cloudAlert = deriveCloudStorageAlert(cloud, nowLabel);
+  if (cloudAlert) alerts.push(cloudAlert);
   for (const screen of screens) {
     if (screen.status === "offline") {
       alerts.push({
@@ -138,7 +164,7 @@ export function deriveAlerts(screens: ScreenHealth[], nowLabel = "just now"): Al
     if (isStorageAlert(screen.storageUsedGb, screen.storageTotalGb)) {
       alerts.push({
         id: `storage-${screen.id}`,
-        title: "Storage low",
+        title: "Screen storage low",
         detail: `${screen.name} · ${screen.storageUsedGb.toFixed(1)} GB of ${screen.storageTotalGb.toFixed(1)} GB used`,
         severity: "warning",
         at: nowLabel,
@@ -158,8 +184,13 @@ export function deriveAlerts(screens: ScreenHealth[], nowLabel = "just now"): Al
   return alerts.sort((a, b) => rank[a.severity] - rank[b.severity]).slice(0, MAX_DASHBOARD_ALERTS);
 }
 
-export function storageAlertCount(screens: ScreenHealth[]): number {
-  return screens.filter((s) => isStorageAlert(s.storageUsedGb, s.storageTotalGb)).length;
+export function storageAlertCount(
+  screens: ScreenHealth[],
+  cloud?: CloudStorageHealth | null,
+): number {
+  const screenCount = screens.filter((s) => isStorageAlert(s.storageUsedGb, s.storageTotalGb)).length;
+  const cloudCount = cloud && isStorageAlert(cloud.usedGb, cloud.totalGb) ? 1 : 0;
+  return screenCount + cloudCount;
 }
 
 export type DashboardNowPlaying = {
@@ -186,6 +217,7 @@ export type DashboardFleetScreen = ScreenHealth & {
 export function summarizeDashboardFleet(input: {
   locations: Array<{ id: string; name: string; status: string }>;
   screens: DashboardFleetScreen[];
+  cloudStorage?: CloudStorageHealth | null;
 }): {
   locations: number;
   screens: number;
@@ -199,13 +231,14 @@ export function summarizeDashboardFleet(input: {
 } {
   const visible = input.locations.filter((location) => location.status !== "Archived");
   const screens = input.screens;
+  const cloud = input.cloudStorage ?? null;
   return {
     locations: visible.length,
     screens: screens.length,
     online: screens.filter((s) => s.status === "online").length,
     offline: screens.filter((s) => s.status === "offline").length,
     syncing: screens.filter((s) => s.status === "syncing").length,
-    storageAlerts: storageAlertCount(screens),
+    storageAlerts: storageAlertCount(screens, cloud),
     locationStatus: visible.map((location) => ({
       id: location.id,
       name: location.name,
@@ -222,7 +255,7 @@ export function summarizeDashboardFleet(input: {
         nowPlaying: s.nowPlaying,
         status: s.status,
       })),
-    alerts: deriveAlerts(screens),
+    alerts: deriveAlerts(screens, "just now", cloud),
   };
 }
 

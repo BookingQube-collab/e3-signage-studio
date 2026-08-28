@@ -70,7 +70,7 @@ test("offline screens become critical alerts; disabled screens do not", () => {
   ]);
   assert.equal(alerts[0]?.title, "Screen offline");
   assert.equal(alerts.some((a) => a.title === "Sync failed"), true);
-  assert.equal(alerts.some((a) => a.title === "Storage low"), true);
+  assert.equal(alerts.some((a) => a.title === "Screen storage low"), true);
   assert.equal(alerts.some((a) => a.title === "Synchronization in progress"), true);
   assert.equal(alerts.some((a) => a.detail.includes("Lobby")), false);
   assert.equal(
@@ -79,6 +79,20 @@ test("offline screens become critical alerts; disabled screens do not", () => {
       screen({ id: "s1", name: "Office" }),
     ]),
     1,
+  );
+});
+
+test("cloud storage low alert is labeled Cloudflare R2 and counts separately", () => {
+  const alerts = deriveAlerts([], "just now", { usedGb: 90, totalGb: 100 });
+  assert.equal(alerts[0]?.title, "Storage low");
+  assert.match(alerts[0]?.detail ?? "", /Cloudflare R2/);
+  assert.equal(storageAlertCount([screen({ id: "s1", name: "Office" })], { usedGb: 90, totalGb: 100 }), 1);
+  assert.equal(
+    storageAlertCount(
+      [screen({ id: "s4", name: "Bar", storageUsedGb: 58, storageTotalGb: 64 })],
+      { usedGb: 90, totalGb: 100 },
+    ),
+    2,
   );
 });
 

@@ -44,6 +44,7 @@ import type {
 
 import { requireCmsPermission } from "./auth.server";
 import { ensureSeedLocations } from "./location-seed.server";
+import { getOrgCloudStorageUsage } from "./storage.server";
 import { getServiceRoleClient, getUserClient, isServiceRoleConfigured } from "./supabase.server";
 
 function throwIfError(error: { message: string } | null, fallback: string): void {
@@ -607,7 +608,9 @@ export async function getDashboardSummary(accessToken: string): Promise<Dashboar
       .is("archived_at", null),
     client
       .from("organization_settings")
-      .select("offline_after_seconds")
+      .select(
+        "offline_after_seconds, cloud_storage_quota_bytes, cloud_storage_used_bytes, cloud_storage_measured_at",
+      )
       .eq("organization_id", orgId)
       .maybeSingle(),
     client
@@ -637,10 +640,13 @@ export async function getDashboardSummary(accessToken: string): Promise<Dashboar
     last_error: string | null;
   }>;
   const campaignRows = (campaignRes.data ?? []) as Array<{ id: string; status: string }>;
-  const offlineAfter = asNumber(
-    (settingsRes.data as { offline_after_seconds?: number } | null)?.offline_after_seconds,
-    DEFAULT_OFFLINE_AFTER_SECONDS,
-  );
+  const orgSettings = (settingsRes.data ?? null) as {
+    offline_after_seconds?: number;
+    cloud_storage_quota_bytes?: number | null;
+    cloud_storage_used_bytes?: number | null;
+    cloud_storage_measured_at?: string | null;
+  } | null;
+  const offlineAfter = asNumber(orgSettings?.offline_after_seconds, DEFAULT_OFFLINE_AFTER_SECONDS);
   const threshold = offlineAfter > 0 ? offlineAfter : DEFAULT_OFFLINE_AFTER_SECONDS;
 
   const screenIds = screenRows.map((row) => row.id);
@@ -658,7 +664,7 @@ export async function getDashboardSummary(accessToken: string): Promise<Dashboar
 
   const reader = privilegedClient(client);
   const since = new Date(nowMs - 24 * 60 * 60 * 1000).toISOString();
-  const [syncRes, scheduleRes, mediaRes, eventRes] = await Promise.all([
+  const [syncRes, scheduleRes, mediaRes, eventRes, cloudUsage] = await Promise.all([
     screenIds.length
       ? client
           .from("device_sync_states")
@@ -683,6 +689,13 @@ export async function getDashboardSummary(accessToken: string): Promise<Dashboar
           .order("created_at", { ascending: false })
           .limit(40)
       : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
+    getOrgCloudStorageUsage({
+      organizationId: orgId,
+      quotaBytes: orgSettings?.cloud_storage_quota_bytes,
+      cachedUsedBytes: orgSettings?.cloud_storage_used_bytes,
+      cachedMeasuredAt: orgSettings?.cloud_storage_measured_at,
+      nowMs,
+    }),
   ]);
   throwIfError(syncRes.error, "Could not load sync state.");
   throwIfError(scheduleRes.error, "Could not load schedules.");
@@ -804,6 +817,10 @@ export async function getDashboardSummary(accessToken: string): Promise<Dashboar
         : row.status,
     })),
     screens,
+    cloudStorage: {
+      usedGb: bytesToGb(cloudUsage.usedBytes),
+      totalGb: bytesToGb(cloudUsage.quotaBytes),
+    },
   });
 
   return {

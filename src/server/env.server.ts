@@ -19,6 +19,8 @@ export type ServerEnv = {
   r2SecretAccessKey: string | undefined;
   r2Bucket: string | undefined;
   r2Endpoint: string | undefined;
+  /** Optional org Cloudflare media quota override (bytes). Falls back to DB / 100 GiB. */
+  cloudStorageQuotaBytes: string | undefined;
   mediaMaxImageBytes: string | undefined;
   mediaMaxVideoBytes: string | undefined;
 };
@@ -230,6 +232,7 @@ export function getServerEnv(): ServerEnv {
     r2SecretAccessKey: readEnvValue(envName(["R2", "SECRET", "ACCESS", "KEY"])),
     r2Bucket: readEnvValue(envName(["R2", "BUCKET"])),
     r2Endpoint: readEnvValue(envName(["R2", "ENDPOINT"])),
+    cloudStorageQuotaBytes: readEnvValue(envName(["CLOUD", "STORAGE", "QUOTA", "BYTES"])),
     mediaMaxImageBytes: readEnvValue(envName(["MEDIA", "MAX", "IMAGE", "BYTES"])),
     mediaMaxVideoBytes: readEnvValue(envName(["MEDIA", "MAX", "VIDEO", "BYTES"])),
   };

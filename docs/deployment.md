@@ -15,6 +15,7 @@ Copy `.env.example` to `.env` locally. Never commit real passwords or keys.
 | `DATABASE_URL` | Migrations | Direct Postgres (`sslmode=require`) |
 | `DATABASE_POOLER_URL` | Migrations | IPv4 session pooler when the direct host is IPv6-only |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_ENDPOINT` | Server | Cloudflare R2. If any are empty, media uses a private Supabase Storage bucket named `media` |
+| `CLOUD_STORAGE_QUOTA_BYTES` | Server | Optional org media library quota (bytes) for dashboard Storage low alerts. Per-org override: `organization_settings.cloud_storage_quota_bytes` (default 100 GiB) |
 
 Device APKs never contain Supabase or R2 credentials. TVs call the CMS origin only.
 
