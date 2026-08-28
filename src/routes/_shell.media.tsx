@@ -55,6 +55,7 @@ import {
   upsertFolder,
 } from "@/lib/media-folders";
 import { describeCanceledStatement } from "@/lib/media-upload-error";
+import { useIsClient } from "@/lib/use-is-client";
 import { cn } from "@/lib/utils";
 import { mediaService } from "@/services";
 import type { Media, MediaFolder } from "@/types";
@@ -82,6 +83,7 @@ const UNFILED_VALUE = "__unfiled";
 
 function MediaPage() {
   const qc = useQueryClient();
+  const isClient = useIsClient();
   const replaceInputRef = useRef<HTMLInputElement>(null);
   const [view, setView] = useState<"grid" | "list">("grid");
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("All");
@@ -101,16 +103,30 @@ function MediaPage() {
   const [hiddenMediaIds, setHiddenMediaIds] = useState<Set<string>>(new Set());
   const [hiddenFolderIds, setHiddenFolderIds] = useState<Set<string>>(new Set());
 
-  const mediaQuery = useQuery({ queryKey: ["media"], queryFn: mediaService.list });
-  const foldersQuery = useQuery({ queryKey: ["media-folders"], queryFn: mediaService.listFolders });
+  const mediaQuery = useQuery({
+    queryKey: ["media"],
+    queryFn: mediaService.list,
+    enabled: isClient,
+    throwOnError: false,
+  });
+  const foldersQuery = useQuery({
+    queryKey: ["media-folders"],
+    queryFn: mediaService.listFolders,
+    enabled: isClient,
+    throwOnError: false,
+  });
 
   const folders = useMemo(
     () =>
-      uniqueFoldersByName((foldersQuery.data ?? []).filter((folder) => !hiddenFolderIds.has(folder.id))),
+      uniqueFoldersByName(
+        (Array.isArray(foldersQuery.data) ? foldersQuery.data : []).filter(
+          (folder) => !hiddenFolderIds.has(folder.id),
+        ),
+      ),
     [foldersQuery.data, hiddenFolderIds],
   );
   const libraryMedia = useMemo(
-    () => (mediaQuery.data ?? []).filter((item) => !hiddenMediaIds.has(item.id)),
+    () => (Array.isArray(mediaQuery.data) ? mediaQuery.data : []).filter((item) => !hiddenMediaIds.has(item.id)),
     [mediaQuery.data, hiddenMediaIds],
   );
   const currentFolder = folders.find((folder) => folder.id === folderId) ?? null;
@@ -164,24 +180,33 @@ function MediaPage() {
 
   const deleteFolder = useMutation({
     mutationFn: mediaService.deleteFolder,
+    throwOnError: false,
     onMutate: async (id) => {
       const previousMedia = qc.getQueryData<Media[]>(["media"]) ?? [];
       const mediaIds = previousMedia.filter((item) => item.folderId === id).map((item) => item.id);
       return { mediaIds, folderId: id };
     },
     onSuccess: (_ok, id, ctx) => {
-      const previousMedia = qc.getQueryData<Media[]>(["media"]) ?? [];
-      const previousFolders = qc.getQueryData<MediaFolder[]>(["media-folders"]) ?? [];
-      const mediaIds = ctx?.mediaIds ?? previousMedia.filter((item) => item.folderId === id).map((item) => item.id);
-      setHiddenFolderIds((prev) => unionIds(prev, [id]));
-      setHiddenMediaIds((prev) => unionIds(prev, mediaIds));
-      const cascaded = applyFolderCascadeDelete(previousMedia, previousFolders, id);
-      qc.setQueryData(["media"], cascaded.media);
-      qc.setQueryData(["media-folders"], cascaded.folders);
-      setFolderId((prev) => (prev === id ? null : prev));
-      setSelected((prev) => (prev?.folderId === id ? null : prev));
+      try {
+        const previousMedia = qc.getQueryData<Media[]>(["media"]) ?? [];
+        const previousFolders = qc.getQueryData<MediaFolder[]>(["media-folders"]) ?? [];
+        const mediaIds = ctx?.mediaIds ?? previousMedia.filter((item) => item.folderId === id).map((item) => item.id);
+        setHiddenFolderIds((prev) => unionIds(prev, [id]));
+        setHiddenMediaIds((prev) => unionIds(prev, mediaIds));
+        const cascaded = applyFolderCascadeDelete(
+          Array.isArray(previousMedia) ? previousMedia : [],
+          Array.isArray(previousFolders) ? previousFolders : [],
+          id,
+        );
+        qc.setQueryData(["media"], cascaded.media);
+        qc.setQueryData(["media-folders"], cascaded.folders);
+        setFolderId((prev) => (prev === id ? null : prev));
+        setSelected((prev) => (prev?.folderId === id ? null : prev));
+        setSelectedIds((prev) => withoutIds(prev, mediaIds));
+      } catch {
+        setFolderId((prev) => (prev === id ? null : prev));
+      }
       setDeleteFolderTarget(null);
-      setSelectedIds((prev) => withoutIds(prev, mediaIds));
       toast.success("Folder deleted");
     },
     onError: (error) => {
@@ -193,8 +218,12 @@ function MediaPage() {
       );
     },
     onSettled: async (_data, error, id, ctx) => {
-      await qc.invalidateQueries({ queryKey: ["media"] });
-      await qc.invalidateQueries({ queryKey: ["media-folders"] });
+      try {
+        await qc.invalidateQueries({ queryKey: ["media"] });
+        await qc.invalidateQueries({ queryKey: ["media-folders"] });
+      } catch {
+        // Stay on /media; the toast already explained a failed delete.
+      }
       if (error || !ctx) return;
       setHiddenMediaIds((prev) =>
         releaseHiddenIfGone(prev, qc.getQueryData<Media[]>(["media"]) ?? [], ctx.mediaIds),
@@ -361,7 +390,13 @@ function MediaPage() {
 
   const visibleIds = useMemo(() => items.map((item) => item.id), [items]);
   const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
-  const overlayOpen = createOpen || moveIds.length > 0 || Boolean(selected) || deleteOpen;
+  const overlayOpen =
+    createOpen ||
+    moveIds.length > 0 ||
+    Boolean(selected) ||
+    deleteOpen ||
+    Boolean(deleteFile) ||
+    Boolean(deleteFolderTarget);
   const deletingFolderId = deleteFolder.isPending ? (deleteFolder.variables ?? null) : null;
   const uploadBlockedInThisFolder = Boolean(deletingFolderId && folderId === deletingFolderId);
   const bulkPlan = partitionBulkDelete(libraryMedia, selectedIds);
@@ -439,7 +474,7 @@ function MediaPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [overlayOpen]);
 
-  const loading = mediaQuery.isLoading || foldersQuery.isLoading;
+  const loading = !isClient || mediaQuery.isPending || foldersQuery.isPending;
   const errored = mediaQuery.isError || foldersQuery.isError;
   const empty = visibleFolders.length === 0 && items.length === 0;
   const selectionActive = selectedIds.size > 0;
@@ -890,7 +925,7 @@ function MediaPage() {
                 ["Type", selected.type],
                 ["Dimensions", selected.dimensions],
                 ["Duration", selected.durationSec ? `${selected.durationSec}s` : "—"],
-                ["File size", `${selected.sizeMb.toFixed(1)} MB`],
+                ["File size", `${Number.isFinite(selected.sizeMb) ? selected.sizeMb.toFixed(1) : "0.0"} MB`],
                 ["Version", selected.version],
                 ["Uploaded by", selected.uploadedBy],
                 ["Uploaded", selected.uploadedAt],

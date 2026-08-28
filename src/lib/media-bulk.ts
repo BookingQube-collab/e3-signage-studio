@@ -152,24 +152,24 @@ export function applyBulkFolderMove<
   return items.map((item) => (set.has(item.id) ? { ...item, folderId, folderName } : item));
 }
 
-export function uniquePlaylistNames<T extends { usedIn: MediaUsage }>(items: T[]): string[] {
+export function uniquePlaylistNames<T extends { usedIn?: MediaUsage | null }>(items: T[]): string[] {
   const names: string[] = [];
   for (const item of items) {
-    for (const name of item.usedIn.playlists) {
+    for (const name of item.usedIn?.playlists ?? []) {
       if (name && !names.includes(name)) names.push(name);
     }
   }
   return names;
 }
 
-export function partitionBulkDelete<T extends { id: string; filename: string; usedIn: MediaUsage }>(
+export function partitionBulkDelete<T extends { id: string; filename: string; usedIn?: MediaUsage | null }>(
   items: T[],
   selectedIds: Iterable<string>,
 ): { deletable: T[]; blocked: T[]; playlistNames: string[] } {
   const set = new Set(selectedIds);
   const selected = items.filter((item) => set.has(item.id));
-  const deletable = selected.filter((item) => item.usedIn.playlists.length === 0);
-  const blocked = selected.filter((item) => item.usedIn.playlists.length > 0);
+  const deletable = selected.filter((item) => (item.usedIn?.playlists ?? []).length === 0);
+  const blocked = selected.filter((item) => (item.usedIn?.playlists ?? []).length > 0);
   return { deletable, blocked, playlistNames: uniquePlaylistNames(blocked) };
 }
 

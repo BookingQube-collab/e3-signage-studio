@@ -21,6 +21,7 @@ import {
   mergeLibraryMedia,
   resolveFolderCreate,
   resolveUploadFolderId,
+  normalizeFolderName,
   uniqueFoldersByName,
   upsertFolder,
 } from "./media-folders.ts";
@@ -142,6 +143,9 @@ test("archived folders stay out of the library and are not revived by create or 
   const office = { id: "f-office", name: "Rajan Office", fileCount: 0 };
   const mixed = [archived, office];
   assert.equal(isArchivedFolder(archived), true);
+  assert.equal(isArchivedFolder({}), false);
+  assert.equal(isArchivedFolder({ archivedAt: null }), false);
+  assert.equal(normalizeFolderName(undefined as unknown as string), "");
   assert.deepEqual(
     liveFolders(mixed).map((folder) => folder.id),
     ["f-office"],
@@ -150,6 +154,7 @@ test("archived folders stay out of the library and are not revived by create or 
     uniqueFoldersByName(mixed).some((folder) => folder.id === "f-old"),
     false,
   );
+  assert.equal(uniqueFoldersByName([office, { id: "f-legacy", name: "Legacy" }]).length, 2);
   const created = resolveFolderCreate(mixed, "InflataPark", "f-new");
   assert.equal(created.reused, false);
   assert.deepEqual(created.folder, { id: "f-new", name: "InflataPark" });

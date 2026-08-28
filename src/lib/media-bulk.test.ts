@@ -169,3 +169,13 @@ test("bulk delete is blocked when a file is in a live playlist, naming that play
     true,
   );
 });
+
+test("partitionBulkDelete does not throw when usedIn is missing", () => {
+  const orphan = { id: "m-orphan", filename: "orphan.png" };
+  const { deletable, blocked } = partitionBulkDelete([orphan], ["m-orphan"]);
+  assert.deepEqual(
+    deletable.map((item) => item.id),
+    ["m-orphan"],
+  );
+  assert.equal(blocked.length, 0);
+});

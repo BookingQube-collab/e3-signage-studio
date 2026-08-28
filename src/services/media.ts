@@ -224,8 +224,18 @@ export const liveMediaService: MediaService = {
     const row = await createMediaFolderFn({ data: { accessToken: await accessToken(), name } });
     return toUiFolder(row);
   },
-  deleteFolder: async (id) =>
-    deleteMediaFolderFn({ data: { accessToken: await accessToken(), id } }),
+  deleteFolder: async (id) => {
+    try {
+      return await deleteMediaFolderFn({ data: { accessToken: await accessToken(), id } });
+    } catch (error) {
+      throw new Error(
+        describeCanceledStatement(
+          error instanceof Error ? error.message : "",
+          "Could not finish deleting this folder. It is still in the library. Try again, or remove files from live playlists first.",
+        ),
+      );
+    }
+  },
   moveToFolder: async (id, folderId) => {
     const row = await moveMediaToFolderFn({
       data: { accessToken: await accessToken(), id, folderId },

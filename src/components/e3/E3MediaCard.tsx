@@ -78,7 +78,8 @@ export function E3MediaCard({
   selectionActive?: boolean;
   onToggle?: (item: Media, event: MouseEvent<HTMLButtonElement>) => void;
 }) {
-  const meta = [item.dimensions, item.durationSec ? `${item.durationSec}s` : null, `${item.sizeMb.toFixed(1)} MB`]
+  const sizeMb = Number.isFinite(item.sizeMb) ? item.sizeMb : 0;
+  const meta = [item.dimensions, item.durationSec ? `${item.durationSec}s` : null, `${sizeMb.toFixed(1)} MB`]
     .filter(Boolean)
     .join(" · ");
   const picker = size === "picker";

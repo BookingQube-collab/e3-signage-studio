@@ -83,6 +83,7 @@ export interface MediaFolder {
   name: string;
   createdAt: string;
   fileCount: number;
+  archivedAt?: string | null;
 }
 
 export interface Media {

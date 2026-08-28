@@ -63,7 +63,8 @@ import { getUserClient } from "./supabase.server";
 
 const MEDIA_SELECT =
   "id, organization_id, name, type, mime_type, current_version_id, status, archived_at, folder_id, location_ids, created_at, updated_at, created_by, uploaded_by";
-const FOLDER_SELECT = "id, organization_id, name, archived_at, created_at, updated_at, created_by";
+const FOLDER_SELECT_CORE = "id, organization_id, name, created_at, updated_at, created_by";
+const FOLDER_SELECT = `${FOLDER_SELECT_CORE}, archived_at`;
 const VERSION_SELECT =
   "id, media_id, version_number, storage_key, thumbnail_key, size_bytes, width, height, duration_ms, checksum_sha256, mime_type, status, created_at, created_by";
 
@@ -71,6 +72,15 @@ type UsedIn = MediaRecord["usedIn"];
 
 function throwIfError(error: { message: string } | null, fallback: string): void {
   if (error) throw new Error(error.message || fallback);
+}
+
+function isUnknownColumn(error: { message: string } | null, column: string): boolean {
+  const msg = (error?.message ?? "").toLowerCase();
+  return (
+    Boolean(error) &&
+    msg.includes(column.toLowerCase()) &&
+    (msg.includes("does not exist") || msg.includes("schema cache") || msg.includes("could not find"))
+  );
 }
 
 function serverUploadLimits(): { imageBytes: number; videoBytes: number } {
@@ -380,14 +390,48 @@ async function getFolderRow(
   id: string,
   organizationId: string,
 ): Promise<MediaFolderRow | null> {
-  const { data, error } = await client
+  const first = await client
     .from("media_folders")
     .select(FOLDER_SELECT)
     .eq("id", id)
     .eq("organization_id", organizationId)
     .maybeSingle();
-  throwIfError(error, "Could not load folder.");
-  return data ? mapFolder(data as Record<string, unknown>) : null;
+  if (isUnknownColumn(first.error, "archived_at")) {
+    const retry = await client
+      .from("media_folders")
+      .select(FOLDER_SELECT_CORE)
+      .eq("id", id)
+      .eq("organization_id", organizationId)
+      .maybeSingle();
+    throwIfError(retry.error, "Could not load folder.");
+    return retry.data
+      ? mapFolder({ ...(retry.data as Record<string, unknown>), archived_at: null })
+      : null;
+  }
+  throwIfError(first.error, "Could not load folder.");
+  return first.data ? mapFolder(first.data as Record<string, unknown>) : null;
+}
+
+async function loadAllFolderRows(
+  client: ReturnType<typeof getUserClient>,
+  organizationId: string,
+): Promise<MediaFolderRow[]> {
+  const first = await client
+    .from("media_folders")
+    .select(FOLDER_SELECT)
+    .eq("organization_id", organizationId);
+  if (isUnknownColumn(first.error, "archived_at")) {
+    const retry = await client
+      .from("media_folders")
+      .select(FOLDER_SELECT_CORE)
+      .eq("organization_id", organizationId);
+    throwIfError(retry.error, "Could not load folders.");
+    return (retry.data ?? []).map((row) =>
+      mapFolder({ ...(row as Record<string, unknown>), archived_at: null }),
+    );
+  }
+  throwIfError(first.error, "Could not load folders.");
+  return (first.data ?? []).map((row) => mapFolder(row as Record<string, unknown>));
 }
 
 async function requireFolderId(
@@ -424,6 +468,7 @@ async function toFolderRecord(
     name: row.name,
     createdAt: dateLabel(row.created_at),
     fileCount: await visibleFileCount(client, row.id),
+    archivedAt: row.archived_at,
   };
 }
 
@@ -1077,14 +1122,28 @@ export async function listFolders(accessToken: string): Promise<MediaFolderRecor
   const auth = await requireCmsPermission(accessToken, "media.view");
   const client = getUserClient(accessToken);
   const orgId = auth.profile.organizationId;
-  const { data, error } = await client
+  const first = await client
     .from("media_folders")
     .select(FOLDER_SELECT)
     .eq("organization_id", orgId)
     .is("archived_at", null)
     .order("name", { ascending: true });
-  throwIfError(error, "Could not load folders.");
-  const folders = (data ?? []).map((row) => mapFolder(row as Record<string, unknown>));
+  let folders: MediaFolderRow[];
+  if (isUnknownColumn(first.error, "archived_at")) {
+    const retry = await client
+      .from("media_folders")
+      .select(FOLDER_SELECT_CORE)
+      .eq("organization_id", orgId)
+      .order("name", { ascending: true });
+    throwIfError(retry.error, "Could not load folders.");
+    folders = (retry.data ?? []).map((row) =>
+      mapFolder({ ...(row as Record<string, unknown>), archived_at: null }),
+    );
+  } else {
+    throwIfError(first.error, "Could not load folders.");
+    folders = (first.data ?? []).map((row) => mapFolder(row as Record<string, unknown>));
+  }
+  folders = folders.filter((folder) => !folder.archived_at);
   if (folders.length === 0) return [];
 
   const { data: mediaRows, error: countError } = await client
@@ -1117,12 +1176,7 @@ export async function createFolder(accessToken: string, name: string): Promise<M
   const client = getUserClient(accessToken);
   const orgId = auth.profile.organizationId;
   const normalized = assertFolderName(name);
-  const { data: existing, error: existingError } = await client
-    .from("media_folders")
-    .select(FOLDER_SELECT)
-    .eq("organization_id", orgId);
-  throwIfError(existingError, "Could not load folders.");
-  const rows = (existing ?? []).map((row) => mapFolder(row as Record<string, unknown>));
+  const rows = await loadAllFolderRows(client, orgId);
   const resolved = resolveFolderCreate(
     rows.map((row) => ({ id: row.id, name: row.name, archivedAt: row.archived_at })),
     normalized,
@@ -1139,15 +1193,10 @@ export async function createFolder(accessToken: string, name: string): Promise<M
       name: normalized,
       created_by: auth.userId,
     })
-    .select(FOLDER_SELECT)
+    .select(FOLDER_SELECT_CORE)
     .single();
   if (error?.code === "23505") {
-    const { data: raced, error: racedError } = await client
-      .from("media_folders")
-      .select(FOLDER_SELECT)
-      .eq("organization_id", orgId);
-    throwIfError(racedError, "Could not load folders.");
-    const racedRows = (raced ?? []).map((row) => mapFolder(row as Record<string, unknown>));
+    const racedRows = await loadAllFolderRows(client, orgId);
     const match = findFolderByName(
       racedRows.filter((row) => !row.archived_at),
       normalized,
@@ -1156,7 +1205,7 @@ export async function createFolder(accessToken: string, name: string): Promise<M
     throw new Error(FOLDER_DUPLICATE_MESSAGE);
   }
   throwIfError(error, "Could not create folder.");
-  return toFolderRecord(client, mapFolder(data as Record<string, unknown>));
+  return toFolderRecord(client, mapFolder({ ...(data as Record<string, unknown>), archived_at: null }));
 }
 
 async function mediaRowsInFolder(
@@ -1176,22 +1225,54 @@ async function mediaRowsInFolder(
 export async function deleteFolder(accessToken: string, id: string): Promise<boolean> {
   const auth = await requireCmsPermission(accessToken, "media.manage");
   const client = getUserClient(accessToken);
-  const existing = await getFolderRow(client, id, auth.profile.organizationId);
+  const orgId = auth.profile.organizationId;
+  const existing = await getFolderRow(client, id, orgId);
   if (!existing) throw new Error("Folder not found.");
   if (existing.archived_at) return true;
 
-  const rows = await mediaRowsInFolder(client, id, auth.profile.organizationId);
+  const rows = await mediaRowsInFolder(client, id, orgId);
   for (const row of rows) {
     assertCanMutateOwnedContent(auth.profile, row.created_by);
   }
   const visible = rows.filter((row) => !row.archived_at && isVisibleLibraryStatus(row.status));
   await assertIdsDeletable(client, visible);
 
+  const now = new Date().toISOString();
+  if (visible.length > 0) {
+    const { error: archiveMediaError } = await client
+      .from("media")
+      .update({ status: "ARCHIVED", archived_at: now })
+      .in(
+        "id",
+        visible.map((row) => row.id),
+      )
+      .eq("organization_id", orgId);
+    throwIfError(archiveMediaError, "Could not delete folder files.");
+  }
+
+  let folderGoneFromLibrary = false;
+  const { error: archiveError } = await client
+    .from("media_folders")
+    .update({ archived_at: now })
+    .eq("id", id)
+    .eq("organization_id", orgId)
+    .is("archived_at", null);
+  if (isUnknownColumn(archiveError, "archived_at")) {
+    const { error: deleteError } = await client.from("media_folders").delete().eq("id", id);
+    throwIfError(deleteError, "Could not delete folder.");
+    folderGoneFromLibrary = true;
+  } else {
+    throwIfError(archiveError, "Could not delete folder.");
+    folderGoneFromLibrary = true;
+  }
+
   try {
     for (const row of rows) {
       await purgeMediaRow(client, row.id);
     }
+    await client.from("media_folders").delete().eq("id", id);
   } catch (error) {
+    if (folderGoneFromLibrary) return true;
     const raw = error instanceof Error ? error.message : "";
     throw new Error(
       describeCanceledStatement(
@@ -1201,17 +1282,8 @@ export async function deleteFolder(accessToken: string, id: string): Promise<boo
     );
   }
 
-  const { error: archiveError } = await client
-    .from("media_folders")
-    .update({ archived_at: new Date().toISOString() })
-    .eq("id", id)
-    .eq("organization_id", auth.profile.organizationId)
-    .is("archived_at", null);
-  throwIfError(archiveError, "Could not delete folder.");
-
-  await client.from("media_folders").delete().eq("id", id);
-
-  const leftover = await getFolderRow(client, id, auth.profile.organizationId);
+  if (folderGoneFromLibrary) return true;
+  const leftover = await getFolderRow(client, id, orgId);
   if (leftover && !leftover.archived_at) {
     throw new Error("Could not delete folder.");
   }

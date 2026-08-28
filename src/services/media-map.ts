@@ -10,6 +10,7 @@ export type MediaFolderRecord = {
   name: string;
   createdAt: string;
   fileCount: number;
+  archivedAt?: string | null;
 };
 
 export type MediaRecord = {
@@ -39,6 +40,7 @@ export function toUiFolder(row: MediaFolderRecord): MediaFolder {
     name: row.name,
     createdAt: row.createdAt,
     fileCount: row.fileCount,
+    archivedAt: row.archivedAt ?? null,
   };
 }
 

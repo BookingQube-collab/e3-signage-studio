@@ -8,7 +8,7 @@ export type LibraryView =
   | { mode: "root" };
 
 export function normalizeFolderName(name: string): string {
-  return name.replace(/\s+/g, " ").trim();
+  return String(name ?? "").replace(/\s+/g, " ").trim();
 }
 
 export function assertFolderName(name: string): string {
