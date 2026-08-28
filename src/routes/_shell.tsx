@@ -4,6 +4,7 @@ import { PermissionDenied } from "@/components/auth/PermissionDenied";
 import { AppShell } from "@/components/layout/AppShell";
 import { RoutePending } from "@/components/layout/RoutePending";
 import { AUTH_SESSION_STALE_MS, loadShellAuth } from "@/lib/query-defaults";
+import { hasQueryClientContext } from "@/lib/router-preload";
 import { canAccessPath } from "@/lib/rbac";
 import { useIsClient } from "@/lib/use-is-client";
 
@@ -12,7 +13,11 @@ export const Route = createFileRoute("/_shell")({
   staleTime: AUTH_SESSION_STALE_MS,
   preloadStaleTime: AUTH_SESSION_STALE_MS,
   shouldReload: false,
-  beforeLoad: async ({ context }) => {
+  beforeLoad: async ({ context, preload }) => {
+    if (!hasQueryClientContext(context)) {
+      if (preload) return {};
+      throw redirect({ to: "/login" });
+    }
     const auth = await loadShellAuth(context.queryClient);
     if (!auth.ok && auth.code === "UNAUTHENTICATED") {
       throw redirect({ to: "/login" });

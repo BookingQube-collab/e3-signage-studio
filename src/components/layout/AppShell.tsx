@@ -79,8 +79,16 @@ function initialsFor(name: string): string {
 
 function Brand({ collapsed }: { collapsed?: boolean }) {
   return (
-    <Link to="/dashboard" className="flex items-center gap-3 px-2 py-1">
-      <img src={logo} alt="E3" width={40} height={27} className="h-7 w-auto shrink-0" />
+    <Link to="/dashboard" preload={false} className="flex items-center gap-3 px-2 py-1">
+      <img
+        src={logo}
+        alt="E3"
+        width={40}
+        height={27}
+        fetchPriority="high"
+        decoding="async"
+        className="h-7 w-auto shrink-0"
+      />
       {!collapsed ? (
         <span className="font-display min-w-0 truncate text-sm font-semibold uppercase tracking-[0.16em]">
           Digital Signage
@@ -112,6 +120,7 @@ function NavList({
           <Link
             key={to}
             to={to}
+            preload={false}
             onClick={onNavigate}
             title={collapsed ? label : undefined}
             className={cn(
@@ -255,7 +264,7 @@ export function AppShell({
                 <DropdownMenuSeparator />
                 {showSettings ? (
                   <DropdownMenuItem asChild>
-                    <Link to="/settings">Settings</Link>
+                    <Link to="/settings" preload={false}>Settings</Link>
                   </DropdownMenuItem>
                 ) : null}
                 <DropdownMenuItem onSelect={() => void signOut()} disabled={signingOut}>
