@@ -19,7 +19,7 @@ export type ServerEnv = {
   r2SecretAccessKey: string | undefined;
   r2Bucket: string | undefined;
   r2Endpoint: string | undefined;
-  /** Optional org Cloudflare media quota override (bytes). Falls back to DB / 100 GiB. */
+  /** Optional org Cloudflare media quota override (bytes). Falls back to DB / 8 GiB. */
   cloudStorageQuotaBytes: string | undefined;
   mediaMaxImageBytes: string | undefined;
   mediaMaxVideoBytes: string | undefined;

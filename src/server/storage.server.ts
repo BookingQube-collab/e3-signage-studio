@@ -17,8 +17,8 @@ export const DOWNLOAD_URL_TTL_SECONDS = 60 * 60;
 
 /** Re-measure Cloudflare usage at most this often (dashboard polls ~30s). */
 export const CLOUD_STORAGE_CACHE_TTL_MS = 5 * 60 * 1000;
-/** Default org media quota when settings/env omit one (100 GiB). */
-export const DEFAULT_CLOUD_STORAGE_QUOTA_BYTES = 107374182400;
+/** Default org media quota when settings/env omit one (8 GiB). Alert when used >= this. */
+export const DEFAULT_CLOUD_STORAGE_QUOTA_BYTES = 8 * 1024 * 1024 * 1024;
 
 export type SignedUpload = {
   url: string;

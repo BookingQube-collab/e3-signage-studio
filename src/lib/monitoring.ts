@@ -20,7 +20,10 @@ export function adminMonitoringRefetchInterval(): number | false {
 
 export const REPORT_WINDOW_DAYS = 30;
 export const HEARTBEAT_INTERVAL_SECONDS = 120;
+/** Device-disk UI warning ratio (screen detail). Not used for dashboard Storage Alerts. */
 export const STORAGE_ALERT_RATIO = 0.85;
+/** Dashboard Cloudflare alert fires when used bytes >= org quota (default 8 GiB). */
+export const CLOUD_STORAGE_ALERT_RATIO = 1;
 export const MAX_DASHBOARD_ALERTS = 8;
 export const MAX_DASHBOARD_ACTIVITY = 8;
 
@@ -106,6 +109,11 @@ export function isStorageAlert(usedGb: number, totalGb: number): boolean {
   return storageUsedRatio(usedGb, totalGb) >= STORAGE_ALERT_RATIO;
 }
 
+/** True when Cloudflare / org media usage has reached the configured quota (8 GiB by default). */
+export function isCloudStorageAlert(usedGb: number, totalGb: number): boolean {
+  return storageUsedRatio(usedGb, totalGb) >= CLOUD_STORAGE_ALERT_RATIO;
+}
+
 export type CloudStorageHealth = {
   usedGb: number;
   totalGb: number;
@@ -116,7 +124,7 @@ export function deriveCloudStorageAlert(
   cloud: CloudStorageHealth | null | undefined,
   nowLabel = "just now",
 ): AlertItem | null {
-  if (!cloud || !isStorageAlert(cloud.usedGb, cloud.totalGb)) return null;
+  if (!cloud || !isCloudStorageAlert(cloud.usedGb, cloud.totalGb)) return null;
   return {
     id: "cloud-storage",
     title: "Storage low",
@@ -161,15 +169,7 @@ export function deriveAlerts(
         at: nowLabel,
       });
     }
-    if (isStorageAlert(screen.storageUsedGb, screen.storageTotalGb)) {
-      alerts.push({
-        id: `storage-${screen.id}`,
-        title: "Screen storage low",
-        detail: `${screen.name} · ${screen.storageUsedGb.toFixed(1)} GB of ${screen.storageTotalGb.toFixed(1)} GB used`,
-        severity: "warning",
-        at: nowLabel,
-      });
-    }
+    // Device disk is shown on the screen detail page; dashboard Storage Alerts are Cloudflare-only.
     if (screen.status === "syncing" || screen.syncState === "Downloading" || screen.syncState === "Verifying") {
       alerts.push({
         id: `syncing-${screen.id}`,
@@ -184,13 +184,12 @@ export function deriveAlerts(
   return alerts.sort((a, b) => rank[a.severity] - rank[b.severity]).slice(0, MAX_DASHBOARD_ALERTS);
 }
 
+/** Dashboard "Storage Alerts" card — Cloudflare R2 / org media quota only. */
 export function storageAlertCount(
-  screens: ScreenHealth[],
+  _screens: ScreenHealth[],
   cloud?: CloudStorageHealth | null,
 ): number {
-  const screenCount = screens.filter((s) => isStorageAlert(s.storageUsedGb, s.storageTotalGb)).length;
-  const cloudCount = cloud && isStorageAlert(cloud.usedGb, cloud.totalGb) ? 1 : 0;
-  return screenCount + cloudCount;
+  return cloud && isCloudStorageAlert(cloud.usedGb, cloud.totalGb) ? 1 : 0;
 }
 
 export type DashboardNowPlaying = {

@@ -11,6 +11,7 @@ import {
   coveragePercent,
   deriveAlerts,
   expectedHeartbeats,
+  isCloudStorageAlert,
   isStorageAlert,
   mergeDeviceLogLines,
   storageAlertCount,
@@ -48,10 +49,18 @@ test("coverage never exceeds 100 percent", () => {
   assert.equal(coveragePercent(3, 0), 100);
 });
 
-test("storage alert fires at 85 percent used", () => {
+test("device disk warning still uses 85 percent for screen detail helpers", () => {
   assert.equal(isStorageAlert(54.4, 64), true);
   assert.equal(isStorageAlert(50, 64), false);
   assert.equal(isStorageAlert(10, 0), false);
+});
+
+test("cloud storage alert fires at quota (8 GiB), not 85 percent", () => {
+  assert.equal(isCloudStorageAlert(7.9, 8), false);
+  assert.equal(isCloudStorageAlert(8, 8), true);
+  assert.equal(isCloudStorageAlert(0.012, 8), false);
+  assert.equal(isCloudStorageAlert(12, 8), true);
+  assert.equal(isCloudStorageAlert(10, 0), false);
 });
 
 test("offline screens become critical alerts; disabled screens do not", () => {
@@ -70,7 +79,7 @@ test("offline screens become critical alerts; disabled screens do not", () => {
   ]);
   assert.equal(alerts[0]?.title, "Screen offline");
   assert.equal(alerts.some((a) => a.title === "Sync failed"), true);
-  assert.equal(alerts.some((a) => a.title === "Screen storage low"), true);
+  assert.equal(alerts.some((a) => a.title === "Screen storage low"), false);
   assert.equal(alerts.some((a) => a.title === "Synchronization in progress"), true);
   assert.equal(alerts.some((a) => a.detail.includes("Lobby")), false);
   assert.equal(
@@ -78,21 +87,30 @@ test("offline screens become critical alerts; disabled screens do not", () => {
       screen({ id: "s4", name: "Bar", storageUsedGb: 58, storageTotalGb: 64 }),
       screen({ id: "s1", name: "Office" }),
     ]),
-    1,
+    0,
   );
 });
 
-test("cloud storage low alert is labeled Cloudflare R2 and counts separately", () => {
-  const alerts = deriveAlerts([], "just now", { usedGb: 90, totalGb: 100 });
+test("cloud storage low alert is labeled Cloudflare R2; Storage Alerts ignore device disk", () => {
+  const alerts = deriveAlerts([], "just now", { usedGb: 8, totalGb: 8 });
   assert.equal(alerts[0]?.title, "Storage low");
   assert.match(alerts[0]?.detail ?? "", /Cloudflare R2/);
-  assert.equal(storageAlertCount([screen({ id: "s1", name: "Office" })], { usedGb: 90, totalGb: 100 }), 1);
+  assert.equal(storageAlertCount([screen({ id: "s1", name: "Office" })], { usedGb: 8, totalGb: 8 }), 1);
+  assert.equal(storageAlertCount([screen({ id: "s1", name: "Office" })], { usedGb: 0.012, totalGb: 8 }), 0);
   assert.equal(
     storageAlertCount(
-      [screen({ id: "s4", name: "Bar", storageUsedGb: 58, storageTotalGb: 64 })],
-      { usedGb: 90, totalGb: 100 },
+      [screen({ id: "s4", name: "Bar", storageUsedGb: 207.2, storageTotalGb: 238.2 })],
+      { usedGb: 0.012, totalGb: 8 },
     ),
-    2,
+    0,
+  );
+  assert.equal(
+    deriveAlerts(
+      [screen({ id: "s4", name: "Rajan Room", storageUsedGb: 207.2, storageTotalGb: 238.2 })],
+      "just now",
+      { usedGb: 0.012, totalGb: 8 },
+    ).some((a) => a.title === "Screen storage low" || a.title === "Storage low"),
+    false,
   );
 });
 
