@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { LayoutGrid, List, Monitor, Plus, Search } from "lucide-react";
+import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -14,6 +15,7 @@ import {
   E3Progress,
   E3QueryBoundary,
   E3ScreenCard,
+  E3Skeletons,
   E3StatusBadge,
   E3Table,
   type E3Column,
@@ -27,6 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { PairScreenDialog } from "@/features/screens/PairScreenDialog";
 import { ScreenRowMenu } from "@/features/screens/ScreenRowMenu";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
@@ -35,7 +38,7 @@ import { locationService, screenGroupService, screenService } from "@/services";
 import { ADMIN_MONITORING_REFETCH_MS } from "@/lib/monitoring";
 import { useLiveMonitoring } from "@/lib/use-live-monitoring";
 import { hasPermission } from "@/lib/rbac";
-import type { Screen } from "@/types";
+import type { Screen, ScreenGroup, ScreenStatus } from "@/types";
 
 export const Route = createFileRoute("/_shell/screens/")({
   head: () => ({
@@ -54,6 +57,14 @@ export const Route = createFileRoute("/_shell/screens/")({
   }),
   component: ScreensPage,
 });
+
+const STATUS_FILTERS = [
+  { value: "all", label: "All" },
+  { value: "online", label: "Online" },
+  { value: "syncing", label: "Syncing" },
+  { value: "offline", label: "Offline" },
+  { value: "disabled", label: "Disabled" },
+] as const;
 
 function ScreensPage() {
   const navigate = useNavigate();
@@ -93,16 +104,47 @@ function ScreensPage() {
     },
   });
 
+  const allScreens = useMemo(() => screensQuery.data ?? [], [screensQuery.data]);
+  const screenGroups = groups.data ?? [];
+
   const rows = useMemo(() => {
-    return (screensQuery.data ?? []).filter((s) => {
-      if (debouncedSearch && !s.name.toLowerCase().includes(debouncedSearch.toLowerCase())) return false;
+    return allScreens.filter((s) => {
+      if (debouncedSearch && !s.name.toLowerCase().includes(debouncedSearch.toLowerCase()))
+        return false;
       if (locationId !== "all" && s.locationId !== locationId) return false;
       if (status !== "all" && s.status !== status) return false;
       if (groupId !== "all" && !s.groupIds.includes(groupId)) return false;
       if (orientation !== "all" && s.orientation !== orientation) return false;
       return true;
     });
-  }, [screensQuery.data, debouncedSearch, locationId, status, groupId, orientation]);
+  }, [allScreens, debouncedSearch, locationId, status, groupId, orientation]);
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<ScreenStatus | "all", number> = {
+      all: allScreens.length,
+      online: 0,
+      syncing: 0,
+      offline: 0,
+      disabled: 0,
+    };
+    for (const screen of allScreens) counts[screen.status] += 1;
+    return counts;
+  }, [allScreens]);
+
+  const filtersActive =
+    Boolean(search) ||
+    locationId !== "all" ||
+    status !== "all" ||
+    groupId !== "all" ||
+    orientation !== "all";
+
+  function clearFilters() {
+    setSearch("");
+    setLocationId("all");
+    setStatus("all");
+    setGroupId("all");
+    setOrientation("all");
+  }
 
   const columns: E3Column<Screen>[] = [
     {
@@ -111,7 +153,9 @@ function ScreensPage() {
       cell: (s) => (
         <div className="min-w-0">
           <p className="truncate font-medium">{s.name}</p>
-          <p className="truncate text-xs text-muted-foreground">{s.screenType}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {s.screenType} · {s.orientation}
+          </p>
         </div>
       ),
     },
@@ -119,14 +163,21 @@ function ScreensPage() {
     {
       key: "group",
       header: "Group",
-      cell: (s) => (groups.data ?? []).find((g) => s.groupIds.includes(g.id))?.name ?? "—",
+      cell: (s) => groupLabel(s, screenGroups),
     },
     { key: "status", header: "Status", cell: (s) => <E3StatusBadge status={s.status} /> },
     { key: "playlist", header: "Playlist", cell: (s) => s.playlistName ?? "—" },
     {
       key: "playing",
       header: "Now playing",
-      cell: (s) => <span className="text-muted-foreground">{s.nowPlaying ?? "—"}</span>,
+      cell: (s) => (
+        <span
+          className="block max-w-[14rem] truncate text-muted-foreground"
+          title={s.nowPlaying ?? undefined}
+        >
+          {s.nowPlaying ?? "—"}
+        </span>
+      ),
     },
     {
       key: "sync",
@@ -141,7 +192,7 @@ function ScreensPage() {
     {
       key: "seen",
       header: "Last seen",
-      cell: (s) => <span className="text-muted-foreground">{s.lastSeen}</span>,
+      cell: (s) => <span className="tabular-nums text-muted-foreground">{s.lastSeen}</span>,
     },
     ...(canManageScreens
       ? ([
@@ -159,7 +210,7 @@ function ScreensPage() {
     <div>
       <E3PageHeader
         title="Screens"
-        description="Every paired player across all locations."
+        description="Monitor pairing, playlist, sync and last heartbeat across every location."
         actions={
           <>
             <E3Button variant="outline" onClick={() => setGroupsOpen(true)}>
@@ -172,60 +223,54 @@ function ScreensPage() {
         }
       />
 
-      <E3Card className="mb-6">
-        <E3CardBody className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-          <div className="relative xl:col-span-2">
-            <Search
-              className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-              aria-hidden
-            />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search screen name"
-              aria-label="Search screens"
-              className="pl-9"
-            />
-          </div>
-          <Select value={locationId} onValueChange={setLocationId}>
-            <SelectTrigger aria-label="Filter by location">
-              <SelectValue placeholder="Location" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All locations</SelectItem>
-              {(locations.data ?? []).map((l) => (
-                <SelectItem key={l.id} value={l.id}>
-                  {l.shortName}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={status} onValueChange={setStatus}>
-            <SelectTrigger aria-label="Filter by status">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
-              <SelectItem value="online">Online</SelectItem>
-              <SelectItem value="syncing">Syncing</SelectItem>
-              <SelectItem value="offline">Offline</SelectItem>
-              <SelectItem value="disabled">Disabled</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={groupId} onValueChange={setGroupId}>
-            <SelectTrigger aria-label="Filter by group">
-              <SelectValue placeholder="Group" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All groups</SelectItem>
-              {(groups.data ?? []).map((g) => (
-                <SelectItem key={g.id} value={g.id}>
-                  {g.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <div className="flex gap-2">
+      <E3Card className="mb-5">
+        <E3CardBody className="grid items-end gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(12rem,1.4fr)_repeat(3,minmax(0,1fr))_auto]">
+          <FilterField label="Search">
+            <div className="relative">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
+              />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Screen name"
+                aria-label="Search screens"
+                className="pl-9"
+              />
+            </div>
+          </FilterField>
+          <FilterField label="Location">
+            <Select value={locationId} onValueChange={setLocationId}>
+              <SelectTrigger aria-label="Filter by location">
+                <SelectValue placeholder="Location" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All locations</SelectItem>
+                {(locations.data ?? []).map((l) => (
+                  <SelectItem key={l.id} value={l.id}>
+                    {l.shortName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Group">
+            <Select value={groupId} onValueChange={setGroupId}>
+              <SelectTrigger aria-label="Filter by group">
+                <SelectValue placeholder="Group" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All groups</SelectItem>
+                {screenGroups.map((g) => (
+                  <SelectItem key={g.id} value={g.id}>
+                    {g.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Orientation">
             <Select value={orientation} onValueChange={setOrientation}>
               <SelectTrigger aria-label="Filter by orientation">
                 <SelectValue placeholder="Orientation" />
@@ -236,13 +281,22 @@ function ScreensPage() {
                 <SelectItem value="Portrait">Portrait</SelectItem>
               </SelectContent>
             </Select>
-            <div className="flex shrink-0 overflow-hidden rounded-xl border border-border">
+          </FilterField>
+          <FilterField label="View">
+            <div
+              className="flex w-fit overflow-hidden rounded-xl border border-border"
+              role="group"
+              aria-label="Result layout"
+            >
               <button
                 type="button"
                 aria-label="Table view"
                 aria-pressed={view === "table"}
                 onClick={() => setView("table")}
-                className={cn("grid size-9 place-items-center", view === "table" && "bg-accent")}
+                className={cn(
+                  "grid size-10 place-items-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98]",
+                  view === "table" && "bg-accent text-foreground",
+                )}
               >
                 <List className="size-4" />
               </button>
@@ -251,12 +305,15 @@ function ScreensPage() {
                 aria-label="Grid view"
                 aria-pressed={view === "grid"}
                 onClick={() => setView("grid")}
-                className={cn("grid size-9 place-items-center", view === "grid" && "bg-accent")}
+                className={cn(
+                  "grid size-10 place-items-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98]",
+                  view === "grid" && "bg-accent text-foreground",
+                )}
               >
                 <LayoutGrid className="size-4" />
               </button>
             </div>
-          </div>
+          </FilterField>
         </E3CardBody>
       </E3Card>
 
@@ -264,8 +321,9 @@ function ScreensPage() {
         isLoading={screensQuery.isLoading}
         isError={screensQuery.isError}
         refetch={() => void screensQuery.refetch()}
+        skeleton={view === "grid" ? <E3Skeletons count={6} /> : <ScreensTableSkeleton />}
       >
-        {rows.length === 0 ? (
+        {allScreens.length === 0 ? (
           <E3EmptyState
             icon={Monitor}
             title="No screens yet"
@@ -276,24 +334,80 @@ function ScreensPage() {
               </E3Button>
             }
           />
-        ) : view === "table" ? (
-          <E3Table
-            columns={columns}
-            rows={rows}
-            rowKey={(s) => s.id}
-            onRowClick={(s) => void navigate({ to: "/screens/$id", params: { id: s.id } })}
-            caption="All paired screens"
-          />
         ) : (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {rows.map((s) => (
-              <E3ScreenCard
-                key={s.id}
-                screen={s}
-                overflow={canManageScreens ? <ScreenRowMenu screen={s} /> : undefined}
+          <>
+            <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Filter by status">
+              {STATUS_FILTERS.map((item) => {
+                const selected = status === item.value;
+                const count = statusCounts[item.value];
+                return (
+                  <button
+                    key={item.value}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => setStatus(item.value === "all" || selected ? "all" : item.value)}
+                    className={cn(
+                      "rounded-full border px-3.5 py-1.5 text-sm tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98]",
+                      selected
+                        ? "e3-gradient border-transparent text-white"
+                        : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+                    )}
+                  >
+                    {item.label}
+                    <span
+                      className={cn("ml-1.5", selected ? "text-white/80" : "text-muted-foreground")}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm tabular-nums text-muted-foreground">
+                {filtersActive
+                  ? `${rows.length} of ${allScreens.length} screens`
+                  : `${allScreens.length} screens`}
+              </p>
+              {filtersActive ? (
+                <E3Button variant="ghost" size="sm" onClick={clearFilters}>
+                  Clear filters
+                </E3Button>
+              ) : null}
+            </div>
+
+            {rows.length === 0 ? (
+              <E3EmptyState
+                icon={Search}
+                title="No screens match"
+                description="Nothing matches these filters. Clear them to see the full list."
+                action={
+                  <E3Button variant="outline" onClick={clearFilters}>
+                    Clear filters
+                  </E3Button>
+                }
               />
-            ))}
-          </div>
+            ) : view === "table" ? (
+              <E3Table
+                columns={columns}
+                rows={rows}
+                rowKey={(s) => s.id}
+                onRowClick={(s) => void navigate({ to: "/screens/$id", params: { id: s.id } })}
+                caption="All paired screens"
+              />
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {rows.map((s) => (
+                  <E3ScreenCard
+                    key={s.id}
+                    screen={s}
+                    overflow={canManageScreens ? <ScreenRowMenu screen={s} /> : undefined}
+                  />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </E3QueryBoundary>
 
@@ -331,30 +445,78 @@ function ScreensPage() {
               </E3Button>
             </div>
           </div>
-          {(groups.data ?? []).map((g) => (
-            <div
-              key={g.id}
-              className="flex items-center justify-between gap-3 rounded-xl border border-border p-3"
-            >
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{g.name}</p>
-                <p className="truncate text-xs text-muted-foreground">{g.description}</p>
+          {screenGroups.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+              No groups yet. Create one to target many screens at once.
+            </p>
+          ) : (
+            screenGroups.map((g) => (
+              <div
+                key={g.id}
+                className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card px-3 py-3"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{g.name}</p>
+                  {g.description ? (
+                    <p className="truncate text-xs text-muted-foreground">{g.description}</p>
+                  ) : null}
+                </div>
+                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                  {g.screenIds.length} screens
+                </span>
               </div>
-              <span className="shrink-0 text-xs text-muted-foreground">
-                {g.screenIds.length} screens
-              </span>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </E3Modal>
 
-      <p className="mt-6 text-xs text-muted-foreground">
+      <p className="mt-8 text-xs text-muted-foreground">
         Looking for a specific venue?{" "}
-        <Link to="/locations" className="underline underline-offset-4">
+        <Link
+          to="/locations"
+          className="underline underline-offset-4 transition-colors hover:text-foreground"
+        >
           Browse locations
         </Link>
         .
       </p>
+    </div>
+  );
+}
+
+function FilterField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="min-w-0 space-y-1.5">
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      {children}
+    </div>
+  );
+}
+
+function groupLabel(screen: Screen, groups: ScreenGroup[]) {
+  const names = groups.filter((g) => screen.groupIds.includes(g.id)).map((g) => g.name);
+  if (names.length === 0) return "—";
+  if (names.length === 1) return names[0];
+  return `${names[0]} +${names.length - 1}`;
+}
+
+function ScreensTableSkeleton() {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-border bg-card" aria-hidden>
+      <div className="border-b border-border px-4 py-3">
+        <Skeleton className="h-3 w-44" />
+      </div>
+      {Array.from({ length: 8 }).map((_, i) => (
+        <div
+          key={i}
+          className="flex items-center gap-4 border-b border-border/60 px-4 py-3.5 last:border-0"
+        >
+          <Skeleton className="h-4 w-40" />
+          <Skeleton className="hidden h-4 w-24 sm:block" />
+          <Skeleton className="hidden h-4 w-20 md:block" />
+          <Skeleton className="ml-auto h-4 w-16" />
+        </div>
+      ))}
     </div>
   );
 }
