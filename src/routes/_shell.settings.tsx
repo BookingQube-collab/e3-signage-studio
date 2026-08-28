@@ -1,16 +1,20 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { ImageIcon, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
-import { E3Button, E3Card, E3CardBody, E3CardHeader, E3PageHeader } from "@/components/e3";
+import { PermissionDenied } from "@/components/auth/PermissionDenied";
+import {
+  E3Button,
+  E3Card,
+  E3CardBody,
+  E3CardHeader,
+  E3Modal,
+  E3PageHeader,
+} from "@/components/e3";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  DEFAULT_CMS_SETTINGS,
-  DEFAULT_PUBLIC_CMS_URL,
-  loadCmsSettings,
-  saveCmsSettings,
-} from "@/lib/cms-settings";
 import {
   Select,
   SelectContent,
@@ -18,9 +22,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { UI_TRANSITIONS } from "@/types";
 import { Switch } from "@/components/ui/switch";
+import { MediaPicker } from "@/features/media/MediaPicker";
+import {
+  DEFAULT_CMS_SETTINGS,
+  DEFAULT_PUBLIC_CMS_URL,
+  loadCmsSettings,
+  saveCmsSettings,
+} from "@/lib/cms-settings";
+import { hasPermission } from "@/lib/rbac";
+import {
+  getOrganizationSettingsFn,
+  updateWaitingScreenSettingsFn,
+} from "@/lib/settings-functions";
+import { getBrowserAccessToken } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import { mediaService } from "@/services";
+import { UI_TRANSITIONS } from "@/types";
+import type { Media } from "@/types";
 
 export const Route = createFileRoute("/_shell/settings")({
   head: () => ({
@@ -43,18 +62,127 @@ export const Route = createFileRoute("/_shell/settings")({
 const TABS = ["Organization", "Playback", "Sync", "Notifications"] as const;
 
 function SettingsPage() {
+  const { auth } = Route.useRouteContext();
+  const canView = Boolean(auth?.ok && hasPermission(auth.profile.role, "settings.view"));
+  const canManage = Boolean(auth?.ok && hasPermission(auth.profile.role, "settings.manage"));
+
+  if (!canView) {
+    return (
+      <PermissionDenied
+        title="Permission denied"
+        description="Only Super Admins can open organization settings."
+      />
+    );
+  }
+
+  return <SettingsEditor canManage={canManage} />;
+}
+
+function SettingsEditor({ canManage }: { canManage: boolean }) {
+  const qc = useQueryClient();
   const [tab, setTab] = useState<(typeof TABS)[number]>("Organization");
   const [settings, setSettings] = useState(DEFAULT_CMS_SETTINGS);
   const { org, playback, sync, notify, publicCmsUrl } = settings;
+
+  const [waitingTitle, setWaitingTitle] = useState("");
+  const [waitingMessage, setWaitingMessage] = useState("");
+  const [waitingMediaId, setWaitingMediaId] = useState<string | null>(null);
+  const [waitingThumb, setWaitingThumb] = useState<string | null>(null);
+  const [waitingMediaName, setWaitingMediaName] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const orgSettingsQuery = useQuery({
+    queryKey: ["organization-settings"],
+    queryFn: async () => {
+      const accessToken = await getBrowserAccessToken();
+      return getOrganizationSettingsFn({ data: { accessToken } });
+    },
+  });
+
+  const mediaQuery = useQuery({
+    queryKey: ["media"],
+    queryFn: () => mediaService.list(),
+    enabled: pickerOpen,
+  });
+  const foldersQuery = useQuery({
+    queryKey: ["media-folders"],
+    queryFn: () => mediaService.listFolders(),
+    enabled: pickerOpen,
+  });
+
+  const imageMedia = useMemo(
+    () =>
+      (mediaQuery.data ?? []).filter(
+        (item) => item.type === "Image" || item.type === "Logo" || item.type === "QR",
+      ),
+    [mediaQuery.data],
+  );
 
   useEffect(() => {
     setSettings(loadCmsSettings());
   }, []);
 
-  function save() {
+  useEffect(() => {
+    const waiting = orgSettingsQuery.data?.waitingScreen;
+    if (!waiting) return;
+    setWaitingTitle(waiting.title ?? "");
+    setWaitingMessage(waiting.message ?? "");
+    setWaitingMediaId(waiting.mediaId);
+    setWaitingThumb(waiting.thumbnailUrl);
+    setWaitingMediaName(waiting.mediaName);
+  }, [orgSettingsQuery.data]);
+
+  const saveWaiting = useMutation({
+    mutationFn: async () => {
+      const accessToken = await getBrowserAccessToken();
+      return updateWaitingScreenSettingsFn({
+        data: {
+          accessToken,
+          mediaId: waitingMediaId,
+          title: waitingTitle.trim() || null,
+          message: waitingMessage.trim() || null,
+        },
+      });
+    },
+    onSuccess: (data) => {
+      void qc.setQueryData(["organization-settings"], data);
+      toast.success("Waiting screen saved");
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || "Could not save waiting screen");
+    },
+  });
+
+  function saveLocal() {
     const next = saveCmsSettings(settings);
     setSettings(next);
     toast.success("Settings saved");
+  }
+
+  function save() {
+    if (tab === "Playback") {
+      if (!canManage) {
+        toast.error("Permission denied");
+        return;
+      }
+      saveLocal();
+      saveWaiting.mutate();
+      return;
+    }
+    saveLocal();
+  }
+
+  function pickMedia(item: Media) {
+    setWaitingMediaId(item.id);
+    setWaitingMediaName(item.filename);
+    setWaitingThumb(item.thumbnailUrl ?? item.previewUrl ?? null);
+    setPickerOpen(false);
+  }
+
+  function clearMedia() {
+    setWaitingMediaId(null);
+    setWaitingMediaName(null);
+    setWaitingThumb(null);
   }
 
   return (
@@ -63,8 +191,12 @@ function SettingsPage() {
         title="Settings"
         description="Network-wide defaults for the E3 signage admin panel."
         actions={
-          <E3Button variant="primary" onClick={save}>
-            Save changes
+          <E3Button
+            variant="primary"
+            onClick={save}
+            disabled={tab === "Playback" && (!canManage || saveWaiting.isPending)}
+          >
+            {saveWaiting.isPending ? "Saving…" : "Save changes"}
           </E3Button>
         }
       />
@@ -210,6 +342,83 @@ function SettingsPage() {
                   setSettings({ ...settings, playback: { ...playback, muteVideo: v } })
                 }
               />
+
+              <div className="space-y-4 rounded-xl border border-border p-4">
+                <div>
+                  <p className="text-sm font-medium">Default waiting screen</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Shown on paired TVs until an active campaign package is playing. Leave blank to
+                    keep the built-in E3 branded hold screen.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-start gap-4">
+                  <div className="relative aspect-video w-full max-w-xs overflow-hidden rounded-lg border border-border bg-muted">
+                    {waitingThumb ? (
+                      <img
+                        src={waitingThumb}
+                        alt={waitingMediaName ?? "Waiting screen"}
+                        className="size-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex size-full flex-col items-center justify-center gap-2 text-muted-foreground">
+                        <ImageIcon className="size-8 opacity-60" aria-hidden />
+                        <span className="text-xs">E3 branded default</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <E3Button
+                      type="button"
+                      variant="secondary"
+                      disabled={!canManage || orgSettingsQuery.isLoading}
+                      onClick={() => setPickerOpen(true)}
+                    >
+                      Choose image
+                    </E3Button>
+                    {waitingMediaId ? (
+                      <E3Button
+                        type="button"
+                        variant="ghost"
+                        disabled={!canManage}
+                        onClick={clearMedia}
+                      >
+                        <X className="size-4" /> Clear image
+                      </E3Button>
+                    ) : null}
+                    {waitingMediaName ? (
+                      <p className="max-w-xs truncate text-xs text-muted-foreground">
+                        {waitingMediaName}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-1">
+                  <div className="space-y-2">
+                    <Label htmlFor="w-title">Headline (optional)</Label>
+                    <Input
+                      id="w-title"
+                      maxLength={120}
+                      placeholder="Waiting for the main act"
+                      value={waitingTitle}
+                      disabled={!canManage}
+                      onChange={(e) => setWaitingTitle(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="w-msg">Message (optional)</Label>
+                    <Input
+                      id="w-msg"
+                      maxLength={500}
+                      placeholder="This screen is online. Publish a campaign to take over."
+                      value={waitingMessage}
+                      disabled={!canManage}
+                      onChange={(e) => setWaitingMessage(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
           ) : null}
 
@@ -300,6 +509,21 @@ function SettingsPage() {
           ) : null}
         </E3CardBody>
       </E3Card>
+
+      <E3Modal
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        title="Choose waiting screen image"
+        description="Pick an image from the media library. Videos are not supported here."
+        className="sm:max-w-2xl"
+      >
+        <MediaPicker
+          media={imageMedia}
+          folders={foldersQuery.data ?? []}
+          {...(waitingMediaId ? { selectedIds: new Set([waitingMediaId]) } : {})}
+          onPick={pickMedia}
+        />
+      </E3Modal>
     </div>
   );
 }

@@ -24,6 +24,11 @@ class AppContainer(context: Context) {
     val pairing: PairingCoordinator = PairingCoordinator(api, store)
     val packages = LocalPackageStore(db, PlayerFiles.root(context), json)
     val downloader = AssetDownloader(RetrofitDeviceApi.downloadClient())
+    val waitingScreen = WaitingScreenStore(
+        filesDir = PlayerFiles.root(context),
+        downloader = downloader,
+        json = json,
+    )
     val telemetry = DeviceTelemetry(
         context = context,
         api = api,
@@ -39,6 +44,7 @@ class AppContainer(context: Context) {
         packages = packages,
         downloader = downloader,
         filesDir = PlayerFiles.root(context),
+        waitingScreen = waitingScreen,
         onActivated = { telemetry.noteSuccessfulSync() },
     )
 

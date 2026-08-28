@@ -40,11 +40,25 @@ data class ActivateResponse(
 )
 
 @Serializable
+data class WaitingScreenConfig(
+    val mediaId: String? = null,
+    val version: Int? = null,
+    val checksum: String? = null,
+    val fileSize: Long? = null,
+    val mimeType: String? = null,
+    val downloadUrl: String? = null,
+    val title: String? = null,
+    val message: String? = null,
+    val configVersion: Int = 0,
+)
+
+@Serializable
 data class SyncStatusResponse(
     val manifestVersion: Int,
     val configVersion: Int,
     val syncRequested: Boolean,
     val rotatedToken: String? = null,
+    val waitingScreen: WaitingScreenConfig? = null,
 )
 
 @Serializable

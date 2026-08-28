@@ -404,10 +404,13 @@ export async function deviceSyncStatus(
   const pending = asNullableString((data as { pending_manifest_id?: string | null } | null)?.pending_manifest_id);
   const requestedAt = asNullableString((data as { sync_requested_at?: string | null } | null)?.sync_requested_at);
   const rotatedToken = await maybeRotateToken(auth);
+  const { loadDeviceWaitingScreen } = await import("./settings.server");
+  const waitingScreen = await loadDeviceWaitingScreen(auth.admin, auth.screen.organization_id);
   return ok({
     manifestVersion: cloud,
     configVersion: configVersion > 0 ? configVersion : 1,
     syncRequested: Boolean(requestedAt) || cloud > local || Boolean(pending),
+    waitingScreen,
     ...(rotatedToken ? { rotatedToken } : {}),
   });
 }

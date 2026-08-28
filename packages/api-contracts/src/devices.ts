@@ -45,11 +45,24 @@ export const deviceActivateResponseSchema = z.object({
   screenId: uuidSchema.optional(),
 });
 
+export const deviceWaitingScreenSchema = z.object({
+  mediaId: uuidSchema.nullable(),
+  version: z.number().int().positive().nullable(),
+  checksum: sha256Schema.nullable(),
+  fileSize: z.number().int().min(0).nullable(),
+  mimeType: z.string().nullable(),
+  downloadUrl: z.string().url().nullable(),
+  title: z.string().max(120).nullable(),
+  message: z.string().max(500).nullable(),
+  configVersion: z.number().int().min(0),
+});
+
 export const deviceSyncStatusResponseSchema = z.object({
   manifestVersion: z.number().int().min(0),
   configVersion: z.number().int().min(0),
   syncRequested: z.boolean(),
   rotatedToken: z.string().min(16).optional(),
+  waitingScreen: deviceWaitingScreenSchema.optional(),
 });
 
 export const manifestAssetSchema = z.object({
@@ -185,6 +198,7 @@ export type DevicePairRequest = z.infer<typeof devicePairRequestSchema>;
 export type DevicePairResponse = z.infer<typeof devicePairResponseSchema>;
 export type DeviceActivateResponse = z.infer<typeof deviceActivateResponseSchema>;
 export type DeviceSyncStatusResponse = z.infer<typeof deviceSyncStatusResponseSchema>;
+export type DeviceWaitingScreen = z.infer<typeof deviceWaitingScreenSchema>;
 export type DeviceOkResponse = z.infer<typeof deviceOkResponseSchema>;
 export type ContentManifest = z.infer<typeof contentManifestSchema>;
 export type DeviceHeartbeatRequest = z.infer<typeof deviceHeartbeatRequestSchema>;

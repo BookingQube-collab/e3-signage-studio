@@ -32,6 +32,7 @@ class PackageSyncCoordinator(
     private val packages: LocalPackageStore,
     private val downloader: AssetDownloader,
     private val filesDir: File,
+    private val waitingScreen: WaitingScreenStore,
     private val onActivated: () -> Unit = {},
 ) {
     private val mutex = Mutex()
@@ -55,6 +56,7 @@ class PackageSyncCoordinator(
         persistRotatedToken(store, status.rotatedToken)
         val live = store.read() ?: credentials
         packages.noteCloudVersion(status.manifestVersion)
+        waitingScreen.applyFromSync(status.waitingScreen)
 
         val activeVersion = packages.activeVersion() ?: 0
         val inflight = inflightFor(status.manifestVersion)

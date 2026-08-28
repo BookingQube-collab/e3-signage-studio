@@ -37,6 +37,7 @@ data class PlaybackUiState(
     val layoutHeight: Int = 1080,
     val zones: List<ZoneUiState> = emptyList(),
     val waitingKind: WaitingKind? = WaitingKind.FIRST_PUBLISH,
+    val waitingOverrides: WaitingOverrides = WaitingOverrides(),
     val timezone: String = "Asia/Qatar",
     val playingMediaId: String? = null,
 )
@@ -87,6 +88,19 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch { pollLoop() }
         viewModelScope.launch { heartbeatLoop() }
         viewModelScope.launch { resumeWhenOnline() }
+        viewModelScope.launch {
+            app.container.waitingScreen.state.collect { waiting ->
+                val overrides = WaitingOverrides(
+                    localImagePath = waiting.localImagePath,
+                    title = waiting.title,
+                    message = waiting.message,
+                )
+                val current = _ui.value
+                if (current.waitingOverrides != overrides) {
+                    _ui.value = current.copy(waitingOverrides = overrides)
+                }
+            }
+        }
     }
 
     @Volatile
@@ -102,9 +116,13 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     private suspend fun playLoop() {
         while (viewModelScope.isActive) {
             val loaded = packages.loadActive()
+            val waitingOverrides = waitingOverrides()
             if (loaded == null) {
                 closeOpenPlay(PlaybackResult.INTERRUPTED)
-                _ui.value = PlaybackUiState(waitingKind = WaitingKind.FIRST_PUBLISH)
+                _ui.value = PlaybackUiState(
+                    waitingKind = WaitingKind.FIRST_PUBLISH,
+                    waitingOverrides = waitingOverrides,
+                )
                 withTimeoutOrNull(15_000) { app.container.sync.activations.first() }
                 continue
             }
@@ -121,6 +139,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     playing = false,
                     background = plan.background,
                     waitingKind = WaitingKind.OFF_HOURS,
+                    waitingOverrides = waitingOverrides,
                     timezone = tz,
                 )
                 delay(15_000)
@@ -134,6 +153,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     playing = false,
                     background = plan.background,
                     waitingKind = WaitingKind.EMPTY_PLAYLIST,
+                    waitingOverrides = waitingOverrides,
                     timezone = tz,
                 )
                 delay(15_000)
@@ -190,6 +210,15 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         } catch (error: Exception) {
             Log.w(TAG, "proof-of-play: ${error.message}")
         }
+    }
+
+    private fun waitingOverrides(): WaitingOverrides {
+        val waiting = app.container.waitingScreen.state.value
+        return WaitingOverrides(
+            localImagePath = waiting.localImagePath,
+            title = waiting.title,
+            message = waiting.message,
+        )
     }
 
     private fun buildUi(

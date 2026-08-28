@@ -73,7 +73,7 @@ fun PlaybackScreen(state: PlaybackUiState, onVideoFinished: (Int, Boolean) -> Un
             .background(parseHex(state.background)),
     ) {
         if (!state.playing && state.waitingKind != null) {
-            WaitingScreen(state.waitingKind)
+            WaitingScreen(state.waitingKind, state.waitingOverrides)
         }
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val density = LocalDensity.current

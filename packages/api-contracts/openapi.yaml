@@ -140,6 +140,19 @@ components:
       required: [code]
       properties:
         code: { type: string }
+    DeviceWaitingScreen:
+      type: object
+      required: [mediaId, version, checksum, fileSize, mimeType, downloadUrl, title, message, configVersion]
+      properties:
+        mediaId: { type: string, format: uuid, nullable: true }
+        version: { type: integer, nullable: true }
+        checksum: { type: string, nullable: true }
+        fileSize: { type: integer, nullable: true }
+        mimeType: { type: string, nullable: true }
+        downloadUrl: { type: string, format: uri, nullable: true }
+        title: { type: string, nullable: true }
+        message: { type: string, nullable: true }
+        configVersion: { type: integer }
     DeviceSyncStatus:
       type: object
       required: [manifestVersion, configVersion, syncRequested]
@@ -148,6 +161,8 @@ components:
         configVersion: { type: integer }
         syncRequested: { type: boolean }
         rotatedToken: { type: string, description: "Present when the server rotated the device token. Persist immediately; previous token remains valid for 24h." }
+        waitingScreen:
+          $ref: '#/components/schemas/DeviceWaitingScreen'
     ContentManifest:
       type: object
       required: [screenId, manifestVersion, configVersion, generatedAt, assets]
