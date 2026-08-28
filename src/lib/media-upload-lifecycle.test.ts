@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildOptimisticLibraryMedia,
+  chunkItems,
   clientUploadDedupeKey,
   completeStatOutcome,
   describeResyncToast,
@@ -15,6 +16,8 @@ import {
   shouldPurgeAbandonedUpload,
   shouldResyncPromote,
   shouldSkipCompleteObjectStat,
+  shouldSkipLibraryAutoSync,
+  storageKeysOnPage,
   uploadProgressIsComplete,
 } from "./media-upload-lifecycle.ts";
 
@@ -212,6 +215,18 @@ test("resync promotes pending rows whose objects exist and never duplicates READ
   assert.equal(shouldResyncPromote("PROCESSING", false), false);
   assert.equal(describeResyncToast(0).title, "Library is in sync with Cloudflare");
   assert.match(describeResyncToast(2).title, /2 files restored/);
+});
+
+test("library auto-sync skips when no PROCESSING/FAILED rows exist", () => {
+  assert.equal(shouldSkipLibraryAutoSync(false), true);
+  assert.equal(shouldSkipLibraryAutoSync(true), false);
+});
+
+test("resync matches one R2 page in chunks instead of joining the whole bucket", () => {
+  assert.deepEqual(chunkItems(["a", "b", "c", "d", "e"], 2), [["a", "b"], ["c", "d"], ["e"]]);
+  assert.deepEqual(chunkItems([], 80), []);
+  const page = ["org/a", "org/b", "org/c", "org/d"];
+  assert.deepEqual(storageKeysOnPage(page, ["org/b", "org/z"]), ["org/b"]);
 });
 
 test("an object that landed in storage is completed even when HEAD size is unknown", () => {

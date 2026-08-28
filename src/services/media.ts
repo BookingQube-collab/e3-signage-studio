@@ -17,7 +17,7 @@ import {
   archiveMediaFn,
 } from "@/lib/media-functions";
 import { assertUploadSize, inferMediaMime } from "@/lib/media-file";
-import { describeBrowserUploadFailure, describeCanceledStatement } from "@/lib/media-upload-error";
+import { describeBrowserUploadFailure, describeCanceledStatement, describeResyncError } from "@/lib/media-upload-error";
 import {
   buildOptimisticLibraryMedia,
   clientUploadDedupeKey,
@@ -288,10 +288,14 @@ export const liveMediaService: MediaService = {
     deleteMediaBulkFn({ data: { accessToken: await accessToken(), ids } }),
   downloadUrl: async (id) => mediaDownloadUrlFn({ data: { accessToken: await accessToken(), id } }),
   resyncFromStorage: async (folderId) => {
-    const rows = await resyncMediaFromStorageFn({
-      data: { accessToken: await accessToken(), folderId: folderId ?? null },
-    });
-    return rows.map(toUiMedia);
+    try {
+      const rows = await resyncMediaFromStorageFn({
+        data: { accessToken: await accessToken(), folderId: folderId ?? null },
+      });
+      return rows.map(toUiMedia);
+    } catch (error) {
+      throw new Error(describeResyncError(error instanceof Error ? error.message : ""));
+    }
   },
   listFolders: async () => {
     const rows = await listMediaFoldersFn({ data: { accessToken: await accessToken() } });

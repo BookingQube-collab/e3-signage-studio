@@ -1,7 +1,11 @@
 import { createHash, createHmac } from "node:crypto";
 
-import { parseS3ListBucketResult } from "../lib/r2-list";
-import { COMPLETE_OBJECT_STAT_TIMEOUT_MS, STORAGE_LIST_TIMEOUT_MS } from "../lib/media-upload-lifecycle";
+import { parseS3ListBucketResult, type S3ListBucketPage } from "../lib/r2-list";
+import {
+  COMPLETE_OBJECT_STAT_TIMEOUT_MS,
+  RESYNC_R2_PAGE_SIZE,
+  STORAGE_LIST_TIMEOUT_MS,
+} from "../lib/media-upload-lifecycle";
 import { getServerEnv } from "./env.server";
 
 type HttpMethod = "PUT" | "GET" | "HEAD" | "DELETE";
@@ -184,20 +188,29 @@ export async function r2HeadObject(key: string): Promise<{ sizeBytes: number } |
   throw new Error(`Could not verify uploaded object (${response.status}).`);
 }
 
+export async function r2ListObjectKeysPage(
+  prefix: string,
+  options?: { maxKeys?: number; continuationToken?: string | null; timeoutMs?: number },
+): Promise<S3ListBucketPage> {
+  const maxKeys = Math.min(Math.max(options?.maxKeys ?? RESYNC_R2_PAGE_SIZE, 1), 1000);
+  const extraQuery: Array<[string, string]> = [
+    ["list-type", "2"],
+    ["max-keys", String(maxKeys)],
+    ["prefix", prefix],
+  ];
+  if (options?.continuationToken) extraQuery.push(["continuation-token", options.continuationToken]);
+  const { url } = signedUrl({ method: "GET", expiresIn: 60, extraQuery });
+  const timeoutMs = options?.timeoutMs ?? STORAGE_LIST_TIMEOUT_MS;
+  const response = await fetchWithTimeout(url, { method: "GET" }, timeoutMs);
+  if (!response.ok) throw new Error(`Could not list stored objects (${response.status}).`);
+  return parseS3ListBucketResult(await response.text());
+}
+
 export async function r2ListObjectKeys(prefix: string, maxPages = 3): Promise<string[]> {
   const keys: string[] = [];
   let token: string | null = null;
   for (let page = 0; page < maxPages; page += 1) {
-    const extraQuery: Array<[string, string]> = [
-      ["list-type", "2"],
-      ["max-keys", "1000"],
-      ["prefix", prefix],
-    ];
-    if (token) extraQuery.push(["continuation-token", token]);
-    const { url } = signedUrl({ method: "GET", expiresIn: 60, extraQuery });
-    const response = await fetchWithTimeout(url, { method: "GET" }, STORAGE_LIST_TIMEOUT_MS);
-    if (!response.ok) throw new Error(`Could not list stored objects (${response.status}).`);
-    const parsed = parseS3ListBucketResult(await response.text());
+    const parsed = await r2ListObjectKeysPage(prefix, { maxKeys: RESYNC_R2_PAGE_SIZE, continuationToken: token });
     keys.push(...parsed.keys);
     if (!parsed.nextContinuationToken) break;
     token = parsed.nextContinuationToken;

@@ -28,7 +28,7 @@ import {
   uniqueLibraryFilename,
 } from "../lib/media-file";
 import { mediaKeysToSign } from "../lib/media-sign";
-import { describeCanceledStatement } from "../lib/media-upload-error";
+import { describeCanceledStatement, describeResyncError, isCanceledStatementError } from "../lib/media-upload-error";
 import {
   FOLDER_DUPLICATE_MESSAGE,
   assertFolderName,
@@ -37,13 +37,21 @@ import {
   uniqueFoldersByName,
 } from "../lib/media-folders";
 import {
-  COMPLETE_OBJECT_STAT_TIMEOUT_MS,
+  AUTO_SYNC_DEADLINE_MS,
+  AUTO_SYNC_R2_MAX_PAGES,
+  chunkItems,
   incompleteVersionReusable,
   isVisibleLibraryStatus,
+  RESYNC_KEY_IN_CHUNK,
+  RESYNC_MANUAL_DEADLINE_MS,
+  RESYNC_R2_MAX_PAGES,
+  RESYNC_R2_PAGE_SIZE,
+  RESYNC_UPDATE_BATCH_SIZE,
   shouldDiscardIncompleteMedia,
-  shouldPurgeAbandonedUpload,
   shouldResyncPromote,
   shouldSkipCompleteObjectStat,
+  shouldSkipLibraryAutoSync,
+  STORAGE_LIST_TIMEOUT_MS,
 } from "../lib/media-upload-lifecycle";
 import { requireCmsPermission } from "./auth.server";
 import type { MediaFolderRow, MediaRow, MediaVersionRow } from "./db/types";
@@ -59,8 +67,7 @@ import {
   createObjectDownloadUrls,
   createObjectUploadUrl,
   deleteObjects,
-  listStoredObjectKeys,
-  statObject,
+  listStoredObjectKeysPage,
   storageBackendName,
   UPLOAD_URL_TTL_SECONDS,
 } from "./storage.server";
@@ -736,6 +743,7 @@ async function loadIncompleteMediaWithVersions(
   client: ReturnType<typeof getUserClient>,
   organizationId: string,
   folderId?: string | null,
+  limit = 80,
 ): Promise<Array<{ media: MediaRow; version: MediaVersionRow }>> {
   let query = client
     .from("media")
@@ -743,10 +751,12 @@ async function loadIncompleteMediaWithVersions(
     .eq("organization_id", organizationId)
     .in("status", ["PROCESSING", "FAILED"])
     .is("archived_at", null)
-    .limit(100);
+    .order("created_at", { ascending: false })
+    .limit(limit);
   if (folderId) query = query.eq("folder_id", folderId);
   const { data, error } = await query;
-  if (error || !data || data.length === 0) return [];
+  throwIfError(error, "Could not load pending uploads.");
+  if (!data || data.length === 0) return [];
   const mediaRows = data.map((row) => mapMedia(row as Record<string, unknown>));
   const { data: versionRaw, error: versionError } = await client
     .from("media_versions")
@@ -754,8 +764,9 @@ async function loadIncompleteMediaWithVersions(
     .in(
       "media_id",
       mediaRows.map((row) => row.id),
-    );
-  if (versionError) return [];
+    )
+    .in("status", ["PROCESSING", "FAILED"]);
+  throwIfError(versionError, "Could not load pending upload versions.");
   const versionsByMedia = new Map<string, MediaVersionRow[]>();
   for (const raw of versionRaw ?? []) {
     const version = mapVersion(raw as Record<string, unknown>);
@@ -771,50 +782,185 @@ async function loadIncompleteMediaWithVersions(
   return pending;
 }
 
-async function keysPresentInStorage(
-  organizationId: string,
-  pendingKeys: string[],
-): Promise<{ found: Set<string>; authoritative: boolean }> {
-  const listed = await listStoredObjectKeys(`${organizationId}/`);
-  if (listed) return { found: listed, authoritative: true };
-  const found = new Set<string>();
-  await Promise.all(
-    pendingKeys.map(async (key) => {
-      try {
-        const stat = await withDeadline(statObject(key), COMPLETE_OBJECT_STAT_TIMEOUT_MS);
-        if (stat) found.add(key);
-      } catch {
-        // Timed out or missing — not authoritative, so do not purge.
-      }
-    }),
-  );
-  return { found, authoritative: false };
-}
-
-async function promotePendingStoredUploads(
+async function hasIncompleteUploads(
   client: ReturnType<typeof getUserClient>,
   organizationId: string,
   folderId?: string | null,
-): Promise<MediaRow[]> {
-  const pending = await loadIncompleteMediaWithVersions(client, organizationId, folderId);
-  if (pending.length === 0) return [];
-  const stored = await keysPresentInStorage(
-    organizationId,
-    pending.map((row) => row.version.storage_key),
-  );
-  const promoted: MediaRow[] = [];
-  await Promise.all(
-    pending.map(async ({ media, version }) => {
-      if (!shouldResyncPromote(media.status, stored.found.has(version.storage_key))) return;
-      await markUploadReady(client, media, version);
-      promoted.push({
-        ...media,
-        status: "READY",
-        current_version_id: version.id,
-        mime_type: version.mime_type,
-      });
+): Promise<boolean> {
+  let query = client
+    .from("media")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .in("status", ["PROCESSING", "FAILED"])
+    .is("archived_at", null)
+    .limit(1);
+  if (folderId) query = query.eq("folder_id", folderId);
+  const { data, error } = await query;
+  throwIfError(error, "Could not check pending uploads.");
+  return (data?.length ?? 0) > 0;
+}
+
+async function loadPendingMatchingStorageKeys(
+  client: ReturnType<typeof getUserClient>,
+  organizationId: string,
+  storageKeys: string[],
+  folderId?: string | null,
+): Promise<Array<{ media: MediaRow; version: MediaVersionRow }>> {
+  const uniqueKeys = [...new Set(storageKeys.filter(Boolean))];
+  if (uniqueKeys.length === 0) return [];
+  const { data: versionRaw, error: versionError } = await client
+    .from("media_versions")
+    .select(VERSION_SELECT)
+    .in("storage_key", uniqueKeys)
+    .in("status", ["PROCESSING", "FAILED"]);
+  throwIfError(versionError, "Could not match pending uploads.");
+  const versions = (versionRaw ?? []).map((row) => mapVersion(row as Record<string, unknown>));
+  const mediaIds = [...new Set(versions.map((version) => version.media_id))];
+  if (mediaIds.length === 0) return [];
+
+  let mediaQuery = client
+    .from("media")
+    .select(MEDIA_SELECT)
+    .in("id", mediaIds)
+    .eq("organization_id", organizationId)
+    .in("status", ["PROCESSING", "FAILED"])
+    .is("archived_at", null);
+  if (folderId) mediaQuery = mediaQuery.eq("folder_id", folderId);
+  const { data, error } = await mediaQuery;
+  throwIfError(error, "Could not load pending media.");
+  const mediaById = new Map(
+    (data ?? []).map((row) => {
+      const media = mapMedia(row as Record<string, unknown>);
+      return [media.id, media] as const;
     }),
   );
+  const pending: Array<{ media: MediaRow; version: MediaVersionRow }> = [];
+  for (const version of versions) {
+    const media = mediaById.get(version.media_id);
+    if (!media) continue;
+    if (!shouldResyncPromote(media.status, true)) continue;
+    pending.push({ media, version });
+  }
+  return pending;
+}
+
+async function promoteRowsInBatches(
+  client: ReturnType<typeof getUserClient>,
+  rows: Array<{ media: MediaRow; version: MediaVersionRow }>,
+): Promise<MediaRow[]> {
+  const promoted: MediaRow[] = [];
+  for (const batch of chunkItems(rows, RESYNC_UPDATE_BATCH_SIZE)) {
+    const done = await Promise.all(
+      batch.map(async ({ media, version }) => {
+        try {
+          await markUploadReady(client, media, version);
+          return {
+            ...media,
+            status: "READY",
+            current_version_id: version.id,
+            mime_type: version.mime_type,
+          };
+        } catch (error) {
+          if (isCanceledStatementError(error instanceof Error ? error.message : "")) throw error;
+          return null;
+        }
+      }),
+    );
+    for (const row of done) {
+      if (row) promoted.push(row);
+    }
+  }
+  return promoted;
+}
+
+type PromoteFromR2Options = {
+  folderId?: string | null;
+  maxPages: number;
+  deadlineMs: number;
+};
+
+async function promotePendingFromR2Pages(
+  client: ReturnType<typeof getUserClient>,
+  organizationId: string,
+  options: PromoteFromR2Options,
+): Promise<MediaRow[]> {
+  if (shouldSkipLibraryAutoSync(await hasIncompleteUploads(client, organizationId, options.folderId))) {
+    return [];
+  }
+
+  const promoted: MediaRow[] = [];
+
+  if (options.maxPages <= AUTO_SYNC_R2_MAX_PAGES) {
+    const pending = await loadIncompleteMediaWithVersions(client, organizationId, options.folderId, 20);
+    for (const batch of chunkItems(pending, RESYNC_UPDATE_BATCH_SIZE)) {
+      const remainingMs = options.deadlineMs - Date.now();
+      if (remainingMs < 400) break;
+      const found: Array<{ media: MediaRow; version: MediaVersionRow }> = [];
+      await Promise.all(
+        batch.map(async (row) => {
+          const page = await listStoredObjectKeysPage(row.version.storage_key, {
+            maxKeys: 1,
+            timeoutMs: Math.min(800, remainingMs),
+          });
+          if (page?.keys.includes(row.version.storage_key)) found.push(row);
+        }),
+      );
+      if (found.length === 0) continue;
+      promoted.push(...(await promoteRowsInBatches(client, found)));
+    }
+    return promoted;
+  }
+
+  let token: string | null = null;
+  for (let page = 0; page < options.maxPages; page += 1) {
+    const remainingMs = options.deadlineMs - Date.now();
+    if (remainingMs < 400) break;
+    const listed = await listStoredObjectKeysPage(`${organizationId}/`, {
+      maxKeys: RESYNC_R2_PAGE_SIZE,
+      continuationToken: token,
+      timeoutMs: Math.min(STORAGE_LIST_TIMEOUT_MS, remainingMs),
+    });
+    if (!listed || listed.keys.length === 0) break;
+
+    for (const keyChunk of chunkItems(listed.keys, RESYNC_KEY_IN_CHUNK)) {
+      if (options.deadlineMs - Date.now() < 400) break;
+      const matches = await loadPendingMatchingStorageKeys(
+        client,
+        organizationId,
+        keyChunk,
+        options.folderId,
+      );
+      if (matches.length === 0) continue;
+      promoted.push(...(await promoteRowsInBatches(client, matches)));
+    }
+
+    if (!listed.nextContinuationToken) break;
+    token = listed.nextContinuationToken;
+  }
+
+  if (options.deadlineMs - Date.now() >= 400) {
+    const promotedIds = new Set(promoted.map((row) => row.id));
+    const leftover = (await loadIncompleteMediaWithVersions(client, organizationId, options.folderId)).filter(
+      (row) => !promotedIds.has(row.media.id),
+    );
+    for (const batch of chunkItems(leftover, RESYNC_UPDATE_BATCH_SIZE)) {
+      const remainingMs = options.deadlineMs - Date.now();
+      if (remainingMs < 400) break;
+      const found: Array<{ media: MediaRow; version: MediaVersionRow }> = [];
+      await Promise.all(
+        batch.map(async (row) => {
+          const page = await listStoredObjectKeysPage(row.version.storage_key, {
+            maxKeys: 1,
+            timeoutMs: Math.min(1500, remainingMs),
+          });
+          if (page?.keys.includes(row.version.storage_key)) found.push(row);
+        }),
+      );
+      if (found.length === 0) continue;
+      promoted.push(...(await promoteRowsInBatches(client, found)));
+    }
+  }
+
   return promoted;
 }
 
@@ -826,7 +972,13 @@ async function reconcilePendingUploadsOnce(
 ): Promise<void> {
   const existing = reconcileInFlight.get(organizationId);
   if (existing) return existing;
-  const run = withDeadline(reconcileAndPurgeAbandonedUploads(client, organizationId), 2500)
+  const run = withDeadline(
+    promotePendingFromR2Pages(client, organizationId, {
+      maxPages: AUTO_SYNC_R2_MAX_PAGES,
+      deadlineMs: Date.now() + AUTO_SYNC_DEADLINE_MS,
+    }),
+    AUTO_SYNC_DEADLINE_MS,
+  )
     .then(() => undefined)
     .catch(() => undefined)
     .finally(() => {
@@ -834,45 +986,6 @@ async function reconcilePendingUploadsOnce(
     });
   reconcileInFlight.set(organizationId, run);
   return run;
-}
-
-async function reconcileAndPurgeAbandonedUploads(
-  client: ReturnType<typeof getUserClient>,
-  organizationId: string,
-): Promise<void> {
-  const pending = await loadIncompleteMediaWithVersions(client, organizationId);
-  if (pending.length === 0) return;
-  const stored = await keysPresentInStorage(
-    organizationId,
-    pending.map((row) => row.version.storage_key),
-  );
-  const nowMs = Date.now();
-  const processingTtlMs = UPLOAD_URL_TTL_SECONDS * 1000;
-  await Promise.all(
-    pending.map(async ({ media, version }) => {
-      try {
-        if (shouldResyncPromote(media.status, stored.found.has(version.storage_key))) {
-          await markUploadReady(client, media, version);
-          return;
-        }
-        if (!stored.authoritative) return;
-        if (media.current_version_id && media.current_version_id !== version.id) return;
-        if (
-          !shouldPurgeAbandonedUpload({
-            status: media.status,
-            createdAtIso: media.created_at,
-            nowMs,
-            processingTtlMs,
-          })
-        ) {
-          return;
-        }
-        await purgeMediaRow(client, media.id);
-      } catch {
-        // Listing must still succeed if one abandoned row cannot be completed or deleted.
-      }
-    }),
-  );
 }
 
 export async function createUploadIntent(
@@ -1097,13 +1210,17 @@ export async function resyncFromStorage(
 ): Promise<MediaRecord[]> {
   const auth = await requireCmsPermission(accessToken, "media.manage");
   const client = getUserClient(accessToken);
-  const promoted = await promotePendingStoredUploads(
-    client,
-    auth.profile.organizationId,
-    folderId,
-  );
-  if (promoted.length === 0) return [];
-  return toRecords(client, promoted, true);
+  try {
+    const promoted = await promotePendingFromR2Pages(client, auth.profile.organizationId, {
+      folderId,
+      maxPages: RESYNC_R2_MAX_PAGES,
+      deadlineMs: Date.now() + RESYNC_MANUAL_DEADLINE_MS,
+    });
+    if (promoted.length === 0) return [];
+    return toRecords(client, promoted, true);
+  } catch (error) {
+    throw new Error(describeResyncError(error instanceof Error ? error.message : ""));
+  }
 }
 
 export async function discardIncompleteUpload(

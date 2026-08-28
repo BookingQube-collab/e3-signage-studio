@@ -5,6 +5,33 @@ import { hueFromChecksum } from "./media-file.ts";
 export const COMPLETE_OBJECT_STAT_TIMEOUT_MS = 800;
 export const STORAGE_LIST_TIMEOUT_MS = 4000;
 export const COMPLETE_UPLOAD_CLIENT_TIMEOUT_MS = 5000;
+export const AUTO_SYNC_DEADLINE_MS = 2500;
+export const AUTO_SYNC_R2_MAX_PAGES = 1;
+export const RESYNC_R2_PAGE_SIZE = 100;
+export const RESYNC_R2_MAX_PAGES = 8;
+export const RESYNC_MANUAL_DEADLINE_MS = 6500;
+export const RESYNC_UPDATE_BATCH_SIZE = 8;
+export const RESYNC_KEY_IN_CHUNK = 80;
+
+export function chunkItems<T>(items: T[], size: number): T[][] {
+  const chunkSize = Math.max(1, Math.floor(size));
+  if (items.length === 0) return [];
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += chunkSize) {
+    out.push(items.slice(i, i + chunkSize));
+  }
+  return out;
+}
+
+export function shouldSkipLibraryAutoSync(pendingExists: boolean): boolean {
+  return !pendingExists;
+}
+
+/** Intersect one R2 page with pending storage keys — never send the whole bucket to Postgres. */
+export function storageKeysOnPage(pageKeys: string[], pendingKeys: Iterable<string>): string[] {
+  const pending = pendingKeys instanceof Set ? pendingKeys : new Set(pendingKeys);
+  return pageKeys.filter((key) => pending.has(key));
+}
 
 export function uploadProgressIsComplete(percent: number): boolean {
   return percent >= 100;

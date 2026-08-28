@@ -6,7 +6,7 @@ import {
   r2CreateUploadUrl,
   r2DeleteObjects,
   r2HeadObject,
-  r2ListObjectKeys,
+  r2ListObjectKeysPage,
 } from "./r2-sign.server";
 import { getServiceRoleClient } from "./supabase.server";
 
@@ -94,11 +94,13 @@ export async function createObjectDownloadUrl(key: string, expiresIn = DOWNLOAD_
   return url;
 }
 
-export async function listStoredObjectKeys(prefix: string): Promise<Set<string> | null> {
+export async function listStoredObjectKeysPage(
+  prefix: string,
+  options?: { maxKeys?: number; continuationToken?: string | null; timeoutMs?: number },
+): Promise<{ keys: string[]; nextContinuationToken: string | null } | null> {
   if (!isR2Configured()) return null;
   try {
-    const keys = await r2ListObjectKeys(prefix);
-    return new Set(keys);
+    return await r2ListObjectKeysPage(prefix, options);
   } catch {
     return null;
   }

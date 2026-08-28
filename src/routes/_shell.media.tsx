@@ -54,7 +54,7 @@ import {
   uniqueFoldersByName,
   upsertFolder,
 } from "@/lib/media-folders";
-import { describeCanceledStatement } from "@/lib/media-upload-error";
+import { describeCanceledStatement, describeResyncError } from "@/lib/media-upload-error";
 import { describeResyncToast, describeUploadBatchToast } from "@/lib/media-upload-lifecycle";
 import { useIsClient } from "@/lib/use-is-client";
 import { cn } from "@/lib/utils";
@@ -191,7 +191,7 @@ function MediaPage() {
       toast.success(describeResyncToast(added.length).title);
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Could not sync from Cloudflare.");
+      toast.error(describeResyncError(error instanceof Error ? error.message : ""));
     },
     onSettled: async (added) => {
       await qc.invalidateQueries({ queryKey: ["media"] });

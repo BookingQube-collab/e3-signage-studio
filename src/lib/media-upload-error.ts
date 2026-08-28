@@ -1,12 +1,18 @@
 /** Postgres surfaces this when a statement is aborted or times out — never show it raw. */
 export function isCanceledStatementError(message: string): boolean {
-  return /canceling statement/i.test(message);
+  return /canceling statement/i.test(message) || /statement timeout/i.test(message);
 }
 
 export function describeCanceledStatement(message: string, fallback: string): string {
   if (isCanceledStatementError(message)) return fallback;
   const trimmed = message.trim();
   return trimmed || fallback;
+}
+
+export const RESYNC_TIMEOUT_MESSAGE = "Sync took too long; try again";
+
+export function describeResyncError(message: string): string {
+  return describeCanceledStatement(message, RESYNC_TIMEOUT_MESSAGE);
 }
 
 /** Maps XMLHttpRequest PUT failures (R2 / Supabase) to a toast the operator can act on. */
