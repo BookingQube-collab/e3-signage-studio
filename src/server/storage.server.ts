@@ -107,8 +107,8 @@ async function persistCloudUsageCache(
 /**
  * Actual Cloudflare R2 bytes under `{orgId}/` (ListObjects Size sum), cached ~5 minutes.
  * Falls back to summing media_versions when R2 is unavailable.
- * Stale readings (up to 1h) are returned immediately while a background refresh runs —
- * so dashboard navigation is never blocked on R2 list (up to ~8s).
+ * Fresh/stale readings return immediately; cold misses schedule a background refresh and
+ * never block the dashboard on R2 list (up to ~8s).
  */
 export async function getOrgCloudStorageUsage(input: {
   organizationId: string;
@@ -179,7 +179,14 @@ export async function getOrgCloudStorageUsage(input: {
     };
   }
 
-  return measureAndStoreCloudUsage(orgId, quotaBytes, nowMs, cachedUsed, cachedAtMs);
+  // Cold miss: never block CMS navigation on an R2 ListObjects walk (up to ~8s).
+  scheduleCloudUsageRefresh(orgId);
+  return {
+    usedBytes: cachedUsed ?? 0,
+    quotaBytes,
+    source: "cache",
+    measuredAt: new Date(nowMs).toISOString(),
+  };
 }
 
 function scheduleCloudUsageRefresh(orgId: string): void {

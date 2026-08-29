@@ -198,13 +198,9 @@ async function attachPairingCodeToScreen(
   throwIfError(pendingError, "Could not store the pairing code.");
 }
 
-async function maybeSeed(auth: AuthOk): Promise<void> {
+function maybeSeed(auth: AuthOk): void {
   if (auth.profile.role !== "SUPER_ADMIN") return;
-  try {
-    await ensureSeedLocations(auth.profile.organizationId);
-  } catch {
-    // Listing should still work if seed cannot run (missing service role, race, etc.).
-  }
+  void ensureSeedLocations(auth.profile.organizationId).catch(() => undefined);
 }
 
 async function offlineAfterSeconds(
@@ -402,13 +398,16 @@ async function loadLocationRecords(
 ): Promise<LocationRecord[]> {
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
-  const { data: screens, error } = await client
-    .from("screens")
-    .select("location_id, operational_status, last_heartbeat_at, archived_at")
-    .in("location_id", ids)
-    .is("archived_at", null);
-  throwIfError(error, "Could not load screens.");
-  const threshold = await offlineAfterSeconds(client, organizationId);
+  const [screensRes, threshold] = await Promise.all([
+    client
+      .from("screens")
+      .select("location_id, operational_status, last_heartbeat_at, archived_at")
+      .in("location_id", ids)
+      .is("archived_at", null),
+    offlineAfterSeconds(client, organizationId),
+  ]);
+  throwIfError(screensRes.error, "Could not load screens.");
+  const screens = screensRes.data;
 
   const counts = new Map<string, { total: number; online: number }>();
   for (const loc of rows) counts.set(loc.id, { total: 0, online: 0 });
@@ -446,7 +445,7 @@ async function loadLocationRecords(
 
 export async function listLocations(accessToken: string): Promise<LocationRecord[]> {
   const auth = await requireCmsPermission(accessToken, "locations.view");
-  await maybeSeed(auth);
+  maybeSeed(auth);
   const client = getUserClient(accessToken);
   const { data, error } = await client
     .from("locations")
@@ -490,7 +489,7 @@ export async function createLocation(
   if (auth.profile.role !== "SUPER_ADMIN") {
     throw new Error("Only a Super Admin can add locations.");
   }
-  await maybeSeed(auth);
+  maybeSeed(auth);
   const client = getUserClient(accessToken);
   const shortName = input.shortName.trim() || input.name.trim();
   const code = locationCodeFromName(input.name);
@@ -600,7 +599,7 @@ export async function deleteLocation(accessToken: string, id: string): Promise<b
 
 async function listScreenRows(accessToken: string, locationId?: string): Promise<ScreenRecord[]> {
   const auth = await requireCmsPermission(accessToken, "screens.view");
-  await maybeSeed(auth);
+  maybeSeed(auth);
   if (locationId) assertLocationAccess(auth.profile, locationId);
   const client = getUserClient(accessToken);
   let query = client

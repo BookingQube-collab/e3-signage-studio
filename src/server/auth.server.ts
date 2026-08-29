@@ -29,7 +29,7 @@ import {
   looksLikeEmail,
   normalizeUsername,
 } from "@/lib/user-credentials";
-import { jwtExpiresWithinMs } from "@/lib/jwt-expiry";
+import { jwtExpiresWithinMs, readJwtAccessClaims } from "@/lib/jwt-expiry";
 import { ensureSeedLocations } from "./location-seed.server";
 import { clearAuthCookies, readAuthCookies, setAuthCookies } from "./session-cookies.server";
 import { getServiceRoleClient, getUserClient } from "./supabase.server";
@@ -188,27 +188,49 @@ export async function resolveAuthFromRequest(
   if (cached) return cached;
 
   try {
-    const client = getUserClient(accessToken);
-    if (refreshToken && jwtExpiresWithinMs(accessToken, 120_000)) {
+    let token = accessToken;
+    const client = getUserClient(token);
+    const needsRefresh = Boolean(refreshToken && jwtExpiresWithinMs(token, 120_000));
+
+    if (needsRefresh && refreshToken) {
       const { data: refreshed, error: refreshError } = await client.auth.setSession({
-        access_token: accessToken,
+        access_token: token,
         refresh_token: refreshToken,
       });
       if (!refreshError && refreshed.session) {
+        token = refreshed.session.access_token;
         setAuthCookies(refreshed.session.access_token, refreshed.session.refresh_token);
       }
     }
 
-    const { data: userData, error: userError } = await client.auth.getUser(accessToken);
-    if (userError || !userData.user) {
-      return fail("UNAUTHENTICATED", { userId: null, email: null });
+    // Prefer JWT claims over GoTrue getUser — PostgREST rejects bad tokens on the RPC.
+    let userId: string;
+    let email: string | null;
+    const claims = readJwtAccessClaims(token);
+    if (claims && claims.expMs > Date.now()) {
+      userId = claims.sub;
+      email = claims.email;
+    } else {
+      const { data: userData, error: userError } = await client.auth.getUser(token);
+      if (userError || !userData.user) {
+        return fail("UNAUTHENTICATED", { userId: null, email: null });
+      }
+      userId = userData.user.id;
+      email = userData.user.email ?? null;
     }
 
-    const userId = userData.user.id;
-    const email = userData.user.email ?? null;
-
-    const { data: rpcData, error: rpcError } = await client.rpc("resolve_cms_profile");
+    const profileClient = token === accessToken ? client : getUserClient(token);
+    const { data: rpcData, error: rpcError } = await profileClient.rpc("resolve_cms_profile");
     if (rpcError) {
+      const msg = rpcError.message.toLowerCase();
+      if (
+        msg.includes("jwt") ||
+        msg.includes("unauthorized") ||
+        msg.includes("not authenticated") ||
+        rpcError.code === "PGRST301"
+      ) {
+        return fail("UNAUTHENTICATED", { userId: null, email: null });
+      }
       return {
         ok: false,
         code: "CONFIG",
@@ -237,7 +259,10 @@ export async function resolveAuthFromRequest(
       profile,
       permissions: permissionsForRole(profile.role),
     };
-    writeCachedAuth(accessToken, okResult);
+    writeCachedAuth(token, okResult);
+    if (token !== accessToken && accessToken) {
+      writeCachedAuth(accessToken, okResult);
+    }
     return okResult;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Authentication failed.";

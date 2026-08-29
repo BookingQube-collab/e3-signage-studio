@@ -72,7 +72,13 @@ export const INITIAL_LOCATIONS: readonly SeedLocation[] = [
 ];
 
 /** Inserts the 7 seed locations when the org has none. Does not seed screens. */
+const SEED_CHECK_TTL_MS = 10 * 60 * 1000;
+const seedCheckedAt = new Map<string, number>();
+
 export async function ensureSeedLocations(organizationId: string): Promise<boolean> {
+  const last = seedCheckedAt.get(organizationId);
+  if (last != null && Date.now() - last < SEED_CHECK_TTL_MS) return false;
+
   if (!isServiceRoleConfigured()) return false;
   const admin = getServiceRoleClient();
   const { count, error: countError } = await admin
@@ -80,7 +86,10 @@ export async function ensureSeedLocations(organizationId: string): Promise<boole
     .select("id", { count: "exact", head: true })
     .eq("organization_id", organizationId);
   if (countError) throw new Error(countError.message);
-  if ((count ?? 0) > 0) return false;
+  if ((count ?? 0) > 0) {
+    seedCheckedAt.set(organizationId, Date.now());
+    return false;
+  }
 
   const { error } = await admin.from("locations").insert(
     INITIAL_LOCATIONS.map((loc) => ({
@@ -96,8 +105,12 @@ export async function ensureSeedLocations(organizationId: string): Promise<boole
   );
   if (error) {
     // Unique race if two requests seed at once — treat as already seeded.
-    if (error.code === "23505") return false;
+    if (error.code === "23505") {
+      seedCheckedAt.set(organizationId, Date.now());
+      return false;
+    }
     throw new Error(error.message);
   }
+  seedCheckedAt.set(organizationId, Date.now());
   return true;
 }
