@@ -1,6 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Megaphone, Plus, Repeat } from "lucide-react";
+import { Download, Megaphone, Plus, Repeat, Search } from "lucide-react";
+import type { ReactNode } from "react";
+import { useMemo, useState } from "react";
+import { toast } from "sonner";
 
 import {
   E3Button,
@@ -15,6 +18,14 @@ import {
   E3Table,
   type E3Column,
 } from "@/components/e3";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { CampaignRowMenu } from "@/features/campaigns/CampaignRowMenu";
 import {
   effectiveCampaignStatus,
@@ -22,8 +33,10 @@ import {
   isDatedSchedule,
   isEvergreenSchedule,
 } from "@/lib/campaign-window";
+import { toCsv } from "@/lib/monitoring";
+import { useDebouncedValue } from "@/lib/use-debounced-value";
 import { campaignService, locationService } from "@/services";
-import type { Campaign, Location } from "@/types";
+import type { Campaign, CampaignStatus, Location } from "@/types";
 
 export const Route = createFileRoute("/_shell/campaigns/")({
   head: () => ({
@@ -42,6 +55,44 @@ export const Route = createFileRoute("/_shell/campaigns/")({
   }),
   component: CampaignsPage,
 });
+
+const STATUS_FILTERS = [
+  { value: "all", label: "All" },
+  { value: "Active", label: "Active" },
+  { value: "Scheduled", label: "Scheduled" },
+  { value: "Paused", label: "Paused" },
+  { value: "Ended", label: "Ended" },
+  { value: "Draft", label: "Draft" },
+  { value: "Archived", label: "Archived" },
+] as const;
+
+type StatusFilter = (typeof STATUS_FILTERS)[number]["value"];
+type TypeFilter = "all" | "scheduled" | "ongoing";
+
+function downloadCsv(filename: string, headers: string[], rows: string[][]): void {
+  const blob = new Blob([toCsv(headers, rows)], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function campaignType(c: Campaign): "scheduled" | "ongoing" | "other" {
+  if (isDatedSchedule(c.schedule)) return "scheduled";
+  if (isEvergreenSchedule(c.schedule)) return "ongoing";
+  return "other";
+}
+
+function campaignOverlapsDateRange(c: Campaign, dateFrom: string, dateTo: string): boolean {
+  if (!isDatedSchedule(c.schedule)) return !dateFrom && !dateTo;
+  const start = c.schedule.startDate;
+  const end = c.schedule.endDate;
+  if (dateFrom && end < dateFrom) return false;
+  if (dateTo && start > dateTo) return false;
+  return true;
+}
 
 function campaignNameCell(c: Campaign) {
   return (
@@ -64,6 +115,13 @@ function syncCell(c: Campaign) {
   );
 }
 
+function locationNamesFor(c: Campaign, locations: Location[]): string {
+  const names = locations
+    .filter((l) => (c.locationIds ?? []).includes(l.id))
+    .map((l) => l.shortName || l.name);
+  return names.length > 0 ? names.join("; ") : "";
+}
+
 function CampaignsPage() {
   const navigate = useNavigate();
   const { data, isLoading, isError, refetch } = useQuery({
@@ -72,11 +130,124 @@ function CampaignsPage() {
   });
   const locationsQuery = useQuery({ queryKey: ["locations"], queryFn: locationService.list });
 
+  const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search);
+  const [status, setStatus] = useState<StatusFilter>("all");
+  const [type, setType] = useState<TypeFilter>("all");
+  const [locationId, setLocationId] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
   const campaigns = Array.isArray(data) ? data : [];
   const locations = Array.isArray(locationsQuery.data) ? locationsQuery.data : [];
-  const scheduled = campaigns.filter((c) => isDatedSchedule(c.schedule));
-  const ongoing = campaigns.filter((c) => isEvergreenSchedule(c.schedule));
-  const other = campaigns.filter((c) => !isDatedSchedule(c.schedule) && !isEvergreenSchedule(c.schedule));
+
+  const filtered = useMemo(() => {
+    const q = debouncedSearch.trim().toLowerCase();
+    return campaigns.filter((c) => {
+      if (q) {
+        const hay = `${c.name} ${c.contentName ?? ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+
+      const kind = campaignType(c);
+      if (type === "scheduled" && kind !== "scheduled") return false;
+      if (type === "ongoing" && kind !== "ongoing") return false;
+
+      if (status !== "all") {
+        const effective = effectiveCampaignStatus(c.status, c.schedule);
+        if (effective !== status) return false;
+      }
+
+      if (locationId !== "all" && !(c.locationIds ?? []).includes(locationId)) return false;
+
+      if (dateFrom || dateTo) {
+        if (kind === "ongoing") return false;
+        if (!campaignOverlapsDateRange(c, dateFrom, dateTo)) return false;
+      }
+
+      return true;
+    });
+  }, [campaigns, debouncedSearch, type, status, locationId, dateFrom, dateTo]);
+
+  const scheduled = filtered.filter((c) => isDatedSchedule(c.schedule));
+  const ongoing = filtered.filter((c) => isEvergreenSchedule(c.schedule));
+  const other = filtered.filter((c) => !isDatedSchedule(c.schedule) && !isEvergreenSchedule(c.schedule));
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<StatusFilter, number> = {
+      all: campaigns.length,
+      Active: 0,
+      Scheduled: 0,
+      Paused: 0,
+      Ended: 0,
+      Draft: 0,
+      Archived: 0,
+    };
+    for (const c of campaigns) {
+      const effective = effectiveCampaignStatus(c.status, c.schedule) as CampaignStatus;
+      if (effective in counts) counts[effective as Exclude<StatusFilter, "all">] += 1;
+    }
+    return counts;
+  }, [campaigns]);
+
+  const filtersActive =
+    Boolean(search) ||
+    status !== "all" ||
+    type !== "all" ||
+    locationId !== "all" ||
+    Boolean(dateFrom) ||
+    Boolean(dateTo);
+
+  function clearFilters() {
+    setSearch("");
+    setStatus("all");
+    setType("all");
+    setLocationId("all");
+    setDateFrom("");
+    setDateTo("");
+  }
+
+  function exportCampaigns() {
+    if (filtered.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    downloadCsv(
+      "e3-campaigns.csv",
+      [
+        "Name",
+        "Content",
+        "Status",
+        "Type",
+        "Locations",
+        "Start",
+        "End",
+        "Screens",
+        "Sync ready",
+        "Sync total",
+      ],
+      filtered.map((c) => {
+        const kind = campaignType(c);
+        return [
+          c.name,
+          c.contentName ?? "",
+          effectiveCampaignStatus(c.status, c.schedule),
+          kind === "scheduled" ? "Scheduled" : kind === "ongoing" ? "Ongoing" : "Other",
+          locationNamesFor(c, locations),
+          kind === "scheduled"
+            ? formatCampaignDateTime(c.schedule?.startDate, c.schedule?.startTime, c.schedule?.timezone)
+            : "—",
+          kind === "scheduled"
+            ? formatCampaignDateTime(c.schedule?.endDate, c.schedule?.endTime, c.schedule?.timezone)
+            : "—",
+          String((c.screenIds ?? []).length),
+          String(c.syncReady),
+          String(c.syncTotal),
+        ];
+      }),
+    );
+    toast.success(`Exported ${filtered.length} campaign${filtered.length === 1 ? "" : "s"}`);
+  }
 
   const scheduledColumns: E3Column<Campaign>[] = [
     { key: "name", header: "Campaign", cell: campaignNameCell },
@@ -145,19 +316,128 @@ function CampaignsPage() {
     void navigate({ to: "/campaigns/$id", params: { id: c.id } });
   }
 
+  const showScheduledSection = type !== "ongoing";
+  const showOngoingSection = type !== "scheduled" && !dateFrom && !dateTo;
+
   return (
     <div>
       <E3PageHeader
         title="Campaigns"
         description="Scheduled campaigns have dates. Ongoing campaigns loop until you pause or archive them."
         actions={
-          <E3Button variant="primary" asChild>
-            <Link to="/campaigns/new" search={{}}>
-              <Plus /> New campaign
-            </Link>
-          </E3Button>
+          <>
+            <E3Button variant="outline" onClick={exportCampaigns} disabled={campaigns.length === 0}>
+              <Download /> Export CSV
+            </E3Button>
+            <E3Button variant="primary" asChild>
+              <Link to="/campaigns/new" search={{}}>
+                <Plus /> New campaign
+              </Link>
+            </E3Button>
+          </>
         }
       />
+
+      <E3Card className="mb-5">
+        <E3CardBody className="grid items-end gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(12rem,1.4fr)_repeat(4,minmax(0,1fr))]">
+          <FilterField label="Search">
+            <div className="relative">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
+              />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Campaign or content name"
+                aria-label="Search campaigns"
+                className="pl-9"
+              />
+            </div>
+          </FilterField>
+          <FilterField label="Type">
+            <Select value={type} onValueChange={(v) => setType(v as TypeFilter)}>
+              <SelectTrigger aria-label="Filter by type">
+                <SelectValue placeholder="Type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All types</SelectItem>
+                <SelectItem value="scheduled">Scheduled</SelectItem>
+                <SelectItem value="ongoing">Ongoing</SelectItem>
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Location">
+            <Select value={locationId} onValueChange={setLocationId}>
+              <SelectTrigger aria-label="Filter by location">
+                <SelectValue placeholder="Location" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All locations</SelectItem>
+                {locations.map((l) => (
+                  <SelectItem key={l.id} value={l.id}>
+                    {l.shortName || l.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="From date">
+            <Input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              aria-label="Filter campaigns overlapping from date"
+            />
+          </FilterField>
+          <FilterField label="To date">
+            <Input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              aria-label="Filter campaigns overlapping to date"
+            />
+          </FilterField>
+        </E3CardBody>
+      </E3Card>
+
+      <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Filter by status">
+        {STATUS_FILTERS.map((item) => {
+          const selected = status === item.value;
+          const count = statusCounts[item.value];
+          return (
+            <button
+              key={item.value}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => setStatus(item.value === "all" || selected ? "all" : item.value)}
+              className={
+                selected
+                  ? "e3-gradient rounded-full border border-transparent px-3.5 py-1.5 text-sm tabular-nums text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98]"
+                  : "rounded-full border border-border px-3.5 py-1.5 text-sm tabular-nums text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98]"
+              }
+            >
+              {item.label}
+              <span className={selected ? "ml-1.5 text-white/80" : "ml-1.5 text-muted-foreground"}>
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm tabular-nums text-muted-foreground">
+          {filtersActive
+            ? `${filtered.length} of ${campaigns.length} campaigns`
+            : `${campaigns.length} campaigns`}
+        </p>
+        {filtersActive ? (
+          <E3Button variant="ghost" size="sm" onClick={clearFilters}>
+            Clear filters
+          </E3Button>
+        ) : null}
+      </div>
 
       <E3QueryBoundary isLoading={isLoading} isError={isError} refetch={() => void refetch()}>
         {campaigns.length === 0 ? (
@@ -173,62 +453,85 @@ function CampaignsPage() {
               </E3Button>
             }
           />
+        ) : filtered.length === 0 ? (
+          <E3EmptyState
+            icon={Search}
+            title="No campaigns match"
+            description="Nothing matches these filters. Clear them to see the full list."
+            action={
+              <E3Button variant="outline" onClick={clearFilters}>
+                Clear filters
+              </E3Button>
+            }
+          />
         ) : (
           <div className="space-y-8">
-            <section className="space-y-3">
-              <h2 className="font-display text-lg font-semibold">Scheduled</h2>
-              <p className="text-sm text-muted-foreground">
-                Campaigns with a start and end date. These also appear on the Schedule calendar.
-              </p>
-              {scheduled.length === 0 ? (
-                <E3EmptyState
-                  title="No dated campaigns"
-                  description="Publish a campaign with start and end dates to fill this list and the calendar."
-                />
-              ) : (
-                <E3Table
-                  columns={scheduledColumns}
-                  rows={scheduled}
-                  rowKey={(c) => c.id}
-                  onRowClick={openCampaign}
-                  caption="Scheduled campaigns"
-                />
-              )}
-            </section>
+            {showScheduledSection ? (
+              <section className="space-y-3">
+                <h2 className="font-display text-lg font-semibold">Scheduled</h2>
+                <p className="text-sm text-muted-foreground">
+                  Campaigns with a start and end date. These also appear on the Schedule calendar.
+                </p>
+                {scheduled.length === 0 ? (
+                  <E3EmptyState
+                    title="No dated campaigns"
+                    description={
+                      filtersActive
+                        ? "No scheduled campaigns match the current filters."
+                        : "Publish a campaign with start and end dates to fill this list and the calendar."
+                    }
+                  />
+                ) : (
+                  <E3Table
+                    columns={scheduledColumns}
+                    rows={scheduled}
+                    rowKey={(c) => c.id}
+                    onRowClick={openCampaign}
+                    caption="Scheduled campaigns"
+                  />
+                )}
+              </section>
+            ) : null}
 
-            <section className="space-y-3">
-              <h2 className="font-display text-lg font-semibold">Ongoing / always-on</h2>
-              <p className="text-sm text-muted-foreground">
-                No start or end date. Listed by location — they are not shown on the Schedule calendar.
-              </p>
-              {ongoing.length === 0 ? (
-                <E3EmptyState
-                  icon={Repeat}
-                  title="No ongoing campaigns"
-                  description="Choose Ongoing (no dates) when creating a campaign for looping content that should always play."
-                />
-              ) : (
-                <div className="space-y-4">
-                  {ongoingGroups.map(({ location, campaigns: rows }) => (
-                    <OngoingLocationGroup
-                      key={location.id}
-                      location={location}
-                      rows={rows}
-                      columns={ongoingColumns}
-                      onRowClick={openCampaign}
-                    />
-                  ))}
-                  {unassignedOngoing.length > 0 ? (
-                    <OngoingLocationGroup
-                      location={null}
-                      rows={unassignedOngoing}
-                      columns={ongoingColumns}
-                      onRowClick={openCampaign}
-                    />
-                  ) : null}
-                </div>
-              )}
-            </section>
+            {showOngoingSection ? (
+              <section className="space-y-3">
+                <h2 className="font-display text-lg font-semibold">Ongoing / always-on</h2>
+                <p className="text-sm text-muted-foreground">
+                  No start or end date. Listed by location — they are not shown on the Schedule calendar.
+                </p>
+                {ongoing.length === 0 ? (
+                  <E3EmptyState
+                    icon={Repeat}
+                    title="No ongoing campaigns"
+                    description={
+                      filtersActive
+                        ? "No ongoing campaigns match the current filters."
+                        : "Choose Ongoing (no dates) when creating a campaign for looping content that should always play."
+                    }
+                  />
+                ) : (
+                  <div className="space-y-4">
+                    {ongoingGroups.map(({ location, campaigns: rows }) => (
+                      <OngoingLocationGroup
+                        key={location.id}
+                        location={location}
+                        rows={rows}
+                        columns={ongoingColumns}
+                        onRowClick={openCampaign}
+                      />
+                    ))}
+                    {unassignedOngoing.length > 0 ? (
+                      <OngoingLocationGroup
+                        location={null}
+                        rows={unassignedOngoing}
+                        columns={ongoingColumns}
+                        onRowClick={openCampaign}
+                      />
+                    ) : null}
+                  </div>
+                )}
+              </section>
+            ) : null}
 
             {other.length > 0 ? (
               <E3Table
@@ -275,5 +578,14 @@ function OngoingLocationGroup({
         />
       </E3CardBody>
     </E3Card>
+  );
+}
+
+function FilterField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="min-w-0 space-y-1.5">
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      {children}
+    </div>
   );
 }
