@@ -279,6 +279,7 @@ export const mockServices: AppServices = {
       store.folders = store.folders.filter((f) => f.id !== id);
       return delay(true, 200);
     },
+    storageBackend: () => delay("r2" as const, 50),
     moveToFolder: (id: string, folderId: string | null) => {
       const existing = store.media.find((m) => m.id === id);
       if (!existing) return Promise.reject(new Error("Media not found."));

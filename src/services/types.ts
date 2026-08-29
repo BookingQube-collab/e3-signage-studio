@@ -105,13 +105,14 @@ export type MediaService = {
   replace: (id: string, file: File, onProgress?: (percent: number) => void) => Promise<Media>;
   rename: (id: string, filename: string) => Promise<Media>;
   archive: (id: string) => Promise<Media>;
-  remove: (id: string) => Promise<boolean>;
-  removeMany: (ids: string[]) => Promise<boolean>;
+  remove: (id: string, options?: { deleteFromStorage?: boolean }) => Promise<boolean>;
+  removeMany: (ids: string[], options?: { deleteFromStorage?: boolean }) => Promise<boolean>;
   downloadUrl: (id: string) => Promise<{ url: string; filename: string }>;
   resyncFromStorage: (folderId?: string | null) => Promise<Media[]>;
   listFolders: () => Promise<MediaFolder[]>;
   createFolder: (name: string) => Promise<MediaFolder>;
-  deleteFolder: (id: string) => Promise<boolean>;
+  deleteFolder: (id: string, options?: { deleteFromStorage?: boolean }) => Promise<boolean>;
+  storageBackend: () => Promise<"r2" | "supabase">;
   moveToFolder: (id: string, folderId: string | null) => Promise<Media>;
   moveManyToFolder: (ids: string[], folderId: string | null) => Promise<Media[]>;
 };

@@ -19,6 +19,7 @@ import {
   blockingLivePlaylistIds,
   liveUsagePlaylistIds,
   MAX_BULK_MEDIA_IDS,
+  shouldDeleteFromStorage,
 } from "../lib/media-bulk";
 import {
   assertUploadSize,
@@ -684,7 +685,7 @@ async function failOrDiscardUpload(
       failedVersionId: version.id,
     })
   ) {
-    await purgeMediaRow(client, media.id);
+    await purgeMediaRow(client, media.id, { deleteFromStorage: true });
     return;
   }
   await client.from("media_versions").update({ status: "FAILED" }).eq("id", version.id);
@@ -1768,18 +1769,26 @@ export async function archiveMedia(accessToken: string, id: string): Promise<Med
   return result;
 }
 
-export async function deleteMedia(accessToken: string, id: string): Promise<boolean> {
+export async function deleteMedia(
+  accessToken: string,
+  id: string,
+  options: { deleteFromStorage?: boolean } = {},
+): Promise<boolean> {
   const auth = await requireCmsPermission(accessToken, "media.manage");
   const client = getUserClient(accessToken);
   const existing = await getMediaRow(client, id, auth.profile.organizationId);
   if (!existing) throw new Error("Media not found.");
   assertCanMutateOwnedContent(auth.profile, existing.created_by);
   await assertIdsDeletable(client, [existing]);
-  await purgeMediaRow(client, id);
+  await purgeMediaRow(client, id, { deleteFromStorage: shouldDeleteFromStorage(options.deleteFromStorage) });
   return true;
 }
 
-export async function deleteMediaBulk(accessToken: string, ids: string[]): Promise<boolean> {
+export async function deleteMediaBulk(
+  accessToken: string,
+  ids: string[],
+  options: { deleteFromStorage?: boolean } = {},
+): Promise<boolean> {
   const auth = await requireCmsPermission(accessToken, "media.manage");
   const client = getUserClient(accessToken);
   const unique = uniqueMediaIds(ids);
@@ -1790,8 +1799,9 @@ export async function deleteMediaBulk(accessToken: string, ids: string[]): Promi
     assertCanMutateOwnedContent(auth.profile, row.created_by);
   }
   await assertIdsDeletable(client, rows);
+  const deleteFromStorage = shouldDeleteFromStorage(options.deleteFromStorage);
   for (const row of rows) {
-    await purgeMediaRow(client, row.id);
+    await purgeMediaRow(client, row.id, { deleteFromStorage });
   }
   return true;
 }
@@ -1861,22 +1871,29 @@ async function detachNonLivePlaylistItems(
   throwIfError(deleteError, "Could not clear archived playlist usage.");
 }
 
-async function purgeMediaRow(client: ReturnType<typeof getUserClient>, id: string): Promise<void> {
+async function purgeMediaRow(
+  client: ReturnType<typeof getUserClient>,
+  id: string,
+  options: { deleteFromStorage?: boolean } = {},
+): Promise<void> {
   await detachNonLivePlaylistItems(client, id);
+  const deleteFromStorage = shouldDeleteFromStorage(options.deleteFromStorage);
   const { data: versions, error: versionError } = await client
     .from("media_versions")
     .select("storage_key, thumbnail_key")
     .eq("media_id", id);
   throwIfError(versionError, "Could not load media versions.");
-  const keys = [
-    ...new Set(
-      (versions ?? []).flatMap((row) => {
-        const storageKey = asNullableString((row as { storage_key: string }).storage_key);
-        const thumb = asNullableString((row as { thumbnail_key: string | null }).thumbnail_key);
-        return [storageKey, thumb].filter((value): value is string => Boolean(value));
-      }),
-    ),
-  ];
+  const keys = deleteFromStorage
+    ? [
+        ...new Set(
+          (versions ?? []).flatMap((row) => {
+            const storageKey = asNullableString((row as { storage_key: string }).storage_key);
+            const thumb = asNullableString((row as { thumbnail_key: string | null }).thumbnail_key);
+            return [storageKey, thumb].filter((value): value is string => Boolean(value));
+          }),
+        ),
+      ]
+    : [];
 
   const { error: clearCurrent } = await client
     .from("media")
@@ -1888,6 +1905,7 @@ async function purgeMediaRow(client: ReturnType<typeof getUserClient>, id: strin
   const { error: deleteRow } = await client.from("media").delete().eq("id", id);
   throwIfError(deleteRow, "Could not delete media.");
 
+  if (!deleteFromStorage || keys.length === 0) return;
   try {
     await deleteObjects(keys);
   } catch {
@@ -2029,7 +2047,11 @@ async function mediaRowsInFolder(
   return (data ?? []).map((row) => mapMedia(row as Record<string, unknown>));
 }
 
-export async function deleteFolder(accessToken: string, id: string): Promise<boolean> {
+export async function deleteFolder(
+  accessToken: string,
+  id: string,
+  options: { deleteFromStorage?: boolean } = {},
+): Promise<boolean> {
   const auth = await requireCmsPermission(accessToken, "media.manage");
   const client = getUserClient(accessToken);
   const orgId = auth.profile.organizationId;
@@ -2043,6 +2065,7 @@ export async function deleteFolder(accessToken: string, id: string): Promise<boo
   }
   const visible = rows.filter((row) => !row.archived_at && isVisibleLibraryStatus(row.status));
   await assertIdsDeletable(client, visible);
+  const deleteFromStorage = shouldDeleteFromStorage(options.deleteFromStorage);
 
   const now = new Date().toISOString();
   if (visible.length > 0) {
@@ -2075,7 +2098,7 @@ export async function deleteFolder(accessToken: string, id: string): Promise<boo
 
   try {
     for (const row of rows) {
-      await purgeMediaRow(client, row.id);
+      await purgeMediaRow(client, row.id, { deleteFromStorage });
     }
     await client.from("media_folders").delete().eq("id", id);
   } catch (error) {

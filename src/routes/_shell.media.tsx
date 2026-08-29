@@ -32,12 +32,14 @@ import {
   applyBulkDelete,
   applySelectionClick,
   inUseDeleteMessage,
+  mediaStorageDeleteCopy,
   partitionBulkDelete,
   releaseHiddenIfGone,
   selectAllActionLabel,
   toggleSelectAll,
   unionIds,
   withoutIds,
+  type MediaStorageBackend,
 } from "@/lib/media-bulk";
 import { ACCEPT_MEDIA } from "@/lib/media-file";
 import {
@@ -62,6 +64,7 @@ import { useIsClient } from "@/lib/use-is-client";
 import { cn } from "@/lib/utils";
 import { mediaService } from "@/services";
 import type { Media, MediaFolder } from "@/types";
+import { Checkbox } from "@/components/ui/checkbox";
 
 export const Route = createFileRoute("/_shell/media")({
   head: () => ({
@@ -103,6 +106,7 @@ function MediaPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteFile, setDeleteFile] = useState<Media | null>(null);
   const [deleteFolderTarget, setDeleteFolderTarget] = useState<MediaFolder | null>(null);
+  const [deleteFromStorage, setDeleteFromStorage] = useState(false);
   const [hiddenMediaIds, setHiddenMediaIds] = useState<Set<string>>(new Set());
   const [hiddenFolderIds, setHiddenFolderIds] = useState<Set<string>>(new Set());
 
@@ -118,6 +122,16 @@ function MediaPage() {
     enabled: isClient,
     throwOnError: false,
   });
+  const storageBackendQuery = useQuery({
+    queryKey: ["media-storage-backend"],
+    queryFn: mediaService.storageBackend,
+    enabled: isClient,
+    staleTime: 60 * 60 * 1000,
+    throwOnError: false,
+  });
+  const storageBackend: MediaStorageBackend =
+    storageBackendQuery.data === "supabase" ? "supabase" : "r2";
+  const storageDeleteCopy = mediaStorageDeleteCopy(storageBackend);
 
   const folders = useMemo(
     () =>
@@ -221,14 +235,15 @@ function MediaPage() {
   });
 
   const deleteFolder = useMutation({
-    mutationFn: mediaService.deleteFolder,
+    mutationFn: ({ id, deleteFromStorage: purgeStorage }: { id: string; deleteFromStorage: boolean }) =>
+      mediaService.deleteFolder(id, { deleteFromStorage: purgeStorage }),
     throwOnError: false,
-    onMutate: async (id) => {
+    onMutate: async ({ id }) => {
       const previousMedia = qc.getQueryData<Media[]>(["media"]) ?? [];
       const mediaIds = previousMedia.filter((item) => item.folderId === id).map((item) => item.id);
       return { mediaIds, folderId: id };
     },
-    onSuccess: (_ok, id, ctx) => {
+    onSuccess: (_ok, { id }, ctx) => {
       try {
         const previousMedia = qc.getQueryData<Media[]>(["media"]) ?? [];
         const previousFolders = qc.getQueryData<MediaFolder[]>(["media-folders"]) ?? [];
@@ -249,6 +264,7 @@ function MediaPage() {
         setFolderId((prev) => (prev === id ? null : prev));
       }
       setDeleteFolderTarget(null);
+      setDeleteFromStorage(false);
       toast.success("Folder deleted");
     },
     onError: (error) => {
@@ -259,7 +275,8 @@ function MediaPage() {
         ),
       );
     },
-    onSettled: async (_data, error, id, ctx) => {
+    onSettled: async (_data, error, vars, ctx) => {
+      const id = vars.id;
       try {
         await qc.invalidateQueries({ queryKey: ["media"] });
         await qc.invalidateQueries({ queryKey: ["media-folders"] });
@@ -364,26 +381,28 @@ function MediaPage() {
   });
 
   const remove = useMutation({
-    mutationFn: mediaService.remove,
-    onMutate: async (id) => {
+    mutationFn: ({ id, deleteFromStorage: purgeStorage }: { id: string; deleteFromStorage: boolean }) =>
+      mediaService.remove(id, { deleteFromStorage: purgeStorage }),
+    onMutate: async ({ id }) => {
       const previousMedia = qc.getQueryData<Media[]>(["media"]);
       setHiddenMediaIds((prev) => unionIds(prev, [id]));
       await qc.cancelQueries({ queryKey: ["media"] });
       qc.setQueryData(["media"], applyBulkDelete(previousMedia ?? [], [id]));
       setSelected((prev) => (prev?.id === id ? null : prev));
       setDeleteFile(null);
+      setDeleteFromStorage(false);
       setSelectedIds((prev) => withoutIds(prev, [id]));
       return { previousMedia };
     },
     onSuccess: () => {
       toast.success("Media deleted");
     },
-    onError: (error, id, ctx) => {
+    onError: (error, { id }, ctx) => {
       setHiddenMediaIds((prev) => withoutIds(prev, [id]));
       if (ctx?.previousMedia) qc.setQueryData(["media"], ctx.previousMedia);
       toast.error(error instanceof Error ? error.message : "Could not delete.");
     },
-    onSettled: async (_data, _error, id) => {
+    onSettled: async (_data, _error, { id }) => {
       await qc.invalidateQueries({ queryKey: ["media"] });
       await qc.invalidateQueries({ queryKey: ["media-folders"] });
       setHiddenMediaIds((prev) =>
@@ -393,13 +412,20 @@ function MediaPage() {
   });
 
   const removeMany = useMutation({
-    mutationFn: mediaService.removeMany,
-    onMutate: async (ids) => {
+    mutationFn: ({
+      ids,
+      deleteFromStorage: purgeStorage,
+    }: {
+      ids: string[];
+      deleteFromStorage: boolean;
+    }) => mediaService.removeMany(ids, { deleteFromStorage: purgeStorage }),
+    onMutate: async ({ ids }) => {
       const previousMedia = qc.getQueryData<Media[]>(["media"]);
       setHiddenMediaIds((prev) => unionIds(prev, ids));
       await qc.cancelQueries({ queryKey: ["media"] });
       qc.setQueryData(["media"], applyBulkDelete(previousMedia ?? [], ids));
       setDeleteOpen(false);
+      setDeleteFromStorage(false);
       setSelected((prev) => (prev && ids.includes(prev.id) ? null : prev));
       setSelectedIds((prev) => withoutIds(prev, ids));
       return { previousMedia, ids };
@@ -407,12 +433,12 @@ function MediaPage() {
     onSuccess: () => {
       toast.success("Media deleted");
     },
-    onError: (error, ids, ctx) => {
+    onError: (error, { ids }, ctx) => {
       setHiddenMediaIds((prev) => withoutIds(prev, ids));
       if (ctx?.previousMedia) qc.setQueryData(["media"], ctx.previousMedia);
       toast.error(error instanceof Error ? error.message : "Could not delete.");
     },
-    onSettled: async (_data, _error, ids) => {
+    onSettled: async (_data, _error, { ids }) => {
       await qc.invalidateQueries({ queryKey: ["media"] });
       await qc.invalidateQueries({ queryKey: ["media-folders"] });
       setHiddenMediaIds((prev) =>
@@ -464,7 +490,7 @@ function MediaPage() {
     deleteOpen ||
     Boolean(deleteFile) ||
     Boolean(deleteFolderTarget);
-  const deletingFolderId = deleteFolder.isPending ? (deleteFolder.variables ?? null) : null;
+  const deletingFolderId = deleteFolder.isPending ? (deleteFolder.variables?.id ?? null) : null;
   const uploadBlockedInThisFolder = Boolean(deletingFolderId && folderId === deletingFolderId);
   const bulkPlan = partitionBulkDelete(libraryMedia, selectedIds);
   const folderFiles = deleteFolderTarget
@@ -602,6 +628,7 @@ function MediaPage() {
                     } catch {
                       // Still open the dialog; server re-checks on confirm.
                     }
+                    setDeleteFromStorage(false);
                     setDeleteFolderTarget(target);
                   })();
                 }}
@@ -722,7 +749,10 @@ function MediaPage() {
           setMoveIds([...selectedIds]);
           setMoveTarget(UNFILED_VALUE);
         }}
-        onDelete={() => setDeleteOpen(true)}
+        onDelete={() => {
+          setDeleteFromStorage(false);
+          setDeleteOpen(true);
+        }}
         busy={moveToFolder.isPending || removeMany.isPending}
       />
 
@@ -775,8 +805,14 @@ function MediaPage() {
               setSelected(item);
               setRenaming(item.filename);
             }}
-            onDelete={setDeleteFile}
-            onDeleteFolder={setDeleteFolderTarget}
+            onDelete={(item) => {
+              setDeleteFromStorage(false);
+              setDeleteFile(item);
+            }}
+            onDeleteFolder={(folder) => {
+              setDeleteFromStorage(false);
+              setDeleteFolderTarget(folder);
+            }}
           />
         ) : (
           <div
@@ -802,7 +838,10 @@ function MediaPage() {
                   setSelected(item);
                   setRenaming(item.filename);
                 }}
-                onDelete={setDeleteFile}
+                onDelete={(item) => {
+                  setDeleteFromStorage(false);
+                  setDeleteFile(item);
+                }}
               />
             ))}
           </div>
@@ -901,23 +940,36 @@ function MediaPage() {
         onOpenChange={(open) => {
           if (!open && removeMany.isPending) return;
           setDeleteOpen(open);
+          if (!open) setDeleteFromStorage(false);
         }}
         title={bulkPlan.deletable.length > 0 ? "Delete files?" : "These files stay on the live screens"}
         description={
           bulkPlan.blocked.length > 0
             ? "Files in live playlists are never deleted silently."
-            : "This cannot be undone."
+            : "This removes files from the library. Files used in live playlists cannot be deleted."
         }
         footer={
           <>
-            <E3Button variant="outline" disabled={removeMany.isPending} onClick={() => setDeleteOpen(false)}>
+            <E3Button
+              variant="outline"
+              disabled={removeMany.isPending}
+              onClick={() => {
+                setDeleteOpen(false);
+                setDeleteFromStorage(false);
+              }}
+            >
               {bulkPlan.deletable.length > 0 ? "Cancel" : "Close"}
             </E3Button>
             {bulkPlan.deletable.length > 0 ? (
               <E3Button
                 variant="danger"
                 loading={removeMany.isPending}
-                onClick={() => removeMany.mutate(bulkPlan.deletable.map((item) => item.id))}
+                onClick={() =>
+                  removeMany.mutate({
+                    ids: bulkPlan.deletable.map((item) => item.id),
+                    deleteFromStorage,
+                  })
+                }
               >
                 {bulkPlan.blocked.length > 0
                   ? `Delete ${bulkPlan.deletable.length} unused`
@@ -944,6 +996,15 @@ function MediaPage() {
               {bulkPlan.deletable.length} unused file{bulkPlan.deletable.length === 1 ? "" : "s"} can still be deleted.
               In-use files stay so the live TV keeps playing.
             </p>
+          ) : null}
+          {bulkPlan.deletable.length > 0 ? (
+            <StorageDeleteOption
+              id="bulk-delete-from-storage"
+              copy={storageDeleteCopy}
+              checked={deleteFromStorage}
+              disabled={removeMany.isPending}
+              onCheckedChange={setDeleteFromStorage}
+            />
           ) : null}
         </div>
       </E3Modal>
@@ -989,7 +1050,11 @@ function MediaPage() {
             <E3Button
               variant="danger"
               disabled={!selected || mediaBusy}
-              onClick={() => selected && setDeleteFile(selected)}
+              onClick={() => {
+                if (!selected) return;
+                setDeleteFromStorage(false);
+                setDeleteFile(selected);
+              }}
             >
               Delete
             </E3Button>
@@ -1076,32 +1141,56 @@ function MediaPage() {
         open={Boolean(deleteFile)}
         onOpenChange={(open) => {
           if (!open && remove.isPending) return;
-          if (!open) setDeleteFile(null);
+          if (!open) {
+            setDeleteFile(null);
+            setDeleteFromStorage(false);
+          }
         }}
         title={deleteFile ? `Delete ${deleteFile.filename}?` : "Delete file?"}
         description="This removes the file from the library. Files used in live playlists cannot be deleted."
         footer={
           <>
-            <E3Button variant="outline" disabled={remove.isPending} onClick={() => setDeleteFile(null)}>
+            <E3Button
+              variant="outline"
+              disabled={remove.isPending}
+              onClick={() => {
+                setDeleteFile(null);
+                setDeleteFromStorage(false);
+              }}
+            >
               Cancel
             </E3Button>
             <E3Button
               variant="danger"
               loading={remove.isPending}
               disabled={!deleteFile}
-              onClick={() => deleteFile && remove.mutate(deleteFile.id)}
+              onClick={() =>
+                deleteFile &&
+                remove.mutate({ id: deleteFile.id, deleteFromStorage })
+              }
             >
               Delete file
             </E3Button>
           </>
         }
-      />
+      >
+        <StorageDeleteOption
+          id="file-delete-from-storage"
+          copy={storageDeleteCopy}
+          checked={deleteFromStorage}
+          disabled={remove.isPending}
+          onCheckedChange={setDeleteFromStorage}
+        />
+      </E3Modal>
 
       <E3Modal
         open={Boolean(deleteFolderTarget)}
         onOpenChange={(open) => {
           if (!open && deleteFolder.isPending) return;
-          if (!open) setDeleteFolderTarget(null);
+          if (!open) {
+            setDeleteFolderTarget(null);
+            setDeleteFromStorage(false);
+          }
         }}
         title={deleteFolderTarget ? folderCopy.title : "Delete folder?"}
         description={
@@ -1114,7 +1203,10 @@ function MediaPage() {
             <E3Button
               variant="outline"
               disabled={deleteFolder.isPending}
-              onClick={() => setDeleteFolderTarget(null)}
+              onClick={() => {
+                setDeleteFolderTarget(null);
+                setDeleteFromStorage(false);
+              }}
             >
               {folderPlan.blocked.length > 0 && folderPlan.deletable.length === 0 ? "Close" : "Cancel"}
             </E3Button>
@@ -1123,7 +1215,13 @@ function MediaPage() {
                 variant="danger"
                 loading={deleteFolder.isPending}
                 disabled={!deleteFolderTarget}
-                onClick={() => deleteFolderTarget && deleteFolder.mutate(deleteFolderTarget.id)}
+                onClick={() =>
+                  deleteFolderTarget &&
+                  deleteFolder.mutate({
+                    id: deleteFolderTarget.id,
+                    deleteFromStorage,
+                  })
+                }
               >
                 {folderCopy.confirmLabel}
               </E3Button>
@@ -1148,6 +1246,15 @@ function MediaPage() {
               Remove {folderPlan.blocked.length === 1 ? "that file" : "those files"} from live playlists
               first, then delete the folder. The folder and its other files stay so the live TV keeps playing.
             </p>
+          ) : null}
+          {folderPlan.blocked.length === 0 ? (
+            <StorageDeleteOption
+              id="folder-delete-from-storage"
+              copy={storageDeleteCopy}
+              checked={deleteFromStorage}
+              disabled={deleteFolder.isPending}
+              onCheckedChange={setDeleteFromStorage}
+            />
           ) : null}
         </div>
       </E3Modal>
@@ -1230,6 +1337,43 @@ function LibraryGrid({
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function StorageDeleteOption({
+  id,
+  copy,
+  checked,
+  disabled,
+  onCheckedChange,
+}: {
+  id: string;
+  copy: ReturnType<typeof mediaStorageDeleteCopy>;
+  checked: boolean;
+  disabled?: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  const hintId = `${id}-hint`;
+  return (
+    <div className="space-y-2 rounded-xl border border-border p-3">
+      <div className="flex items-start gap-3">
+        <Checkbox
+          id={id}
+          checked={checked}
+          disabled={disabled}
+          onCheckedChange={(value) => onCheckedChange(value === true)}
+          aria-describedby={hintId}
+        />
+        <div className="min-w-0 space-y-1">
+          <label htmlFor={id} className="text-sm font-medium leading-none">
+            {copy.checkboxLabel}
+          </label>
+          <p id={hintId} className="text-xs text-muted-foreground">
+            {checked ? copy.checkedHint : copy.uncheckedHint}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

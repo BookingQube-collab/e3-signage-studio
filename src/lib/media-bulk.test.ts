@@ -11,12 +11,14 @@ import {
   isLivePlaylistStatus,
   liveUsagePlaylistIds,
   liveUsagePlaylistNames,
+  mediaStorageDeleteCopy,
   partitionBulkDelete,
   pruneHiddenIds,
   releaseHiddenIfGone,
   selectAllActionLabel,
   selectAllIds,
   selectionCountLabel,
+  shouldDeleteFromStorage,
   toggleSelectAll,
   unionIds,
   withoutIds,
@@ -190,4 +192,18 @@ test("partitionBulkDelete does not throw when usedIn is missing", () => {
     ["m-orphan"],
   );
   assert.equal(blocked.length, 0);
+});
+
+test("deleteFromStorage is opt-in and R2/supabase copy differs", () => {
+  assert.equal(shouldDeleteFromStorage(undefined), false);
+  assert.equal(shouldDeleteFromStorage(false), false);
+  assert.equal(shouldDeleteFromStorage(true), true);
+  const r2 = mediaStorageDeleteCopy("r2");
+  assert.equal(r2.checkboxLabel, "Also delete from Cloudflare?");
+  assert.match(r2.checkedHint, /Cloudflare R2/);
+  assert.match(r2.uncheckedHint, /library records only/i);
+  const supabase = mediaStorageDeleteCopy("supabase");
+  assert.equal(supabase.checkboxLabel, "Also delete from storage?");
+  assert.match(supabase.checkedHint, /storage/);
+  assert.doesNotMatch(supabase.checkboxLabel, /Cloudflare/i);
 });

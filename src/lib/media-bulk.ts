@@ -184,6 +184,36 @@ export function uniquePlaylistNames<T extends { usedIn?: MediaUsage | null }>(it
   return names;
 }
 
+export type MediaStorageBackend = "r2" | "supabase";
+
+/** Normalize the optional CMS delete → object-store purge flag (opt-in). */
+export function shouldDeleteFromStorage(flag: boolean | null | undefined): boolean {
+  return flag === true;
+}
+
+/**
+ * Confirm-dialog copy for optionally purging Cloudflare R2 / Supabase Storage
+ * after removing library rows.
+ */
+export function mediaStorageDeleteCopy(backend: MediaStorageBackend = "r2"): {
+  checkboxLabel: string;
+  checkedHint: string;
+  uncheckedHint: string;
+} {
+  if (backend === "supabase") {
+    return {
+      checkboxLabel: "Also delete from storage?",
+      checkedHint: "Permanently removes the object(s) from storage. This cannot be undone.",
+      uncheckedHint: "Removes library records only. Objects stay in storage.",
+    };
+  }
+  return {
+    checkboxLabel: "Also delete from Cloudflare?",
+    checkedHint: "Permanently removes the object(s) from Cloudflare R2. This cannot be undone.",
+    uncheckedHint: "Removes library records only. Objects stay in Cloudflare R2.",
+  };
+}
+
 export function partitionBulkDelete<T extends { id: string; filename: string; usedIn?: MediaUsage | null }>(
   items: T[],
   selectedIds: Iterable<string>,

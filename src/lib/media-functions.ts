@@ -101,21 +101,31 @@ export const archiveMediaFn = createServerFn({ method: "POST" })
   });
 
 export const deleteMediaFn = createServerFn({ method: "POST" })
-  .validator(accessTokenSchema.extend({ id: z.string().uuid() }))
+  .validator(
+    accessTokenSchema.extend({
+      id: z.string().uuid(),
+      deleteFromStorage: z.boolean().optional(),
+    }),
+  )
   .handler(async ({ data }): Promise<boolean> => {
     const { deleteMedia } = await import("@/server/media.server");
-    return deleteMedia(data.accessToken, data.id);
+    return deleteMedia(data.accessToken, data.id, {
+      deleteFromStorage: data.deleteFromStorage === true,
+    });
   });
 
 export const deleteMediaBulkFn = createServerFn({ method: "POST" })
   .validator(
     accessTokenSchema.extend({
       ids: z.array(z.string().uuid()).min(1).max(100),
+      deleteFromStorage: z.boolean().optional(),
     }),
   )
   .handler(async ({ data }): Promise<boolean> => {
     const { deleteMediaBulk } = await import("@/server/media.server");
-    return deleteMediaBulk(data.accessToken, data.ids);
+    return deleteMediaBulk(data.accessToken, data.ids, {
+      deleteFromStorage: data.deleteFromStorage === true,
+    });
   });
 
 export const mediaDownloadUrlFn = createServerFn({ method: "POST" })
@@ -140,10 +150,24 @@ export const createMediaFolderFn = createServerFn({ method: "POST" })
   });
 
 export const deleteMediaFolderFn = createServerFn({ method: "POST" })
-  .validator(accessTokenSchema.extend({ id: z.string().uuid() }))
+  .validator(
+    accessTokenSchema.extend({
+      id: z.string().uuid(),
+      deleteFromStorage: z.boolean().optional(),
+    }),
+  )
   .handler(async ({ data }): Promise<boolean> => {
     const { deleteFolder } = await import("@/server/media.server");
-    return deleteFolder(data.accessToken, data.id);
+    return deleteFolder(data.accessToken, data.id, {
+      deleteFromStorage: data.deleteFromStorage === true,
+    });
+  });
+
+export const mediaStorageBackendFn = createServerFn({ method: "POST" })
+  .validator(accessTokenSchema)
+  .handler(async (): Promise<"r2" | "supabase"> => {
+    const { mediaStorageBackend } = await import("@/server/media.server");
+    return mediaStorageBackend();
   });
 
 export const moveMediaToFolderFn = createServerFn({ method: "POST" })

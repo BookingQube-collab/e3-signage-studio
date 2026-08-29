@@ -10,6 +10,7 @@ import {
   listMediaFoldersFn,
   listMediaFn,
   mediaDownloadUrlFn,
+  mediaStorageBackendFn,
   moveMediaBulkFn,
   moveMediaToFolderFn,
   renameMediaFn,
@@ -284,9 +285,22 @@ export const liveMediaService: MediaService = {
     const row = await archiveMediaFn({ data: { accessToken: await accessToken(), id } });
     return toUiMedia(row);
   },
-  remove: async (id) => deleteMediaFn({ data: { accessToken: await accessToken(), id } }),
-  removeMany: async (ids) =>
-    deleteMediaBulkFn({ data: { accessToken: await accessToken(), ids } }),
+  remove: async (id, options) =>
+    deleteMediaFn({
+      data: {
+        accessToken: await accessToken(),
+        id,
+        deleteFromStorage: options?.deleteFromStorage === true,
+      },
+    }),
+  removeMany: async (ids, options) =>
+    deleteMediaBulkFn({
+      data: {
+        accessToken: await accessToken(),
+        ids,
+        deleteFromStorage: options?.deleteFromStorage === true,
+      },
+    }),
   downloadUrl: async (id) => mediaDownloadUrlFn({ data: { accessToken: await accessToken(), id } }),
   resyncFromStorage: async (folderId) => {
     try {
@@ -306,9 +320,15 @@ export const liveMediaService: MediaService = {
     const row = await createMediaFolderFn({ data: { accessToken: await accessToken(), name } });
     return toUiFolder(row);
   },
-  deleteFolder: async (id) => {
+  deleteFolder: async (id, options) => {
     try {
-      return await deleteMediaFolderFn({ data: { accessToken: await accessToken(), id } });
+      return await deleteMediaFolderFn({
+        data: {
+          accessToken: await accessToken(),
+          id,
+          deleteFromStorage: options?.deleteFromStorage === true,
+        },
+      });
     } catch (error) {
       throw new Error(
         describeCanceledStatement(
@@ -316,6 +336,13 @@ export const liveMediaService: MediaService = {
           "Could not finish deleting this folder. It is still in the library. Try again, or remove files from live playlists first.",
         ),
       );
+    }
+  },
+  storageBackend: async () => {
+    try {
+      return await mediaStorageBackendFn({ data: { accessToken: await accessToken() } });
+    } catch {
+      return "r2";
     }
   },
   moveToFolder: async (id, folderId) => {
