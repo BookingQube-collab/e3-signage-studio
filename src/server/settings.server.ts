@@ -195,12 +195,15 @@ async function validateImageMedia(
 async function bumpScreensConfigVersion(
   admin: ReturnType<typeof getServiceRoleClient>,
   organizationId: string,
+  locationId?: string | null,
 ): Promise<void> {
-  const { data: screenRows, error: screenError } = await admin
+  let query = admin
     .from("screens")
     .select("id, cloud_config_version")
     .eq("organization_id", organizationId)
     .is("archived_at", null);
+  if (locationId) query = query.eq("location_id", locationId);
+  const { data: screenRows, error: screenError } = await query;
   if (screenError) throw new Error(screenError.message || "Could not load screens for config bump.");
 
   for (const row of screenRows ?? []) {
@@ -486,36 +489,94 @@ async function resolveDownloadableImageAsset(
   };
 }
 
+type LocationWaitingRow = {
+  waiting_media_id?: string | null;
+  waiting_title?: string | null;
+  waiting_message?: string | null;
+  waiting_config_version?: number | null;
+};
+
+/**
+ * Resolution order for the TV idle / waiting screen:
+ * 1. Location override when `locations.waiting_media_id` is set → CUSTOM image
+ * 2. Else organization Settings waiting screen (FULL_LOGO / ICON / CUSTOM)
+ * 3. Else built-in FULL_LOGO (APK fallback when CUSTOM asset cannot be resolved)
+ */
 export async function loadDeviceWaitingScreen(
   admin: ReturnType<typeof getServiceRoleClient>,
   organizationId: string,
+  locationId?: string | null,
 ): Promise<DeviceWaitingScreenPayload> {
-  const { data } = await admin
-    .from("organization_settings")
-    .select(
-      "default_waiting_brand, default_waiting_media_id, default_waiting_title, default_waiting_message, waiting_config_version, player_brand_icon_media_id",
-    )
-    .eq("organization_id", organizationId)
-    .maybeSingle();
+  const [{ data }, locationRes] = await Promise.all([
+    admin
+      .from("organization_settings")
+      .select(
+        "default_waiting_brand, default_waiting_media_id, default_waiting_title, default_waiting_message, waiting_config_version, player_brand_icon_media_id",
+      )
+      .eq("organization_id", organizationId)
+      .maybeSingle(),
+    locationId
+      ? admin
+          .from("locations")
+          .select("waiting_media_id, waiting_title, waiting_message, waiting_config_version")
+          .eq("id", locationId)
+          .eq("organization_id", organizationId)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
 
-  const configVersion = Math.max(
+  const orgVersion = Math.max(
     1,
     asNumber((data as { waiting_config_version?: number } | null)?.waiting_config_version, 1),
   );
-  const title = asNullableString(
+  const location = locationRes.data as LocationWaitingRow | null;
+  const locationMediaId = asNullableString(location?.waiting_media_id);
+  const locationVersion = Math.max(1, asNumber(location?.waiting_config_version, 1));
+  const configVersion = orgVersion + (locationMediaId ? locationVersion : 0);
+
+  const orgTitle = asNullableString(
     (data as { default_waiting_title?: string | null } | null)?.default_waiting_title,
   );
-  const message = asNullableString(
+  const orgMessage = asNullableString(
     (data as { default_waiting_message?: string | null } | null)?.default_waiting_message,
-  );
-  let brand = normalizeBrand((data as { default_waiting_brand?: string | null } | null)?.default_waiting_brand);
-  const mediaId = asNullableString(
-    (data as { default_waiting_media_id?: string | null } | null)?.default_waiting_media_id,
   );
   const playerBrandIconId = asNullableString(
     (data as { player_brand_icon_media_id?: string | null } | null)?.player_brand_icon_media_id,
   );
   const brandIcon = await resolveDownloadableImageAsset(admin, organizationId, playerBrandIconId);
+
+  // 1) Location override
+  if (locationMediaId) {
+    const title = asNullableString(location?.waiting_title) ?? orgTitle;
+    const message = asNullableString(location?.waiting_message) ?? orgMessage;
+    const customAsset = await resolveDownloadableImageAsset(admin, organizationId, locationMediaId);
+    if (customAsset) {
+      return {
+        brand: "CUSTOM",
+        mediaId: customAsset.mediaId,
+        version: customAsset.version,
+        checksum: customAsset.checksum,
+        fileSize: customAsset.fileSize,
+        mimeType: customAsset.mimeType,
+        downloadUrl: customAsset.downloadUrl,
+        title,
+        message,
+        configVersion,
+        brandIcon,
+      };
+    }
+    // Location media missing/unusable → fall through to org default
+  }
+
+  // 2) Organization default
+  const title = orgTitle;
+  const message = orgMessage;
+  const brand = normalizeBrand(
+    (data as { default_waiting_brand?: string | null } | null)?.default_waiting_brand,
+  );
+  const mediaId = asNullableString(
+    (data as { default_waiting_media_id?: string | null } | null)?.default_waiting_media_id,
+  );
 
   const empty = (resolvedBrand: WaitingScreenBrand): DeviceWaitingScreenPayload => ({
     brand: resolvedBrand,
@@ -535,6 +596,7 @@ export async function loadDeviceWaitingScreen(
   if (!mediaId) return empty("FULL_LOGO");
 
   const customAsset = await resolveDownloadableImageAsset(admin, organizationId, mediaId);
+  // 3) Built-in FULL_LOGO when custom asset cannot be resolved
   if (!customAsset) return empty("FULL_LOGO");
 
   return {
@@ -550,4 +612,82 @@ export async function loadDeviceWaitingScreen(
     configVersion,
     brandIcon,
   };
+}
+
+export type LocationWaitingScreenSettings = {
+  mediaId: string | null;
+  mediaName: string | null;
+  thumbnailUrl: string | null;
+  title: string | null;
+  message: string | null;
+  configVersion: number;
+};
+
+export async function loadLocationWaitingScreenPreview(
+  admin: ReturnType<typeof getServiceRoleClient>,
+  mediaId: string | null,
+  title: string | null,
+  message: string | null,
+  configVersion: number,
+): Promise<LocationWaitingScreenSettings> {
+  const preview = await loadWaitingMediaPreview(admin, mediaId);
+  return {
+    mediaId,
+    mediaName: preview.mediaName,
+    thumbnailUrl: preview.thumbnailUrl,
+    title,
+    message,
+    configVersion: Math.max(1, configVersion),
+  };
+}
+
+export async function updateLocationWaitingScreen(
+  accessToken: string,
+  locationId: string,
+  input: {
+    mediaId: string | null;
+    title: string | null;
+    message: string | null;
+  },
+): Promise<LocationWaitingScreenSettings> {
+  const auth = await requireCmsPermission(accessToken, "locations.view");
+  if (auth.profile.role !== "SUPER_ADMIN") {
+    throw new Error("Only a Super Admin can set a location waiting screen.");
+  }
+  const admin = getServiceRoleClient();
+  const organizationId = auth.profile.organizationId;
+
+  const { data: location, error: locError } = await admin
+    .from("locations")
+    .select("id, waiting_config_version")
+    .eq("id", locationId)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  if (locError) throw new Error(locError.message || "Could not load location.");
+  if (!location) throw new Error("Location not found.");
+
+  const mediaId = await validateImageMedia(admin, organizationId, input.mediaId, "waiting screen");
+  const title = mediaId ? normalizeTitle(input.title) : null;
+  const message = mediaId ? normalizeMessage(input.message) : null;
+  const nextVersion =
+    Math.max(
+      1,
+      asNumber((location as { waiting_config_version?: number }).waiting_config_version, 1),
+    ) + 1;
+
+  const { error: updateError } = await admin
+    .from("locations")
+    .update({
+      waiting_media_id: mediaId,
+      waiting_title: title,
+      waiting_message: message,
+      waiting_config_version: nextVersion,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", locationId)
+    .eq("organization_id", organizationId);
+  if (updateError) throw new Error(updateError.message || "Could not save location waiting screen.");
+
+  await bumpScreensConfigVersion(admin, organizationId, locationId);
+  return loadLocationWaitingScreenPreview(admin, mediaId, title, message, nextVersion);
 }

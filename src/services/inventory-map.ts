@@ -34,6 +34,11 @@ export type LocationRecord = {
   onlineCount: number;
   activeCampaigns: number;
   createdAt: string;
+  waitingMediaId: string | null;
+  waitingMediaName: string | null;
+  waitingThumbnailUrl: string | null;
+  waitingTitle: string | null;
+  waitingMessage: string | null;
 };
 
 export type ScreenRecord = {
@@ -83,6 +88,11 @@ export function toUiLocation(row: LocationRecord): Location {
     onlineCount: row.onlineCount,
     activeCampaigns: row.activeCampaigns,
     createdAt: row.createdAt.slice(0, 10),
+    waitingMediaId: row.waitingMediaId,
+    waitingMediaName: row.waitingMediaName,
+    waitingThumbnailUrl: row.waitingThumbnailUrl,
+    waitingTitle: row.waitingTitle,
+    waitingMessage: row.waitingMessage,
   };
 }
 

@@ -5,6 +5,7 @@ import {
   listLocationsFn,
   updateLocationFn,
 } from "@/lib/inventory-functions";
+import { updateLocationWaitingScreenFn } from "@/lib/settings-functions";
 import { getBrowserAccessToken } from "@/lib/supabase";
 import type { Location } from "@/types";
 import { LOCATION_STATUS_FROM_UI, LOCATION_TYPE_FROM_UI, toUiLocation } from "./inventory-map";
@@ -57,6 +58,28 @@ export const liveLocationService: LocationService = {
       },
     });
     return toUiLocation(row);
+  },
+  updateWaitingScreen: async (id, input) => {
+    const token = await accessToken();
+    const waiting = await updateLocationWaitingScreenFn({
+      data: {
+        accessToken: token,
+        locationId: id,
+        mediaId: input.mediaId,
+        title: input.title,
+        message: input.message,
+      },
+    });
+    const row = await getLocationFn({ data: { accessToken: token, id } });
+    if (!row) throw new Error("Location not found.");
+    return toUiLocation({
+      ...row,
+      waitingMediaId: waiting.mediaId,
+      waitingMediaName: waiting.mediaName,
+      waitingThumbnailUrl: waiting.thumbnailUrl,
+      waitingTitle: waiting.title,
+      waitingMessage: waiting.message,
+    });
   },
   remove: async (id) => deleteLocationFn({ data: { accessToken: await accessToken(), id } }),
 };

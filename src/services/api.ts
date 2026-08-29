@@ -20,6 +20,7 @@ export const apiServices: AppServices = {
     get: () => notConfigured(),
     create: () => notConfigured(),
     update: () => notConfigured(),
+    updateWaitingScreen: () => notConfigured(),
     remove: () => notConfigured(),
   },
   screenService: {

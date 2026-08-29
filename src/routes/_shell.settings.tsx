@@ -566,7 +566,8 @@ function SettingsEditor({ canManage }: { canManage: boolean }) {
                 <div>
                   <p className="text-sm font-medium">Default waiting screen</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Default image and content shown on paired TVs until an active campaign is playing.
+                    Organization default shown on paired TVs until an active campaign is playing.
+                    Individual locations can override this under Locations → location detail.
                     Manage on-screen brand, optional headline/message, and a custom full-bleed image.
                   </p>
                 </div>

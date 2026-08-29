@@ -65,6 +65,10 @@ export type LocationService = {
   get: (id: string) => Promise<Location | null>;
   create: (input: Omit<Location, "id" | "createdAt">) => Promise<Location>;
   update: (id: string, input: Omit<Location, "id" | "createdAt">) => Promise<Location>;
+  updateWaitingScreen: (
+    id: string,
+    input: { mediaId: string | null; title: string | null; message: string | null },
+  ) => Promise<Location>;
   remove: (id: string) => Promise<boolean>;
 };
 

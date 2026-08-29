@@ -22,6 +22,12 @@ export interface Location {
   onlineCount: number;
   activeCampaigns: number;
   createdAt: string;
+  /** Location waiting-screen override from media library; null inherits org default. */
+  waitingMediaId?: string | null;
+  waitingMediaName?: string | null;
+  waitingThumbnailUrl?: string | null;
+  waitingTitle?: string | null;
+  waitingMessage?: string | null;
 }
 
 export type ScreenStatus = "online" | "offline" | "syncing" | "disabled";

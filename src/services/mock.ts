@@ -59,6 +59,20 @@ export const mockServices: AppServices = {
       store.locations = store.locations.map((l) => (l.id === id ? loc : l));
       return delay(loc, 200);
     },
+    updateWaitingScreen: (id, input) => {
+      const current = store.locations.find((l) => l.id === id);
+      if (!current) return Promise.reject(new Error("Location not found."));
+      const loc: Location = {
+        ...current,
+        waitingMediaId: input.mediaId,
+        waitingMediaName: input.mediaId ? "Mock waiting image" : null,
+        waitingThumbnailUrl: null,
+        waitingTitle: input.title,
+        waitingMessage: input.message,
+      };
+      store.locations = store.locations.map((l) => (l.id === id ? loc : l));
+      return delay(loc, 200);
+    },
     remove: (id: string) => {
       const screens = store.screens.filter((s) => s.locationId === id);
       if (screens.length > 0) {

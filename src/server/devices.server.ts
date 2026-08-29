@@ -56,6 +56,7 @@ type AdminClient = ReturnType<typeof getServiceRoleClient>;
 type DeviceScreen = {
   id: string;
   organization_id: string;
+  location_id: string;
   device_id: string | null;
   archived_at: string | null;
   operational_status: string;
@@ -203,7 +204,7 @@ export async function requireDevice(
   const { data: screen, error: screenError } = await admin
     .from("screens")
     .select(
-      "id, organization_id, device_id, archived_at, operational_status, cloud_manifest_version, cloud_config_version, local_manifest_version",
+      "id, organization_id, location_id, device_id, archived_at, operational_status, cloud_manifest_version, cloud_config_version, local_manifest_version",
     )
     .eq("id", screenId)
     .maybeSingle();
@@ -426,7 +427,11 @@ export async function deviceSyncStatus(
   const requestedAt = asNullableString((data as { sync_requested_at?: string | null } | null)?.sync_requested_at);
   const rotatedToken = await maybeRotateToken(auth);
   const { loadDeviceWaitingScreen } = await import("./settings.server");
-  const waitingScreen = await loadDeviceWaitingScreen(auth.admin, auth.screen.organization_id);
+  const waitingScreen = await loadDeviceWaitingScreen(
+    auth.admin,
+    auth.screen.organization_id,
+    auth.screen.location_id,
+  );
   return ok({
     manifestVersion: cloud,
     configVersion: configVersion > 0 ? configVersion : 1,

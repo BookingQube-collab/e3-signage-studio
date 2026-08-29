@@ -39,6 +39,10 @@ export type LocationRow = {
   city: string | null;
   start_date: string | null;
   end_date: string | null;
+  waiting_media_id: string | null;
+  waiting_title: string | null;
+  waiting_message: string | null;
+  waiting_config_version: number;
   archived_at: string | null;
   created_at: string;
   updated_at: string;

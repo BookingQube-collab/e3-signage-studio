@@ -227,6 +227,9 @@ type LocRow = {
   status: string;
   city: string | null;
   created_at: string;
+  waiting_media_id?: string | null;
+  waiting_title?: string | null;
+  waiting_message?: string | null;
 };
 
 type ScreenDb = {
@@ -394,11 +397,15 @@ async function loadScreenRecords(
   return out;
 }
 
+const LOCATION_COLUMNS =
+  "id, name, short_name, type, status, city, created_at, waiting_media_id, waiting_title, waiting_message";
+
 async function loadLocationRecords(
   client: ReturnType<typeof getUserClient>,
   organizationId: string,
   rows: LocRow[],
   offlineThreshold?: number,
+  options?: { resolveWaitingPreview?: boolean },
 ): Promise<LocationRecord[]> {
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
@@ -430,10 +437,36 @@ async function loadLocationRecords(
     if (conn === "ONLINE") bucket.online += 1;
   }
 
+  const previewByMediaId = new Map<string, { mediaName: string | null; thumbnailUrl: string | null }>();
+  if (options?.resolveWaitingPreview) {
+    const mediaIds = [
+      ...new Set(
+        rows
+          .map((r) => asNullableString(r.waiting_media_id))
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    if (mediaIds.length > 0) {
+      const { loadLocationWaitingScreenPreview } = await import("./settings.server");
+      const admin = getServiceRoleClient();
+      await Promise.all(
+        mediaIds.map(async (mediaId) => {
+          const preview = await loadLocationWaitingScreenPreview(admin, mediaId, null, null, 1);
+          previewByMediaId.set(mediaId, {
+            mediaName: preview.mediaName,
+            thumbnailUrl: preview.thumbnailUrl,
+          });
+        }),
+      );
+    }
+  }
+
   return rows.map((row) => {
     const type = isLocationType(row.type) ? row.type : "OTHER";
     const status = isLocationStatus(row.status) ? row.status : "ACTIVE";
     const bucket = counts.get(row.id) ?? { total: 0, online: 0 };
+    const waitingMediaId = asNullableString(row.waiting_media_id);
+    const preview = waitingMediaId ? previewByMediaId.get(waitingMediaId) : undefined;
     return {
       id: row.id,
       name: row.name,
@@ -445,6 +478,11 @@ async function loadLocationRecords(
       onlineCount: bucket.online,
       activeCampaigns: 0,
       createdAt: row.created_at,
+      waitingMediaId,
+      waitingMediaName: preview?.mediaName ?? null,
+      waitingThumbnailUrl: preview?.thumbnailUrl ?? null,
+      waitingTitle: asNullableString(row.waiting_title),
+      waitingMessage: asNullableString(row.waiting_message),
     };
   });
 }
@@ -456,7 +494,7 @@ export async function listLocations(accessToken: string): Promise<LocationRecord
   const [{ data, error }, threshold] = await Promise.all([
     client
       .from("locations")
-      .select("id, name, short_name, type, status, city, created_at")
+      .select(LOCATION_COLUMNS)
       .eq("organization_id", auth.profile.organizationId)
       .order("created_at", { ascending: true }),
     offlineAfterSeconds(client, auth.profile.organizationId),
@@ -476,12 +514,14 @@ export async function getLocation(accessToken: string, id: string): Promise<Loca
   const client = getUserClient(accessToken);
   const { data, error } = await client
     .from("locations")
-    .select("id, name, short_name, type, status, city, created_at")
+    .select(LOCATION_COLUMNS)
     .eq("id", id)
     .maybeSingle();
   throwIfError(error, "Could not load location.");
   if (!data) return null;
-  const rows = await loadLocationRecords(client, auth.profile.organizationId, [data as LocRow]);
+  const rows = await loadLocationRecords(client, auth.profile.organizationId, [data as LocRow], undefined, {
+    resolveWaitingPreview: true,
+  });
   return filterLocationsByScope(auth.profile, rows)[0] ?? null;
 }
 
@@ -519,7 +559,7 @@ export async function createLocation(
         timezone: "Asia/Qatar",
         created_by: auth.userId,
       })
-      .select("id, name, short_name, type, status, city, created_at")
+      .select(LOCATION_COLUMNS)
       .single();
     if (!error && data) {
       created = data as LocRow;
@@ -529,7 +569,9 @@ export async function createLocation(
     throw new Error(error?.message ?? "Could not create the location.");
   }
   if (!created) throw new Error("Could not generate a unique location code.");
-  const rows = await loadLocationRecords(client, auth.profile.organizationId, [created]);
+  const rows = await loadLocationRecords(client, auth.profile.organizationId, [created], undefined, {
+    resolveWaitingPreview: true,
+  });
   const row = rows[0];
   if (!row) throw new Error("Location was created but could not be loaded.");
   return row;
@@ -566,10 +608,12 @@ export async function updateLocation(
     })
     .eq("id", id)
     .eq("organization_id", auth.profile.organizationId)
-    .select("id, name, short_name, type, status, city, created_at")
+    .select(LOCATION_COLUMNS)
     .single();
   throwIfError(error, "Could not update the location.");
-  const rows = await loadLocationRecords(client, auth.profile.organizationId, [data as LocRow]);
+  const rows = await loadLocationRecords(client, auth.profile.organizationId, [data as LocRow], undefined, {
+    resolveWaitingPreview: true,
+  });
   const row = rows[0];
   if (!row) throw new Error("Location was updated but could not be loaded.");
   return row;

@@ -43,3 +43,18 @@ export const updateBrandingSettingsFn = createServerFn({ method: "POST" })
     const { accessToken, ...input } = data;
     return updateBrandingSettings(accessToken, input);
   });
+
+export const updateLocationWaitingScreenFn = createServerFn({ method: "POST" })
+  .validator(
+    accessTokenSchema.extend({
+      locationId: z.string().uuid(),
+      mediaId: z.string().uuid().nullable(),
+      title: z.string().max(120).nullable(),
+      message: z.string().max(500).nullable(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const { updateLocationWaitingScreen } = await import("@/server/settings.server");
+    const { accessToken, locationId, ...input } = data;
+    return updateLocationWaitingScreen(accessToken, locationId, input);
+  });
