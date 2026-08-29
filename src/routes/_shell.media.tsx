@@ -54,6 +54,7 @@ import {
   foldersInLibraryView,
   libraryViewFor,
   mediaInLibraryView,
+  mediaLibraryPaintState,
   mergeLibraryMedia,
   resolveUploadFolderId,
   uniqueFoldersByName,
@@ -632,18 +633,24 @@ function MediaPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [overlayOpen]);
 
-  const loading =
-    !isClient ||
-    (mediaQuery.data === undefined && mediaQuery.isPending) ||
-    (foldersQuery.data === undefined && foldersQuery.isPending);
-  const errored = mediaQuery.isError || foldersQuery.isError;
-  // Root view only lists folders + unfiled files. All production files live in folders, so
-  // treating folders as still-loading as "empty" flashes a blank library.
-  const empty =
-    !foldersQuery.isPending &&
-    !mediaQuery.isPending &&
-    visibleFolders.length === 0 &&
-    items.length === 0;
+  // Root is folder cards. Do not block them on the media list (c58c4fd regression), and do not
+  // call the library empty until both queries have settled (4bab9c7).
+  const { loading, empty, errored } = mediaLibraryPaintState({
+    isClient,
+    folders: {
+      isPending: foldersQuery.isPending,
+      isError: foldersQuery.isError,
+      hasSettled: foldersQuery.isSuccess || foldersQuery.isError,
+    },
+    media: {
+      isPending: mediaQuery.isPending,
+      isError: mediaQuery.isError,
+      hasSettled: mediaQuery.isSuccess || mediaQuery.isError,
+    },
+    viewMode: libraryView.mode,
+    visibleFolderCount: visibleFolders.length,
+    itemCount: items.length,
+  });
   const selectionActive = selectedIds.size > 0;
   const mediaBusy =
     rename.isPending || replace.isPending || download.isPending || archive.isPending || remove.isPending;
@@ -837,8 +844,9 @@ function MediaPage() {
               )
             }
           />
-        ) : view === "grid" ? (
+        ) : (
           <LibraryGrid
+            view={view}
             folders={visibleFolders}
             items={items}
             searching={searching}
@@ -868,37 +876,6 @@ function MediaPage() {
               setDeleteFolderTarget(folder);
             }}
           />
-        ) : (
-          <div
-            className="space-y-2"
-            onClick={(event) => {
-              if (!(event.target instanceof Element) || event.target.closest("[data-media-card]")) return;
-              clearSelection();
-            }}
-          >
-            {items.map((m) => (
-              <E3MediaCard
-                key={m.id}
-                item={m}
-                view="list"
-                selectable
-                checked={selectedIds.has(m.id)}
-                selectionActive={selectionActive}
-                folderLabel={folderCardLabel(m.folderName, searching || Boolean(m.folderName))}
-                onMove={openMove}
-                onToggle={(item, event) => applyClick(item.id, { toggle: true, range: event.shiftKey })}
-                onOpen={handleOpenMedia}
-                onEdit={(item) => {
-                  setSelected(item);
-                  setRenaming(item.filename);
-                }}
-                onDelete={(item) => {
-                  setDeleteFromStorage(false);
-                  setDeleteFile(item);
-                }}
-              />
-            ))}
-          </div>
         )}
       </E3QueryBoundary>
 
@@ -1317,6 +1294,7 @@ function MediaPage() {
 }
 
 function LibraryGrid({
+  view = "grid",
   folders,
   items,
   searching,
@@ -1332,6 +1310,7 @@ function LibraryGrid({
   onDelete,
   onDeleteFolder,
 }: {
+  view?: "grid" | "list";
   folders: MediaFolder[];
   items: Media[];
   searching: boolean;
@@ -1353,10 +1332,17 @@ function LibraryGrid({
     onBackgroundClick();
   }
 
+  const folderLayout =
+    view === "list"
+      ? "grid gap-2 sm:grid-cols-2 lg:grid-cols-3"
+      : "grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
+  const mediaLayout =
+    view === "list" ? "space-y-2" : "grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
+
   return (
     <div className="space-y-6" onClick={handleBackground}>
       {folders.length > 0 ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className={folderLayout}>
           {folders.map((folder) => (
             <FolderCard
               key={folder.id}
@@ -1373,15 +1359,16 @@ function LibraryGrid({
         </h2>
       ) : null}
       {items.length > 0 ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className={mediaLayout}>
           {items.map((m) => (
             <E3MediaCard
               key={m.id}
               item={m}
+              view={view}
               selectable
               checked={selectedIds.has(m.id)}
               selectionActive={selectionActive}
-              folderLabel={folderCardLabel(m.folderName, searching)}
+              folderLabel={folderCardLabel(m.folderName, searching || (view === "list" && Boolean(m.folderName)))}
               onOpen={onOpenMedia}
               onToggle={onToggle}
               onMove={onMove}

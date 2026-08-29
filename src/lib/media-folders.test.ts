@@ -20,6 +20,7 @@ import {
   libraryViewFor,
   liveFolders,
   mediaInLibraryView,
+  mediaLibraryPaintState,
   mergeLibraryMedia,
   resolveFolderCreate,
   resolveUploadFolderId,
@@ -81,6 +82,53 @@ test("search matches across folders and labels unfiled", () => {
   assert.deepEqual(foldersInLibraryView(folders, view), [{ id: "f-office", name: "Rajan Office" }]);
   assert.equal(foldersInLibraryView(folders, libraryViewFor("", "f-inflata")).length, 0);
   assert.equal(foldersInLibraryView(folders, libraryViewFor("", null)).length, 2);
+});
+
+test("root paints folders without waiting for the media list", () => {
+  const foldersReady = { isPending: false, isError: false, hasSettled: true };
+  const mediaPending = { isPending: true, isError: false, hasSettled: false };
+  const painted = mediaLibraryPaintState({
+    isClient: true,
+    folders: foldersReady,
+    media: mediaPending,
+    viewMode: "root",
+    visibleFolderCount: 1,
+    itemCount: 0,
+  });
+  assert.equal(painted.loading, false);
+  assert.equal(painted.empty, false);
+
+  const waitingEmptyRoot = mediaLibraryPaintState({
+    isClient: true,
+    folders: foldersReady,
+    media: mediaPending,
+    viewMode: "root",
+    visibleFolderCount: 0,
+    itemCount: 0,
+  });
+  assert.equal(waitingEmptyRoot.loading, true);
+  assert.equal(waitingEmptyRoot.empty, false);
+
+  const confirmedEmpty = mediaLibraryPaintState({
+    isClient: true,
+    folders: foldersReady,
+    media: { isPending: false, isError: false, hasSettled: true },
+    viewMode: "root",
+    visibleFolderCount: 0,
+    itemCount: 0,
+  });
+  assert.equal(confirmedEmpty.loading, false);
+  assert.equal(confirmedEmpty.empty, true);
+
+  const folderBrowse = mediaLibraryPaintState({
+    isClient: true,
+    folders: foldersReady,
+    media: mediaPending,
+    viewMode: "folder",
+    visibleFolderCount: 0,
+    itemCount: 0,
+  });
+  assert.equal(folderBrowse.loading, true);
 });
 
 test("move assigns a folder or returns the item to unfiled", () => {

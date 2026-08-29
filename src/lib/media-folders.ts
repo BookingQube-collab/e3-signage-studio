@@ -215,6 +215,50 @@ export function foldersInLibraryView<T extends { name: string }>(
   return folders;
 }
 
+export type LibraryQueryPaint = {
+  isPending: boolean;
+  isError: boolean;
+  /** True once this query has resolved with data or error (not the initial idle/pending gap). */
+  hasSettled: boolean;
+};
+
+/**
+ * Decide loading vs empty for the media library.
+ * Root is folder cards first — never block painting those on the heavier media list.
+ * Only wait on media when browsing a folder, searching, or confirming a truly empty root.
+ */
+export function mediaLibraryPaintState(input: {
+  isClient: boolean;
+  folders: LibraryQueryPaint;
+  media: LibraryQueryPaint;
+  viewMode: LibraryView["mode"];
+  visibleFolderCount: number;
+  itemCount: number;
+}): { loading: boolean; empty: boolean; errored: boolean } {
+  const errored = input.folders.isError || input.media.isError;
+  if (!input.isClient) {
+    return { loading: true, empty: false, errored: false };
+  }
+
+  const foldersLoading = !input.folders.hasSettled && input.folders.isPending;
+  const mediaLoading = !input.media.hasSettled && input.media.isPending;
+  const rootHasFolders = input.viewMode === "root" && input.visibleFolderCount > 0;
+
+  // Paint folder cards as soon as folders settle; keep waiting for media elsewhere.
+  const loading =
+    foldersLoading || (mediaLoading && !rootHasFolders && (input.viewMode !== "root" || input.folders.hasSettled));
+
+  const empty =
+    !loading &&
+    !errored &&
+    input.folders.hasSettled &&
+    input.media.hasSettled &&
+    input.visibleFolderCount === 0 &&
+    input.itemCount === 0;
+
+  return { loading, empty, errored };
+}
+
 export function folderCardLabel(folderName: string | null | undefined, searching: boolean): string | null {
   if (searching) return folderName?.trim() ? folderName : "Unfiled";
   return folderName?.trim() ? folderName : null;
