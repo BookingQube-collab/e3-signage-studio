@@ -7,7 +7,7 @@ export const ADMIN_QUERY_STALE_MS = 90_000;
 export const ADMIN_QUERY_GC_MS = 10 * 60_000;
 
 /** Skip the shell auth round-trip when the session was just resolved. */
-export const AUTH_SESSION_STALE_MS = 60_000;
+export const AUTH_SESSION_STALE_MS = ADMIN_QUERY_STALE_MS;
 export const AUTH_SESSION_QUERY_KEY = ["auth-session"] as const;
 
 export function createAppQueryClient(): QueryClient {
@@ -18,7 +18,7 @@ export function createAppQueryClient(): QueryClient {
         gcTime: ADMIN_QUERY_GC_MS,
         refetchOnWindowFocus: false,
         refetchOnReconnect: true,
-        // Fresh cached lists skip a remount refetch; stale ones still refresh.
+        // Show cached lists immediately; only refetch when staleTime elapsed.
         refetchOnMount: true,
         refetchIntervalInBackground: false,
         retry: 1,

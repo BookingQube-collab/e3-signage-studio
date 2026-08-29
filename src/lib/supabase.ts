@@ -106,10 +106,23 @@ export function getSupabase(): SupabaseClient {
   return browserClient;
 }
 
+/** Avoid serial auth.getSession() locks on every parallel list prefetch. */
+const ACCESS_TOKEN_CACHE_MS = 30_000;
+let cachedAccessToken: { token: string; at: number } | null = null;
+
+export function clearBrowserAccessTokenCache(): void {
+  cachedAccessToken = null;
+}
+
 export async function getBrowserAccessToken(): Promise<string> {
   if (typeof window === "undefined") return "";
+  if (cachedAccessToken && Date.now() - cachedAccessToken.at < ACCESS_TOKEN_CACHE_MS) {
+    return cachedAccessToken.token;
+  }
   const config = await ensurePublicSupabaseConfig();
   if (!config) return "";
   const { data } = await getSupabase().auth.getSession();
-  return data.session?.access_token ?? "";
+  const token = data.session?.access_token ?? "";
+  cachedAccessToken = { token, at: Date.now() };
+  return token;
 }

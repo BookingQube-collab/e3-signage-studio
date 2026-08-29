@@ -8,10 +8,16 @@ import {
   E3PageHeader,
   E3QueryBoundary,
 } from "@/components/e3";
+import { prefetchNavRoute } from "@/lib/nav-prefetch";
+import { hasQueryClientContext } from "@/lib/router-preload";
 import { layoutService } from "@/services";
 import type { Layout } from "@/types";
 
 export const Route = createFileRoute("/_shell/layouts/")({
+  loader: ({ context }) => {
+    if (typeof window === "undefined" || !hasQueryClientContext(context)) return;
+    prefetchNavRoute(context.queryClient, "/layouts");
+  },
   head: () => ({
     meta: [
       { title: "Layouts — E3 Digital Signage" },
@@ -34,7 +40,7 @@ function layoutZones(layout: Layout) {
 }
 
 function LayoutsPage() {
-  const { data, isPending, isError, refetch } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["layouts"],
     queryFn: layoutService.list,
     throwOnError: false,
@@ -56,7 +62,7 @@ function LayoutsPage() {
         }
       />
 
-      <E3QueryBoundary isLoading={isPending} isError={isError} refetch={() => void refetch()}>
+      <E3QueryBoundary isLoading={isLoading} isError={isError} refetch={() => void refetch()}>
         {layouts.length === 0 ? (
           <E3EmptyState
             icon={LayoutTemplate}

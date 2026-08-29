@@ -12,11 +12,17 @@ import {
   type E3Column,
 } from "@/components/e3";
 import { PlaylistRowMenu } from "@/features/playlists/PlaylistRowMenu";
+import { prefetchNavRoute } from "@/lib/nav-prefetch";
 import { hasPermission } from "@/lib/rbac";
+import { hasQueryClientContext } from "@/lib/router-preload";
 import { playlistService } from "@/services";
 import type { Playlist } from "@/types";
 
 export const Route = createFileRoute("/_shell/playlists/")({
+  loader: ({ context }) => {
+    if (typeof window === "undefined" || !hasQueryClientContext(context)) return;
+    prefetchNavRoute(context.queryClient, "/playlists");
+  },
   head: () => ({
     meta: [
       { title: "Playlists — E3 Digital Signage" },
@@ -47,7 +53,7 @@ function PlaylistsPage() {
   const navigate = useNavigate();
   const { auth } = Route.useRouteContext();
   const canManage = Boolean(auth?.ok && hasPermission(auth.profile.role, "playlists.manage"));
-  const { data, isPending, isError, refetch } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["playlists"],
     queryFn: playlistService.list,
     throwOnError: false,
@@ -100,7 +106,7 @@ function PlaylistsPage() {
         }
       />
 
-      <E3QueryBoundary isLoading={isPending} isError={isError} refetch={() => void refetch()}>
+      <E3QueryBoundary isLoading={isLoading} isError={isError} refetch={() => void refetch()}>
         {(data ?? []).length === 0 ? (
           <E3EmptyState
             icon={ListVideo}

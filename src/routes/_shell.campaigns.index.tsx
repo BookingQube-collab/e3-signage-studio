@@ -34,11 +34,17 @@ import {
   isEvergreenSchedule,
 } from "@/lib/campaign-window";
 import { toCsv } from "@/lib/monitoring";
+import { prefetchNavRoute } from "@/lib/nav-prefetch";
+import { hasQueryClientContext } from "@/lib/router-preload";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
 import { campaignService, locationService } from "@/services";
 import type { Campaign, CampaignStatus, Location } from "@/types";
 
 export const Route = createFileRoute("/_shell/campaigns/")({
+  loader: ({ context }) => {
+    if (typeof window === "undefined" || !hasQueryClientContext(context)) return;
+    prefetchNavRoute(context.queryClient, "/campaigns");
+  },
   head: () => ({
     meta: [
       { title: "Campaigns — E3 Digital Signage" },

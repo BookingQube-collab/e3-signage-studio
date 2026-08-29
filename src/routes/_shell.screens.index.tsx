@@ -32,15 +32,21 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { PairScreenDialog } from "@/features/screens/PairScreenDialog";
 import { ScreenRowMenu } from "@/features/screens/ScreenRowMenu";
+import { adminMonitoringRefetchInterval } from "@/lib/monitoring";
+import { prefetchNavRoute } from "@/lib/nav-prefetch";
+import { hasPermission } from "@/lib/rbac";
+import { hasQueryClientContext } from "@/lib/router-preload";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
+import { useLiveMonitoring } from "@/lib/use-live-monitoring";
 import { cn } from "@/lib/utils";
 import { locationService, screenGroupService, screenService } from "@/services";
-import { adminMonitoringRefetchInterval } from "@/lib/monitoring";
-import { useLiveMonitoring } from "@/lib/use-live-monitoring";
-import { hasPermission } from "@/lib/rbac";
 import type { Screen, ScreenGroup, ScreenStatus } from "@/types";
 
 export const Route = createFileRoute("/_shell/screens/")({
+  loader: ({ context }) => {
+    if (typeof window === "undefined" || !hasQueryClientContext(context)) return;
+    prefetchNavRoute(context.queryClient, "/screens");
+  },
   head: () => ({
     meta: [
       { title: "Screens — E3 Digital Signage" },

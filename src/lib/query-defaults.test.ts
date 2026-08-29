@@ -42,7 +42,7 @@ test("admin list cache outlives a 30s monitoring poll", () => {
 });
 
 test("shell auth stale window covers rapid sidebar clicks", () => {
-  assert.equal(AUTH_SESSION_STALE_MS >= 30_000, true);
+  assert.equal(AUTH_SESSION_STALE_MS >= ADMIN_QUERY_STALE_MS, true);
 });
 
 

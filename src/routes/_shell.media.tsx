@@ -60,6 +60,8 @@ import {
 } from "@/lib/media-folders";
 import { describeCanceledStatement, describeResyncError } from "@/lib/media-upload-error";
 import { describeResyncToast, describeUploadBatchToast } from "@/lib/media-upload-lifecycle";
+import { prefetchNavRoute } from "@/lib/nav-prefetch";
+import { hasQueryClientContext } from "@/lib/router-preload";
 import { useIsClient } from "@/lib/use-is-client";
 import { cn } from "@/lib/utils";
 import { mediaService } from "@/services";
@@ -67,6 +69,10 @@ import type { Media, MediaFolder } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
 
 export const Route = createFileRoute("/_shell/media")({
+  loader: ({ context }) => {
+    if (typeof window === "undefined" || !hasQueryClientContext(context)) return;
+    prefetchNavRoute(context.queryClient, "/media");
+  },
   head: () => ({
     meta: [
       { title: "Media Library — E3 Digital Signage" },
@@ -581,7 +587,10 @@ function MediaPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [overlayOpen]);
 
-  const loading = !isClient || mediaQuery.isPending || foldersQuery.isPending;
+  const loading =
+    !isClient ||
+    (mediaQuery.data === undefined && mediaQuery.isPending) ||
+    (foldersQuery.data === undefined && foldersQuery.isPending);
   const errored = mediaQuery.isError || foldersQuery.isError;
   // Root view only lists folders + unfiled files. All production files live in folders, so
   // treating folders as still-loading as "empty" flashes a blank library.

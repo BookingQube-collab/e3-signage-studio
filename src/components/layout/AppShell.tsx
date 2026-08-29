@@ -32,6 +32,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import type { CmsProfile } from "@/lib/auth-types";
+import { prefetchNavRoute } from "@/lib/nav-prefetch";
 import { hasPermission } from "@/lib/rbac";
 import { completeSignOut, redirectToLogin } from "@/lib/sign-out";
 import { cn } from "@/lib/utils";
@@ -109,6 +110,7 @@ function NavList({
   onNavigate?: () => void;
   profile: CmsProfile | null;
 }) {
+  const queryClient = useQueryClient();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const items = NAV.filter(
     (item) => profile !== null && hasPermission(profile.role, item.permission),
@@ -118,11 +120,15 @@ function NavList({
     <nav aria-label="Main" className="flex flex-1 flex-col gap-1 overflow-y-auto p-3">
       {items.map(({ label, to, icon: Icon }) => {
         const active = pathname === to || pathname.startsWith(`${to}/`);
+        const warm = () => prefetchNavRoute(queryClient, to);
         return (
           <Link
             key={to}
             to={to}
             preload="intent"
+            onMouseEnter={warm}
+            onFocus={warm}
+            onPointerDown={warm}
             onClick={onNavigate}
             title={collapsed ? label : undefined}
             className={cn(

@@ -35,6 +35,8 @@ import {
   saveCmsSettings,
 } from "@/lib/cms-settings";
 import { hasPermission } from "@/lib/rbac";
+import { prefetchNavRoute } from "@/lib/nav-prefetch";
+import { hasQueryClientContext } from "@/lib/router-preload";
 import {
   getOrganizationSettingsFn,
   updateBrandingSettingsFn,
@@ -64,6 +66,10 @@ type BrandingSlot =
   | "waiting";
 
 export const Route = createFileRoute("/_shell/settings")({
+  loader: ({ context }) => {
+    if (typeof window === "undefined" || !hasQueryClientContext(context)) return;
+    prefetchNavRoute(context.queryClient, "/settings");
+  },
   head: () => ({
     meta: [
       { title: "Settings — E3 Digital Signage" },

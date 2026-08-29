@@ -20,9 +20,15 @@ import {
 import { cn } from "@/lib/utils";
 import { reportService } from "@/services";
 import { toCsv } from "@/lib/monitoring";
+import { prefetchNavRoute } from "@/lib/nav-prefetch";
+import { hasQueryClientContext } from "@/lib/router-preload";
 import type { AvailabilityRow, CampaignPerformanceRow, ProofOfPlayRow } from "@/types";
 
 export const Route = createFileRoute("/_shell/reports")({
+  loader: ({ context }) => {
+    if (typeof window === "undefined" || !hasQueryClientContext(context)) return;
+    prefetchNavRoute(context.queryClient, "/reports");
+  },
   head: () => ({
     meta: [
       { title: "Reports — E3 Digital Signage" },

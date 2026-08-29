@@ -30,11 +30,17 @@ import {
   adminMonitoringRefetchInterval,
   formatCloudStorageUsage,
 } from "@/lib/monitoring";
+import { prefetchNavRoute } from "@/lib/nav-prefetch";
+import { hasQueryClientContext } from "@/lib/router-preload";
 import { useIsClient } from "@/lib/use-is-client";
 import { useLiveMonitoring } from "@/lib/use-live-monitoring";
 import type { DashboardSummary } from "@/services/types";
 
 export const Route = createFileRoute("/_shell/dashboard")({
+  loader: ({ context }) => {
+    if (typeof window === "undefined" || !hasQueryClientContext(context)) return;
+    prefetchNavRoute(context.queryClient, "/dashboard");
+  },
   head: () => ({
     meta: [
       { title: "Dashboard — E3 Digital Signage" },

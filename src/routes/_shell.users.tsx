@@ -29,11 +29,17 @@ import { CreateUserDialog } from "@/features/users/CreateUserDialog";
 import { UserRowMenu } from "@/features/users/UserRowMenu";
 import { listLocationOptionsFn } from "@/lib/auth-functions";
 import { isProtectedSuperAdminEmail, requiresLocationAssignment } from "@/lib/location-scope";
+import { prefetchNavRoute } from "@/lib/nav-prefetch";
+import { hasQueryClientContext } from "@/lib/router-preload";
 import { getBrowserAccessToken } from "@/lib/supabase";
 import { userService } from "@/services";
 import type { User, UserRole } from "@/types";
 
 export const Route = createFileRoute("/_shell/users")({
+  loader: ({ context }) => {
+    if (typeof window === "undefined" || !hasQueryClientContext(context)) return;
+    prefetchNavRoute(context.queryClient, "/users");
+  },
   head: () => ({
     meta: [
       { title: "Users & Roles — E3 Digital Signage" },

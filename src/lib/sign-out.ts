@@ -61,7 +61,9 @@ async function signOutLocally(): Promise<void> {
 export async function completeSignOut(queryClient: QueryClient): Promise<void> {
   markSigningOut();
   const { clearShellAuth } = await import("./query-defaults.ts");
+  const { clearBrowserAccessTokenCache } = await import("./supabase.ts");
   clearShellAuth(queryClient);
+  clearBrowserAccessTokenCache();
   queryClient.clear();
   await signOutLocally();
   try {

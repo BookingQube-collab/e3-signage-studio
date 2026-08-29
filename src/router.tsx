@@ -15,7 +15,8 @@ export const getRouter = () => {
     defaultPreload: "intent",
     defaultStaleTime: AUTH_SESSION_STALE_MS,
     defaultPreloadStaleTime: AUTH_SESSION_STALE_MS,
-    defaultPendingMs: 200,
+    // Intent preload + data prefetch usually finish under this; avoid a flash spinner.
+    defaultPendingMs: 500,
     defaultPendingComponent: RoutePending,
   });
 

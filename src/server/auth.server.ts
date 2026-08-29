@@ -41,7 +41,7 @@ const MESSAGES: Record<Exclude<AuthFailure["code"], "UNAUTHENTICATED">, string> 
 };
 
 /** Avoid getUser + resolve_cms_profile on every sidebar list call (~2 PostgREST RTTs). */
-const AUTH_RESULT_TTL_MS = 45_000;
+const AUTH_RESULT_TTL_MS = 90_000;
 const AUTH_RESULT_CACHE_MAX = 200;
 const authResultCache = new Map<string, { at: number; result: Extract<AuthSessionResult, { ok: true }> }>();
 

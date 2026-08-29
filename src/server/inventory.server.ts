@@ -259,6 +259,7 @@ async function loadScreenRecords(
   client: ReturnType<typeof getUserClient>,
   organizationId: string,
   screens: ScreenDb[],
+  offlineThreshold?: number,
 ): Promise<ScreenRecord[]> {
   if (screens.length === 0) return [];
 
@@ -274,7 +275,9 @@ async function loadScreenRecords(
   ];
 
   const [threshold, locRes, memberRes, syncRes, playlistRes, mediaRes] = await Promise.all([
-    offlineAfterSeconds(client, organizationId),
+    offlineThreshold != null
+      ? Promise.resolve(offlineThreshold)
+      : offlineAfterSeconds(client, organizationId),
     client.from("locations").select("id, name").in("id", locationIds),
     client
       .from("screen_group_members")
@@ -395,6 +398,7 @@ async function loadLocationRecords(
   client: ReturnType<typeof getUserClient>,
   organizationId: string,
   rows: LocRow[],
+  offlineThreshold?: number,
 ): Promise<LocationRecord[]> {
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
@@ -404,7 +408,9 @@ async function loadLocationRecords(
       .select("location_id, operational_status, last_heartbeat_at, archived_at")
       .in("location_id", ids)
       .is("archived_at", null),
-    offlineAfterSeconds(client, organizationId),
+    offlineThreshold != null
+      ? Promise.resolve(offlineThreshold)
+      : offlineAfterSeconds(client, organizationId),
   ]);
   throwIfError(screensRes.error, "Could not load screens.");
   const screens = screensRes.data;
@@ -447,16 +453,20 @@ export async function listLocations(accessToken: string): Promise<LocationRecord
   const auth = await requireCmsPermission(accessToken, "locations.view");
   maybeSeed(auth);
   const client = getUserClient(accessToken);
-  const { data, error } = await client
-    .from("locations")
-    .select("id, name, short_name, type, status, city, created_at")
-    .eq("organization_id", auth.profile.organizationId)
-    .order("created_at", { ascending: true });
+  const [{ data, error }, threshold] = await Promise.all([
+    client
+      .from("locations")
+      .select("id, name, short_name, type, status, city, created_at")
+      .eq("organization_id", auth.profile.organizationId)
+      .order("created_at", { ascending: true }),
+    offlineAfterSeconds(client, auth.profile.organizationId),
+  ]);
   throwIfError(error, "Could not load locations.");
   const records = await loadLocationRecords(
     client,
     auth.profile.organizationId,
     (data ?? []) as LocRow[],
+    threshold,
   );
   return filterLocationsByScope(auth.profile, records);
 }
@@ -609,12 +619,16 @@ async function listScreenRows(accessToken: string, locationId?: string): Promise
     .is("archived_at", null)
     .order("created_at", { ascending: true });
   if (locationId) query = query.eq("location_id", locationId);
-  const { data, error } = await query;
+  const [{ data, error }, threshold] = await Promise.all([
+    query,
+    offlineAfterSeconds(client, auth.profile.organizationId),
+  ]);
   throwIfError(error, "Could not load screens.");
   const records = await loadScreenRecords(
     client,
     auth.profile.organizationId,
     (data ?? []) as ScreenDb[],
+    threshold,
   );
   return filterScreensByScope(auth.profile, records);
 }

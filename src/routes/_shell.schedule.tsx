@@ -14,9 +14,15 @@ import {
 } from "@/components/e3";
 import { cn } from "@/lib/utils";
 import { effectiveCampaignStatus, formatCampaignDateTime, isDatedSchedule } from "@/lib/campaign-window";
+import { prefetchNavRoute } from "@/lib/nav-prefetch";
+import { hasQueryClientContext } from "@/lib/router-preload";
 import { scheduleService } from "@/services";
 
 export const Route = createFileRoute("/_shell/schedule")({
+  loader: ({ context }) => {
+    if (typeof window === "undefined" || !hasQueryClientContext(context)) return;
+    prefetchNavRoute(context.queryClient, "/schedule");
+  },
   head: () => ({
     meta: [
       { title: "Schedule — E3 Digital Signage" },

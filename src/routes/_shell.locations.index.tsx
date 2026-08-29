@@ -14,11 +14,17 @@ import {
 import { LocationFormDialog } from "@/features/locations/LocationFormDialog";
 import { LocationRowMenu } from "@/features/locations/LocationRowMenu";
 import { NO_LOCATION_ACCESS_MESSAGE } from "@/lib/location-scope";
+import { prefetchNavRoute } from "@/lib/nav-prefetch";
+import { hasQueryClientContext } from "@/lib/router-preload";
 import { cn } from "@/lib/utils";
 import { locationService } from "@/services";
 import type { Location } from "@/types";
 
 export const Route = createFileRoute("/_shell/locations/")({
+  loader: ({ context }) => {
+    if (typeof window === "undefined" || !hasQueryClientContext(context)) return;
+    prefetchNavRoute(context.queryClient, "/locations");
+  },
   head: () => ({
     meta: [
       { title: "Locations — E3 Digital Signage" },
