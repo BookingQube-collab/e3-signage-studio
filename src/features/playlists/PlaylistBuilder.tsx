@@ -59,6 +59,8 @@ export function PlaylistBuilder({
       void qc.invalidateQueries({ queryKey: ["playlist"] });
       void qc.invalidateQueries({ queryKey: ["screens"] });
       void qc.invalidateQueries({ queryKey: ["campaigns"] });
+      // Media cards cache usedIn; stale playlist membership must not block folder deletes.
+      void qc.invalidateQueries({ queryKey: ["media"] });
       toast.success(
         p.usedByScreens > 0
           ? `${p.name} saved · live screens will download the updated loop`
@@ -78,6 +80,7 @@ export function PlaylistBuilder({
       void qc.invalidateQueries({ queryKey: ["playlists"] });
       void qc.invalidateQueries({ queryKey: ["playlist"] });
       void qc.invalidateQueries({ queryKey: ["screens"] });
+      void qc.invalidateQueries({ queryKey: ["media"] });
       toast.success(`${playlist.name || "Playlist"} deleted`);
       setDeleteOpen(false);
       void navigate({ to: "/playlists" });

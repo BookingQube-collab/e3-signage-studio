@@ -14,7 +14,7 @@ export type PlaylistUsageRow = {
 };
 
 /**
- * Live usage is any playlist still in the library (draft/active/scheduled).
+ * Non-archived library playlists (draft/active/scheduled).
  * Archived or soft-deleted playlists must not block media delete.
  */
 export function isLivePlaylistStatus(
@@ -23,6 +23,28 @@ export function isLivePlaylistStatus(
 ): boolean {
   if (typeof archivedAt === "string" && archivedAt.length > 0) return false;
   return (status ?? "").toUpperCase() !== "ARCHIVED";
+}
+
+/**
+ * Media delete is blocked only when a non-archived playlist still holds the file
+ * AND that playlist is assigned to a screen or a non-archived campaign.
+ * Orphan draft/active playlists in the library alone must not block delete.
+ */
+export function blockingLivePlaylistIds(
+  playlists: PlaylistUsageRow[],
+  linkedPlaylistIds: Iterable<string>,
+): Set<string> {
+  const linked = new Set(
+    [...linkedPlaylistIds].filter((id): id is string => typeof id === "string" && id.length > 0),
+  );
+  const ids = new Set<string>();
+  for (const playlist of playlists) {
+    if (!playlist.id) continue;
+    if (!isLivePlaylistStatus(playlist.status, playlist.archived_at)) continue;
+    if (!linked.has(playlist.id)) continue;
+    ids.add(playlist.id);
+  }
+  return ids;
 }
 
 export function liveUsagePlaylistNames(playlists: PlaylistUsageRow[]): string[] {

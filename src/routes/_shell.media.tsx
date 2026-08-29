@@ -555,9 +555,15 @@ function MediaPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [overlayOpen]);
 
-  const loading = !isClient || mediaQuery.isPending;
+  const loading = !isClient || mediaQuery.isPending || foldersQuery.isPending;
   const errored = mediaQuery.isError || foldersQuery.isError;
-  const empty = visibleFolders.length === 0 && items.length === 0;
+  // Root view only lists folders + unfiled files. All production files live in folders, so
+  // treating folders as still-loading as "empty" flashes a blank library.
+  const empty =
+    !foldersQuery.isPending &&
+    !mediaQuery.isPending &&
+    visibleFolders.length === 0 &&
+    items.length === 0;
   const selectionActive = selectedIds.size > 0;
   const mediaBusy =
     rename.isPending || replace.isPending || download.isPending || archive.isPending || remove.isPending;
@@ -587,7 +593,18 @@ function MediaPage() {
             {currentFolder && !searching ? (
               <E3Button
                 variant="outline"
-                onClick={() => setDeleteFolderTarget(currentFolder)}
+                onClick={() => {
+                  const target = currentFolder;
+                  void (async () => {
+                    try {
+                      // Refresh usedIn before the delete plan so playlist edits are not stale.
+                      await mediaQuery.refetch();
+                    } catch {
+                      // Still open the dialog; server re-checks on confirm.
+                    }
+                    setDeleteFolderTarget(target);
+                  })();
+                }}
               >
                 Delete folder
               </E3Button>

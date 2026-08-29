@@ -16,6 +16,7 @@ import {
 import type { MediaFolderRecord, MediaRecord } from "@/services/media-map";
 import {
   assertBulkDeleteAllowed,
+  blockingLivePlaylistIds,
   liveUsagePlaylistIds,
   MAX_BULK_MEDIA_IDS,
 } from "../lib/media-bulk";
@@ -240,31 +241,53 @@ async function loadUsedIn(
     ...new Set((itemRows ?? []).map((row) => asString((row as { playlist_id: string }).playlist_id))),
   ].filter(Boolean);
 
-  const [{ data: playlists }, { data: campaigns }, { data: screens }] = await Promise.all([
-    playlistIds.length > 0
-      ? client.from("playlists").select("id, name, status, archived_at").in("id", playlistIds)
-      : Promise.resolve({
-          data: [] as Array<{ id: string; name: string; status: string; archived_at: string | null }>,
-        }),
-    playlistIds.length > 0
-      ? client
-          .from("campaigns")
-          .select("id, name, playlist_id")
-          .in("playlist_id", playlistIds)
-          .is("archived_at", null)
-      : Promise.resolve({
-          data: [] as Array<{ id: string; name: string; playlist_id: string }>,
-        }),
-    client.from("screens").select("name, currently_playing_media_id").in("currently_playing_media_id", mediaIds),
-  ]);
+  const [{ data: playlists }, { data: campaigns }, { data: playingScreens }, { data: assignedScreens }] =
+    await Promise.all([
+      playlistIds.length > 0
+        ? client.from("playlists").select("id, name, status, archived_at").in("id", playlistIds)
+        : Promise.resolve({
+            data: [] as Array<{ id: string; name: string; status: string; archived_at: string | null }>,
+          }),
+      playlistIds.length > 0
+        ? client
+            .from("campaigns")
+            .select("id, name, playlist_id")
+            .in("playlist_id", playlistIds)
+            .is("archived_at", null)
+        : Promise.resolve({
+            data: [] as Array<{ id: string; name: string; playlist_id: string }>,
+          }),
+      client
+        .from("screens")
+        .select("name, currently_playing_media_id")
+        .in("currently_playing_media_id", mediaIds),
+      playlistIds.length > 0
+        ? client
+            .from("screens")
+            .select("current_playlist_id")
+            .in("current_playlist_id", playlistIds)
+            .is("archived_at", null)
+        : Promise.resolve({ data: [] as Array<{ current_playlist_id: string }> }),
+    ]);
 
-  const livePlaylistIds = liveUsagePlaylistIds(
+  const linkedPlaylistIds = new Set<string>();
+  for (const row of campaigns ?? []) {
+    const id = asString((row as { playlist_id: string }).playlist_id);
+    if (id) linkedPlaylistIds.add(id);
+  }
+  for (const row of assignedScreens ?? []) {
+    const id = asString((row as { current_playlist_id: string }).current_playlist_id);
+    if (id) linkedPlaylistIds.add(id);
+  }
+
+  const livePlaylistIds = blockingLivePlaylistIds(
     (playlists ?? []).map((row) => ({
       id: asString((row as { id: string }).id),
       name: asString((row as { name: string }).name),
       status: asString((row as { status: string }).status),
       archived_at: asNullableString((row as { archived_at: string | null }).archived_at),
     })),
+    linkedPlaylistIds,
   );
   const playlistName = new Map<string, string>();
   for (const row of playlists ?? []) {
@@ -290,7 +313,7 @@ async function loadUsedIn(
       if (entry && name && !entry.campaigns.includes(name)) entry.campaigns.push(name);
     }
   }
-  for (const row of screens ?? []) {
+  for (const row of playingScreens ?? []) {
     const mediaId = asString((row as { currently_playing_media_id: string }).currently_playing_media_id);
     const name = asString((row as { name: string }).name);
     const entry = map.get(mediaId);

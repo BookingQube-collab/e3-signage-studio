@@ -28,6 +28,7 @@ export function PlaylistRowMenu({ playlist }: { playlist: Playlist }) {
       void qc.invalidateQueries({ queryKey: ["playlist", playlist.id] });
       void qc.invalidateQueries({ queryKey: ["screens"] });
       void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      void qc.invalidateQueries({ queryKey: ["media"] });
       toast.success(`${playlist.name} deleted`);
     },
     onError: (err) => {

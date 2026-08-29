@@ -6,6 +6,7 @@ import {
   applyBulkFolderMove,
   applySelectionClick,
   assertBulkDeleteAllowed,
+  blockingLivePlaylistIds,
   inUseDeleteMessage,
   isLivePlaylistStatus,
   liveUsagePlaylistIds,
@@ -141,6 +142,17 @@ test("archived and deleted playlists do not count as live usage", () => {
   assert.doesNotThrow(() => assertBulkDeleteAllowed(blocked));
 });
 
+test("orphan library playlists do not block media delete without a screen or campaign link", () => {
+  const playlists = [
+    { id: "p-draft", name: "Draft only", status: "DRAFT", archived_at: null },
+    { id: "p-live", name: "Test Rajan Room", status: "ACTIVE", archived_at: null },
+    { id: "p-old", name: "Archived Room", status: "ARCHIVED", archived_at: "2026-08-27T00:00:00Z" },
+  ];
+  assert.deepEqual([...blockingLivePlaylistIds(playlists, [])], []);
+  assert.deepEqual([...blockingLivePlaylistIds(playlists, ["p-draft"])], ["p-draft"]);
+  assert.deepEqual([...blockingLivePlaylistIds(playlists, ["p-live", "p-old"])], ["p-live"]);
+  assert.deepEqual([...blockingLivePlaylistIds(playlists, ["p-missing"])], []);
+});
 test("bulk delete is blocked when a file is in a live playlist, naming that playlist", () => {
   const { deletable, blocked, playlistNames } = partitionBulkDelete(items, ["m-wire", "m-rajan"]);
   assert.deepEqual(
