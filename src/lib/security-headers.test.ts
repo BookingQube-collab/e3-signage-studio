@@ -9,6 +9,7 @@ test("admin responses advertise HSTS, CSP, and clickjacking protections", () => 
   assert.equal(SECURITY_HEADERS["X-Content-Type-Options"], "nosniff");
   const csp = SECURITY_HEADERS["Content-Security-Policy"] ?? "";
   assert.match(csp, /frame-ancestors 'none'/);
+  assert.match(csp, /frame-src 'self' https:\/\/vercel\.live/);
   assert.match(csp, /upgrade-insecure-requests/);
   assert.match(csp, /https:\/\/vercel\.live/);
   assert.match(csp, /https:\/\/\*\.supabase\.co/);
