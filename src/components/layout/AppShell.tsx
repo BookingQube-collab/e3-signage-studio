@@ -12,13 +12,13 @@ import {
   Megaphone,
   Menu,
   Monitor,
-  Search,
   Settings,
   Users,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { useCmsLogoSrc } from "@/components/branding/CmsBranding";
+import { GlobalSearch } from "@/components/layout/GlobalSearch";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -29,7 +29,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import type { CmsProfile } from "@/lib/auth-types";
 import { prefetchNavRoute } from "@/lib/nav-prefetch";
@@ -222,18 +221,7 @@ export function AppShell({
           </Sheet>
 
           <div className="hidden min-w-0 flex-1 items-center md:flex">
-            <div className="relative w-full max-w-sm">
-              <Search
-                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-                aria-hidden
-              />
-              <Input
-                type="search"
-                placeholder="Search screens, media, campaigns…"
-                aria-label="Global search"
-                className="h-10 rounded-xl border-border bg-card pl-9"
-              />
-            </div>
+            <GlobalSearch profile={profile} />
           </div>
 
           <div className="flex flex-1 items-center justify-end gap-2 sm:gap-3 md:flex-none">
