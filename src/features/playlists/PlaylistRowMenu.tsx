@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { playlistService } from "@/services";
+import { invalidateKeysInBackground, removeById } from "@/lib/query-cache";
 import type { Playlist } from "@/types";
 
 export function PlaylistRowMenu({ playlist }: { playlist: Playlist }) {
@@ -24,12 +25,12 @@ export function PlaylistRowMenu({ playlist }: { playlist: Playlist }) {
     mutationFn: () => playlistService.remove(playlist.id),
     onSuccess: () => {
       setConfirmDelete(false);
-      void qc.invalidateQueries({ queryKey: ["playlists"] });
-      void qc.invalidateQueries({ queryKey: ["playlist", playlist.id] });
-      void qc.invalidateQueries({ queryKey: ["screens"] });
-      void qc.invalidateQueries({ queryKey: ["dashboard"] });
-      void qc.invalidateQueries({ queryKey: ["media"] });
+      qc.setQueryData(["playlists"], (prev: Playlist[] | undefined) =>
+        removeById(Array.isArray(prev) ? prev : [], playlist.id),
+      );
+      qc.removeQueries({ queryKey: ["playlist", playlist.id] });
       toast.success(`${playlist.name} deleted`);
+      invalidateKeysInBackground(qc, [["screens"], ["dashboard"], ["media"]]);
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Could not delete playlist.");

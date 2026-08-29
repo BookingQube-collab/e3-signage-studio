@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DEFAULT_PUBLIC_CMS_URL, getPublicCmsUrl } from "@/lib/cms-settings";
 import { pairingCodeDigits } from "@/lib/pairing-code";
+import { invalidateKeysInBackground, writeEntityCache } from "@/lib/query-cache";
 import { screenService } from "@/services";
 
 export function RepairScreenDialog({
@@ -35,12 +36,14 @@ export function RepairScreenDialog({
   const repair = useMutation({
     mutationFn: (pairingCode: string) => screenService.repair(screenId, pairingCode),
     onSuccess: (screen) => {
-      void qc.invalidateQueries({ queryKey: ["screen", screenId] });
-      void qc.invalidateQueries({ queryKey: ["screens"] });
-      void qc.invalidateQueries({ queryKey: ["locations"] });
-      void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      writeEntityCache(qc, {
+        detailKey: ["screen", screenId],
+        listKey: ["screens"],
+        entity: screen,
+      });
       toast.success(`${screen.name} is waiting for the player to connect`);
       onOpenChange(false);
+      invalidateKeysInBackground(qc, [["locations"], ["dashboard"]]);
     },
     onError: (err: Error) => {
       toast.error(err.message || "Could not repair screen");

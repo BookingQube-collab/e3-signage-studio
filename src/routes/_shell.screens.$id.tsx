@@ -27,6 +27,7 @@ import { playlistService, screenService } from "@/services";
 import { NO_LOCATION_ACCESS_MESSAGE } from "@/lib/location-scope";
 import { adminMonitoringRefetchInterval } from "@/lib/monitoring";
 import { bindPreviewClips } from "@/lib/playlist-preview";
+import { invalidateKeysInBackground, writeEntityCache } from "@/lib/query-cache";
 import { useLiveMonitoring } from "@/lib/use-live-monitoring";
 import { PlaylistLoopPreview } from "@/features/playlists/PlaylistLoopPreview";
 import { EditScreenDialog } from "@/features/screens/EditScreenDialog";
@@ -83,8 +84,7 @@ function ScreenDetailPage() {
   useLiveMonitoring([["screen", id], ["screens"], ["screen-logs", id]]);
 
   const invalidate = () => {
-    void qc.invalidateQueries({ queryKey: ["screen", id] });
-    void qc.invalidateQueries({ queryKey: ["screens"] });
+    invalidateKeysInBackground(qc, [["screen", id], ["screens"]]);
   };
 
   const sync = useMutation({
@@ -108,10 +108,15 @@ function ScreenDetailPage() {
         syncProgress: 0,
       });
     },
-    onSuccess: () => {
-      invalidate();
+    onSuccess: (next) => {
+      writeEntityCache(qc, {
+        detailKey: ["screen", id],
+        listKey: ["screens"],
+        entity: next,
+      });
       setPlaylistOpen(false);
       toast.success("Playlist changed");
+      invalidateKeysInBackground(qc, [["playlist", next.playlistId]]);
     },
     onError: (err: Error) => {
       toast.error(err.message || "Could not change playlist");
@@ -123,8 +128,12 @@ function ScreenDetailPage() {
       screenService.update(id, {
         status: screenQuery.data?.status === "disabled" ? "online" : "disabled",
       }),
-    onSuccess: () => {
-      invalidate();
+    onSuccess: (next) => {
+      writeEntityCache(qc, {
+        detailKey: ["screen", id],
+        listKey: ["screens"],
+        entity: next,
+      });
       toast.success("Screen updated");
     },
     onError: (err: Error) => {
@@ -136,7 +145,7 @@ function ScreenDetailPage() {
     mutationFn: () => screenService.unpair(id),
     onSuccess: () => {
       invalidate();
-      void qc.invalidateQueries({ queryKey: ["locations"] });
+      invalidateKeysInBackground(qc, [["locations"]]);
       toast.success("Screen unpaired");
       void navigate({ to: "/screens" });
     },

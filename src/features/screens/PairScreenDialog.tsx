@@ -14,8 +14,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { DEFAULT_PUBLIC_CMS_URL, getPublicCmsUrl } from "@/lib/cms-settings";
+import { invalidateKeysInBackground, upsertById, writeEntityCache } from "@/lib/query-cache";
 import { locationService, screenGroupService, screenService } from "@/services";
-import type { Orientation } from "@/types";
+import type { Orientation, Screen } from "@/types";
 
 export function PairScreenDialog({
   open,
@@ -50,18 +51,26 @@ export function PairScreenDialog({
   const pair = useMutation({
     mutationFn: screenService.pair,
     onSuccess: (screen) => {
-      qc.setQueryData(["screen", screen.id], screen);
-      void qc.invalidateQueries({ queryKey: ["screen", screen.id] });
-      void qc.invalidateQueries({ queryKey: ["screens"] });
-      void qc.invalidateQueries({ queryKey: ["location", screen.locationId] });
-      void qc.invalidateQueries({ queryKey: ["locations"] });
-      void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      writeEntityCache(qc, {
+        detailKey: ["screen", screen.id],
+        listKey: ["screens"],
+        entity: screen,
+      });
+      qc.setQueryData(["screens", "location", screen.locationId], (prev: Screen[] | undefined) =>
+        upsertById(Array.isArray(prev) ? prev : [], screen),
+      );
       toast.success(`${screen.name} paired`);
       reset();
       onOpenChange(false);
       if (!defaultLocationId) {
         void navigate({ to: "/screens/$id", params: { id: screen.id } });
       }
+      invalidateKeysInBackground(qc, [
+        ["screens"],
+        ["location", screen.locationId],
+        ["locations"],
+        ["dashboard"],
+      ]);
     },
     onError: (err: Error) => {
       toast.error(err.message || "Could not pair screen");

@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { screenGroupService, screenService } from "@/services";
+import { invalidateKeysInBackground, writeEntityCache } from "@/lib/query-cache";
 import type { Orientation, Screen } from "@/types";
 
 const SCREEN_TYPES = ["Smart TV", "LED Wall", "Kiosk", "Projector", "Tablet"] as const;
@@ -69,15 +70,19 @@ export function EditScreenDialog({
         groupIds: form.groupIds,
       }),
     onSuccess: (next) => {
-      void qc.invalidateQueries({ queryKey: ["screen", screen.id] });
-      void qc.invalidateQueries({ queryKey: ["screens"] });
-      void qc.invalidateQueries({ queryKey: ["screen-groups"] });
-      void qc.invalidateQueries({ queryKey: ["location", screen.locationId] });
-      void qc.invalidateQueries({ queryKey: ["locations"] });
-      void qc.invalidateQueries({ queryKey: ["dashboard"] });
-      qc.setQueryData(["screen", screen.id], next);
+      writeEntityCache(qc, {
+        detailKey: ["screen", screen.id],
+        listKey: ["screens"],
+        entity: next,
+      });
       toast.success(`${next.name} updated`);
       onOpenChange(false);
+      invalidateKeysInBackground(qc, [
+        ["screen-groups"],
+        ["location", screen.locationId],
+        ["locations"],
+        ["dashboard"],
+      ]);
     },
     onError: (err: Error) => {
       toast.error(err.message || "Could not update screen");

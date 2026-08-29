@@ -32,6 +32,7 @@ import {
 } from "@/lib/campaign-window";
 import { campaignService, locationService, screenService } from "@/services";
 import { NO_LOCATION_ACCESS_MESSAGE } from "@/lib/location-scope";
+import { invalidateKeysInBackground, writeEntityCache } from "@/lib/query-cache";
 import { hasPermission } from "@/lib/rbac";
 import type { Campaign } from "@/types";
 
@@ -84,10 +85,14 @@ function LocationDetailPage() {
     mutationFn: (input: Parameters<typeof locationService.update>[1]) =>
       locationService.update(id, input),
     onSuccess: (loc) => {
-      void qc.invalidateQueries({ queryKey: ["location", id] });
-      void qc.invalidateQueries({ queryKey: ["locations"] });
+      writeEntityCache(qc, {
+        detailKey: ["location", id],
+        listKey: ["locations"],
+        entity: loc,
+      });
       toast.success(`${loc.name} updated`);
       setEditOpen(false);
+      invalidateKeysInBackground(qc, [["location", id], ["locations"]]);
     },
     onError: (err: Error) => {
       toast.error(err.message || "Could not update location");
@@ -97,9 +102,7 @@ function LocationDetailPage() {
   const remove = useMutation({
     mutationFn: () => locationService.remove(id),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["locations"] });
-      void qc.invalidateQueries({ queryKey: ["screens"] });
-      void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      invalidateKeysInBackground(qc, [["locations"], ["screens"], ["dashboard"]]);
       toast.success(`${location?.name ?? "Location"} deleted`);
       setDeleteOpen(false);
       void navigate({ to: "/locations" });

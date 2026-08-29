@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { isProtectedSuperAdminEmail } from "@/lib/location-scope";
+import { removeById, writeEntityCache } from "@/lib/query-cache";
 import { userService } from "@/services";
 import type { User } from "@/types";
 
@@ -40,7 +41,11 @@ export function UserRowMenu({
       userService.save({ ...user, status: disabled ? "Active" : "Disabled" }),
     onSuccess: (next) => {
       setConfirm(false);
-      void qc.invalidateQueries({ queryKey: ["users"] });
+      writeEntityCache(qc, {
+        detailKey: ["user", next.id],
+        listKey: ["users"],
+        entity: next,
+      });
       toast.success(next.status === "Disabled" ? `${next.name} disabled` : `${next.name} enabled`);
     },
     onError: (err) => {
@@ -52,7 +57,9 @@ export function UserRowMenu({
     mutationFn: () => userService.remove(user.id),
     onSuccess: () => {
       setConfirmDelete(false);
-      void qc.invalidateQueries({ queryKey: ["users"] });
+      qc.setQueryData(["users"], (prev: User[] | undefined) =>
+        removeById(Array.isArray(prev) ? prev : [], user.id),
+      );
       toast.success(`${user.name} deleted`);
     },
     onError: (err) => {

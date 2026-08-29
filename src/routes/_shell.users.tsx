@@ -30,6 +30,7 @@ import { UserRowMenu } from "@/features/users/UserRowMenu";
 import { listLocationOptionsFn } from "@/lib/auth-functions";
 import { isProtectedSuperAdminEmail, requiresLocationAssignment } from "@/lib/location-scope";
 import { prefetchNavRoute } from "@/lib/nav-prefetch";
+import { writeEntityCache } from "@/lib/query-cache";
 import { hasQueryClientContext } from "@/lib/router-preload";
 import { getBrowserAccessToken } from "@/lib/supabase";
 import { userService } from "@/services";
@@ -110,8 +111,12 @@ function UsersPage() {
 
   const saveUser = useMutation({
     mutationFn: (user: User) => userService.save(user),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["users"] });
+    onSuccess: (next) => {
+      writeEntityCache(qc, {
+        detailKey: ["user", next.id],
+        listKey: ["users"],
+        entity: next,
+      });
       setEditing(null);
       toast.success("User updated");
     },

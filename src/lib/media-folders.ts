@@ -238,6 +238,39 @@ export function applyFolderMove<T extends { id: string; folderId: string | null;
   );
 }
 
+/** Optimistic bulk move: patch folder fields and adjust folder file counts. */
+export function applyMovedMediaBulk<
+  TMedia extends { id: string; folderId: string | null; folderName?: string | null },
+  TFolder extends { id: string; fileCount: number },
+>(
+  media: TMedia[],
+  folders: TFolder[],
+  ids: string[],
+  folderId: string | null,
+  folderName: string | null,
+): { media: TMedia[]; folders: TFolder[] } {
+  const idSet = new Set(ids);
+  const deltas = new Map<string, number>();
+  const nextMedia = media.map((item) => {
+    if (!idSet.has(item.id)) return item;
+    if (item.folderId === folderId) {
+      return { ...item, folderName: folderName ?? item.folderName ?? null };
+    }
+    if (item.folderId) {
+      deltas.set(item.folderId, (deltas.get(item.folderId) ?? 0) - 1);
+    }
+    if (folderId) {
+      deltas.set(folderId, (deltas.get(folderId) ?? 0) + 1);
+    }
+    return { ...item, folderId, folderName };
+  });
+  let nextFolders = folders;
+  for (const [id, delta] of deltas) {
+    nextFolders = bumpFolderFileCount(nextFolders, id, delta);
+  }
+  return { media: nextMedia, folders: nextFolders };
+}
+
 export function createFolderRecord(
   existingNames: string[],
   name: string,

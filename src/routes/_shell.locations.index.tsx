@@ -15,6 +15,7 @@ import { LocationFormDialog } from "@/features/locations/LocationFormDialog";
 import { LocationRowMenu } from "@/features/locations/LocationRowMenu";
 import { NO_LOCATION_ACCESS_MESSAGE } from "@/lib/location-scope";
 import { prefetchNavRoute } from "@/lib/nav-prefetch";
+import { invalidateKeysInBackground, writeEntityCache } from "@/lib/query-cache";
 import { hasQueryClientContext } from "@/lib/router-preload";
 import { cn } from "@/lib/utils";
 import { locationService } from "@/services";
@@ -61,10 +62,15 @@ function LocationsPage() {
   const create = useMutation({
     mutationFn: locationService.create,
     onSuccess: (loc) => {
-      void qc.invalidateQueries({ queryKey: ["locations"] });
+      writeEntityCache(qc, {
+        detailKey: ["location", loc.id],
+        listKey: ["locations"],
+        entity: loc,
+      });
       toast.success(`${loc.name} added`);
       setOpen(false);
       void navigate({ to: "/locations/$id", params: { id: loc.id } });
+      invalidateKeysInBackground(qc, [["locations"], ["dashboard"]]);
     },
     onError: (err: Error) => {
       toast.error(err.message || "Could not add location");
@@ -77,10 +83,14 @@ function LocationsPage() {
       return locationService.update(editing.id, input);
     },
     onSuccess: (loc) => {
-      void qc.invalidateQueries({ queryKey: ["locations"] });
-      void qc.invalidateQueries({ queryKey: ["location", loc.id] });
+      writeEntityCache(qc, {
+        detailKey: ["location", loc.id],
+        listKey: ["locations"],
+        entity: loc,
+      });
       toast.success(`${loc.name} updated`);
       setEditing(null);
+      invalidateKeysInBackground(qc, [["locations"], ["location", loc.id]]);
     },
     onError: (err: Error) => {
       toast.error(err.message || "Could not update location");

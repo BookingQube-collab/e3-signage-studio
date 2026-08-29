@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { layoutService } from "@/services";
+import { removeById } from "@/lib/query-cache";
 import type { Layout } from "@/types";
 
 export function LayoutRowMenu({ layout }: { layout: Layout }) {
@@ -24,8 +25,10 @@ export function LayoutRowMenu({ layout }: { layout: Layout }) {
     mutationFn: () => layoutService.remove(layout.id),
     onSuccess: () => {
       setConfirmDelete(false);
-      void qc.invalidateQueries({ queryKey: ["layouts"] });
-      void qc.invalidateQueries({ queryKey: ["layout", layout.id] });
+      qc.setQueryData(["layouts"], (prev: Layout[] | undefined) =>
+        removeById(Array.isArray(prev) ? prev : [], layout.id),
+      );
+      qc.removeQueries({ queryKey: ["layout", layout.id] });
       toast.success(`${layout.name} deleted`);
     },
     onError: (err) => {

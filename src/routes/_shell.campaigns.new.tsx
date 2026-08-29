@@ -19,6 +19,7 @@ import { TargetSelector } from "@/features/campaigns/TargetSelector";
 import { CampaignContentPreview } from "@/features/campaigns/CampaignContentPreview";
 import { cn } from "@/lib/utils";
 import { isEvergreenSchedule } from "@/lib/campaign-window";
+import { invalidateKeysInBackground, writeEntityCache } from "@/lib/query-cache";
 import { addDaysIso, localIsoDate } from "@/lib/schedule-days";
 import { campaignService, layoutService, locationService, playlistService, screenService } from "@/services";
 import type { Campaign } from "@/types";
@@ -155,10 +156,14 @@ function NewCampaignPage() {
   const save = useMutation({
     mutationFn: campaignService.save,
     onSuccess: (c) => {
+      writeEntityCache(qc, {
+        detailKey: ["campaign", c.id],
+        listKey: ["campaigns"],
+        entity: c,
+      });
       toast.success("Draft saved");
-      void qc.invalidateQueries({ queryKey: ["campaigns"] });
-      void qc.invalidateQueries({ queryKey: ["schedule"] });
       void navigate({ to: "/campaigns/$id", params: { id: c.id } });
+      invalidateKeysInBackground(qc, [["schedule"]]);
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Could not save draft.");
@@ -173,13 +178,18 @@ function NewCampaignPage() {
     },
     onSuccess: (c) => {
       setProgress(100);
+      writeEntityCache(qc, {
+        detailKey: ["campaign", c.id],
+        listKey: ["campaigns"],
+        entity: c,
+      });
       toast.success(liveEdit ? "Campaign updated" : "Campaign published");
-      void qc.invalidateQueries({ queryKey: ["campaigns"] });
-      void qc.invalidateQueries({ queryKey: ["campaign", c.id] });
-      void qc.invalidateQueries({ queryKey: ["campaign-sync", c.id] });
-      void qc.invalidateQueries({ queryKey: ["schedule"] });
-      void qc.invalidateQueries({ queryKey: ["dashboard"] });
       void navigate({ to: "/campaigns/$id", params: { id: c.id } });
+      invalidateKeysInBackground(qc, [
+        ["campaign-sync", c.id],
+        ["schedule"],
+        ["dashboard"],
+      ]);
     },
     onError: (err) => {
       setPublishing(false);

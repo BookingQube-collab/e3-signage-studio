@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { hasPermission } from "@/lib/rbac";
+import { invalidateKeysInBackground, removeById, writeEntityCache } from "@/lib/query-cache";
 import { isUuid } from "@/services/inventory-map";
 import { layoutService, mediaService } from "@/services";
 import { LayoutCanvas, mediaForRef } from "@/features/layouts/LayoutCanvas";
@@ -170,8 +171,11 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
   const save = useMutation({
     mutationFn: layoutService.save,
     onSuccess: (l) => {
-      void qc.invalidateQueries({ queryKey: ["layouts"] });
-      void qc.invalidateQueries({ queryKey: ["layout"] });
+      writeEntityCache(qc, {
+        detailKey: ["layout", l.id],
+        listKey: ["layouts"],
+        entity: l,
+      });
       toast.success(`${l.name || "Layout"} saved`);
       void navigate({ to: "/layouts" });
     },
@@ -183,11 +187,14 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
   const remove = useMutation({
     mutationFn: () => layoutService.remove(layout.id),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["layouts"] });
-      void qc.invalidateQueries({ queryKey: ["layout"] });
+      qc.setQueryData(["layouts"], (prev: Layout[] | undefined) =>
+        removeById(Array.isArray(prev) ? prev : [], layout.id),
+      );
+      qc.removeQueries({ queryKey: ["layout", layout.id] });
       toast.success(`${layout.name || "Layout"} deleted`);
       setDeleteOpen(false);
       void navigate({ to: "/layouts" });
+      invalidateKeysInBackground(qc, [["layouts"]]);
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Could not delete layout.");

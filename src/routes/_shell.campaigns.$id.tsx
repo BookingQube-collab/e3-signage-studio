@@ -19,7 +19,9 @@ import { SyncStatusPanel } from "@/features/campaigns/SyncStatusPanel";
 import { effectiveCampaignStatus, formatCampaignWindowLabel, isEvergreenSchedule } from "@/lib/campaign-window";
 import { campaignService } from "@/services";
 import { NO_LOCATION_ACCESS_MESSAGE } from "@/lib/location-scope";
+import { invalidateKeysInBackground, removeById, writeEntityCache } from "@/lib/query-cache";
 import { hasPermission } from "@/lib/rbac";
+import type { Campaign } from "@/types";
 
 export const Route = createFileRoute("/_shell/campaigns/$id")({
   head: () => ({
@@ -58,11 +60,13 @@ function CampaignDetailPage() {
       return campaignService.save({ ...data, status: "Paused" });
     },
     onSuccess: (c) => {
-      void qc.invalidateQueries({ queryKey: ["campaign", id] });
-      void qc.invalidateQueries({ queryKey: ["campaigns"] });
-      void qc.invalidateQueries({ queryKey: ["campaign-sync", id] });
-      void qc.invalidateQueries({ queryKey: ["schedule"] });
+      writeEntityCache(qc, {
+        detailKey: ["campaign", id],
+        listKey: ["campaigns"],
+        entity: c,
+      });
       toast.success(c.status === "Paused" ? "Campaign stopped" : "Campaign resumed");
+      invalidateKeysInBackground(qc, [["campaign-sync", id], ["schedule"]]);
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Could not update campaign.");
@@ -72,12 +76,14 @@ function CampaignDetailPage() {
   const remove = useMutation({
     mutationFn: () => campaignService.remove(id),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["campaigns"] });
-      void qc.invalidateQueries({ queryKey: ["schedule"] });
-      void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.setQueryData(["campaigns"], (prev: Campaign[] | undefined) =>
+        removeById(Array.isArray(prev) ? prev : [], id),
+      );
+      qc.removeQueries({ queryKey: ["campaign", id] });
       toast.success("Campaign deleted. Screens stay paired.");
       setDeleteOpen(false);
       void navigate({ to: "/campaigns" });
+      invalidateKeysInBackground(qc, [["schedule"], ["dashboard"]]);
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Could not delete campaign.");

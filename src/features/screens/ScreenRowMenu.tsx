@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { EditScreenDialog } from "@/features/screens/EditScreenDialog";
 import { RepairScreenDialog } from "@/features/screens/RepairScreenDialog";
+import { invalidateKeysInBackground, removeById } from "@/lib/query-cache";
 import { screenService } from "@/services";
 import type { Screen } from "@/types";
 
@@ -26,11 +27,12 @@ export function ScreenRowMenu({ screen }: { screen: Screen }) {
     mutationFn: () => screenService.unpair(screen.id),
     onSuccess: () => {
       setConfirmDelete(false);
-      void qc.invalidateQueries({ queryKey: ["screens"] });
-      void qc.invalidateQueries({ queryKey: ["screen", screen.id] });
-      void qc.invalidateQueries({ queryKey: ["locations"] });
-      void qc.invalidateQueries({ queryKey: ["dashboard"] });
-      toast.success("Screen unpaired");
+      qc.setQueryData(["screens"], (prev: Screen[] | undefined) =>
+        removeById(Array.isArray(prev) ? prev : [], screen.id),
+      );
+      qc.removeQueries({ queryKey: ["screen", screen.id] });
+      toast.success(`${screen.name} deleted`);
+      invalidateKeysInBackground(qc, [["locations"], ["dashboard"]]);
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Could not unpair screen.");

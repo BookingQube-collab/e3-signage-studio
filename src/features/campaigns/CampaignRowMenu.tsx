@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { campaignService } from "@/services";
+import { invalidateKeysInBackground, removeById, writeEntityCache } from "@/lib/query-cache";
 import type { Campaign } from "@/types";
 
 export function CampaignRowMenu({ campaign }: { campaign: Campaign }) {
@@ -22,13 +23,18 @@ export function CampaignRowMenu({ campaign }: { campaign: Campaign }) {
 
   const stop = useMutation({
     mutationFn: () => campaignService.save({ ...campaign, status: "Paused" }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["campaigns"] });
-      void qc.invalidateQueries({ queryKey: ["campaign", campaign.id] });
-      void qc.invalidateQueries({ queryKey: ["campaign-sync", campaign.id] });
-      void qc.invalidateQueries({ queryKey: ["schedule"] });
-      void qc.invalidateQueries({ queryKey: ["dashboard"] });
+    onSuccess: (c) => {
+      writeEntityCache(qc, {
+        detailKey: ["campaign", campaign.id],
+        listKey: ["campaigns"],
+        entity: c,
+      });
       toast.success("Campaign stopped — it is no longer published to screens.");
+      invalidateKeysInBackground(qc, [
+        ["campaign-sync", campaign.id],
+        ["schedule"],
+        ["dashboard"],
+      ]);
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Could not stop campaign.");
@@ -38,12 +44,17 @@ export function CampaignRowMenu({ campaign }: { campaign: Campaign }) {
   const resume = useMutation({
     mutationFn: () => campaignService.publish({ ...campaign, status: "Active" }),
     onSuccess: (c) => {
-      void qc.invalidateQueries({ queryKey: ["campaigns"] });
-      void qc.invalidateQueries({ queryKey: ["campaign", campaign.id] });
-      void qc.invalidateQueries({ queryKey: ["campaign-sync", campaign.id] });
-      void qc.invalidateQueries({ queryKey: ["schedule"] });
-      void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      writeEntityCache(qc, {
+        detailKey: ["campaign", campaign.id],
+        listKey: ["campaigns"],
+        entity: c,
+      });
       toast.success(c.status === "Paused" ? "Campaign paused" : "Campaign resumed");
+      invalidateKeysInBackground(qc, [
+        ["campaign-sync", campaign.id],
+        ["schedule"],
+        ["dashboard"],
+      ]);
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Could not resume campaign.");
@@ -54,10 +65,12 @@ export function CampaignRowMenu({ campaign }: { campaign: Campaign }) {
     mutationFn: () => campaignService.remove(campaign.id),
     onSuccess: () => {
       setConfirmDelete(false);
-      void qc.invalidateQueries({ queryKey: ["campaigns"] });
-      void qc.invalidateQueries({ queryKey: ["schedule"] });
-      void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.setQueryData(["campaigns"], (prev: Campaign[] | undefined) =>
+        removeById(Array.isArray(prev) ? prev : [], campaign.id),
+      );
+      qc.removeQueries({ queryKey: ["campaign", campaign.id] });
       toast.success("Campaign deleted. Screens stay paired.");
+      invalidateKeysInBackground(qc, [["schedule"], ["dashboard"]]);
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Could not delete campaign.");

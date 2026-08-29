@@ -78,13 +78,13 @@ export function CreateUserDialog({
       });
     },
     onSuccess: (result) => {
-      void qc.invalidateQueries({ queryKey: ["users"] });
       onOpenChange(false);
       if (result.warning) {
         toast.warning(result.warning);
       } else {
         toast.success("Invitation sent");
       }
+      void qc.invalidateQueries({ queryKey: ["users"] });
     },
     onError: (err: Error) => {
       toast.error(err.message || "Could not send invite");
@@ -107,9 +107,9 @@ export function CreateUserDialog({
       });
     },
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["users"] });
       onOpenChange(false);
       toast.success("User created — they can sign in with username and password");
+      void qc.invalidateQueries({ queryKey: ["users"] });
     },
     onError: (err: Error) => {
       toast.error(err.message || "Could not create user");

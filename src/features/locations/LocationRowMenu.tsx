@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { locationService } from "@/services";
+import { invalidateKeysInBackground, removeById } from "@/lib/query-cache";
 import type { Location } from "@/types";
 
 export function LocationRowMenu({
@@ -30,11 +31,13 @@ export function LocationRowMenu({
     mutationFn: () => locationService.remove(location.id),
     onSuccess: () => {
       setConfirmDelete(false);
-      void qc.invalidateQueries({ queryKey: ["locations"] });
-      void qc.invalidateQueries({ queryKey: ["location", location.id] });
-      void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.setQueryData(["locations"], (prev: Location[] | undefined) =>
+        removeById(Array.isArray(prev) ? prev : [], location.id),
+      );
+      qc.removeQueries({ queryKey: ["location", location.id] });
       toast.success(`${location.name} deleted`);
       void navigate({ to: "/locations" });
+      invalidateKeysInBackground(qc, [["dashboard"], ["screens"]]);
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Could not delete location.");

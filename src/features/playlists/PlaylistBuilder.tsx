@@ -30,6 +30,7 @@ import { UI_TRANSITIONS, type Media, type Playlist, type PlaylistItem } from "@/
 import { bindPreviewClips, playlistItemThumbMedia } from "@/lib/playlist-preview";
 import { MediaPicker } from "@/features/media/MediaPicker";
 import { PlaylistLoopPreview } from "./PlaylistLoopPreview";
+import { invalidateKeysInBackground, removeById, writeEntityCache } from "@/lib/query-cache";
 
 export function PlaylistBuilder({
   initial,
@@ -55,19 +56,19 @@ export function PlaylistBuilder({
   const save = useMutation({
     mutationFn: playlistService.save,
     onSuccess: (p) => {
-      void qc.invalidateQueries({ queryKey: ["playlists"] });
-      void qc.invalidateQueries({ queryKey: ["playlist"] });
-      void qc.invalidateQueries({ queryKey: ["screens"] });
-      void qc.invalidateQueries({ queryKey: ["campaigns"] });
-      // Media cards cache usedIn; stale playlist membership must not block folder deletes.
-      void qc.invalidateQueries({ queryKey: ["media"] });
+      writeEntityCache(qc, {
+        detailKey: ["playlist", p.id],
+        listKey: ["playlists"],
+        entity: p,
+      });
       toast.success(
         p.usedByScreens > 0
           ? `${p.name} saved · live screens will download the updated loop`
           : `${p.name} saved`,
       );
-      // Match LayoutBuilder: leave the editor after a successful save.
       void navigate({ to: "/playlists" });
+      // Screens + campaigns may show playlist names; media usedIn must stay fresh for deletes.
+      invalidateKeysInBackground(qc, [["screens"], ["campaigns"], ["media"]]);
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Could not save playlist.");
@@ -77,13 +78,14 @@ export function PlaylistBuilder({
   const remove = useMutation({
     mutationFn: () => playlistService.remove(playlist.id),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["playlists"] });
-      void qc.invalidateQueries({ queryKey: ["playlist"] });
-      void qc.invalidateQueries({ queryKey: ["screens"] });
-      void qc.invalidateQueries({ queryKey: ["media"] });
+      qc.setQueryData(["playlists"], (prev: Playlist[] | undefined) =>
+        removeById(Array.isArray(prev) ? prev : [], playlist.id),
+      );
+      qc.removeQueries({ queryKey: ["playlist", playlist.id] });
       toast.success(`${playlist.name || "Playlist"} deleted`);
       setDeleteOpen(false);
       void navigate({ to: "/playlists" });
+      invalidateKeysInBackground(qc, [["screens"], ["media"], ["dashboard"]]);
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Could not delete playlist.");

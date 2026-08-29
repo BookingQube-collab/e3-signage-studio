@@ -5,6 +5,7 @@ import {
   FOLDER_DUPLICATE_MESSAGE,
   applyFolderCascadeDelete,
   applyFolderMove,
+  applyMovedMediaBulk,
   applyRenamedMedia,
   applyUploadedMedia,
   assertFolderName,
@@ -212,4 +213,16 @@ test("rename keeps the same id in the same folder", () => {
     { ...inflata, filename: "birthday.png" },
   );
   assert.equal(missing.some((item) => item.id === "m1"), true);
+});
+
+test("bulk move updates folder ids and file counts immediately", () => {
+  const folders = [
+    { id: "f-inflata", name: "InflataPark", fileCount: 1 },
+    { id: "f-office", name: "Rajan Office", fileCount: 1 },
+  ];
+  const moved = applyMovedMediaBulk(items, folders, ["m1", "m3"], "f-office", "Rajan Office");
+  assert.equal(moved.media.find((item) => item.id === "m1")?.folderId, "f-office");
+  assert.equal(moved.media.find((item) => item.id === "m3")?.folderId, "f-office");
+  assert.equal(moved.folders.find((folder) => folder.id === "f-inflata")?.fileCount, 0);
+  assert.equal(moved.folders.find((folder) => folder.id === "f-office")?.fileCount, 3);
 });

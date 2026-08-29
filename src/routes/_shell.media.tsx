@@ -44,6 +44,7 @@ import {
 import { ACCEPT_MEDIA } from "@/lib/media-file";
 import {
   applyFolderCascadeDelete,
+  applyMovedMediaBulk,
   applyRenamedMedia,
   applyUploadedMedia,
   countFilesInFolder,
@@ -61,6 +62,7 @@ import {
 import { describeCanceledStatement, describeResyncError } from "@/lib/media-upload-error";
 import { describeResyncToast, describeUploadBatchToast } from "@/lib/media-upload-lifecycle";
 import { prefetchNavRoute } from "@/lib/nav-prefetch";
+import { invalidateKeysInBackground } from "@/lib/query-cache";
 import { hasQueryClientContext } from "@/lib/router-preload";
 import { useIsClient } from "@/lib/use-is-client";
 import { cn } from "@/lib/utils";
@@ -196,13 +198,12 @@ function MediaPage() {
     },
     onSettled: (result) => {
       const added = result?.uploaded ?? [];
-      window.setTimeout(() => {
-        void (async () => {
-          await qc.invalidateQueries({ queryKey: ["media"] });
-          await qc.invalidateQueries({ queryKey: ["media-folders"] });
-          mergeIntoLibrary(added);
-        })();
-      }, 1500);
+      void Promise.all([
+        qc.invalidateQueries({ queryKey: ["media"] }),
+        qc.invalidateQueries({ queryKey: ["media-folders"] }),
+      ]).then(() => {
+        if (added.length > 0) mergeIntoLibrary(added);
+      });
     },
   });
 
@@ -215,10 +216,13 @@ function MediaPage() {
     onError: (error) => {
       toast.error(describeResyncError(error instanceof Error ? error.message : ""));
     },
-    onSettled: async (added) => {
-      await qc.invalidateQueries({ queryKey: ["media"] });
-      await qc.invalidateQueries({ queryKey: ["media-folders"] });
-      if (added && added.length > 0) mergeIntoLibrary(added);
+    onSettled: (added) => {
+      void Promise.all([
+        qc.invalidateQueries({ queryKey: ["media"] }),
+        qc.invalidateQueries({ queryKey: ["media-folders"] }),
+      ]).then(() => {
+        if (added && added.length > 0) mergeIntoLibrary(added);
+      });
     },
   });
 
@@ -229,11 +233,11 @@ function MediaPage() {
       qc.setQueryData(["media-folders"], (prev: MediaFolder[] | undefined) =>
         upsertFolder(prev ?? [], folder),
       );
-      void qc.invalidateQueries({ queryKey: ["media-folders"] });
       setCreateOpen(false);
       setNewFolderName("");
       setFolderId(folder.id);
       toast.success(`${folder.name} created`);
+      invalidateKeysInBackground(qc, [["media-folders"]]);
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Could not create folder.");
@@ -281,35 +285,62 @@ function MediaPage() {
         ),
       );
     },
-    onSettled: async (_data, error, vars, ctx) => {
+    onSettled: (_data, error, vars, ctx) => {
       const id = vars.id;
-      try {
-        await qc.invalidateQueries({ queryKey: ["media"] });
-        await qc.invalidateQueries({ queryKey: ["media-folders"] });
-      } catch {
-        // Stay on /media; the toast already explained a failed delete.
-      }
-      if (error || !ctx) return;
-      setHiddenMediaIds((prev) =>
-        releaseHiddenIfGone(prev, qc.getQueryData<Media[]>(["media"]) ?? [], ctx.mediaIds),
-      );
-      setHiddenFolderIds((prev) =>
-        releaseHiddenIfGone(prev, qc.getQueryData<MediaFolder[]>(["media-folders"]) ?? [], [id]),
-      );
+      void Promise.all([
+        qc.invalidateQueries({ queryKey: ["media"] }),
+        qc.invalidateQueries({ queryKey: ["media-folders"] }),
+      ])
+        .catch(() => {
+          // Stay on /media; the toast already explained a failed delete.
+        })
+        .then(() => {
+          if (error || !ctx) return;
+          setHiddenMediaIds((prev) =>
+            releaseHiddenIfGone(prev, qc.getQueryData<Media[]>(["media"]) ?? [], ctx.mediaIds),
+          );
+          setHiddenFolderIds((prev) =>
+            releaseHiddenIfGone(prev, qc.getQueryData<MediaFolder[]>(["media-folders"]) ?? [], [id]),
+          );
+        });
     },
   });
 
   const moveToFolder = useMutation({
     mutationFn: ({ ids, nextFolderId }: { ids: string[]; nextFolderId: string | null }) =>
       mediaService.moveManyToFolder(ids, nextFolderId),
-    onSuccess: (moved) => {
-      void qc.invalidateQueries({ queryKey: ["media"] });
-      void qc.invalidateQueries({ queryKey: ["media-folders"] });
-      const first = moved[0];
-      setSelected((prev) => (prev && moved.some((item) => item.id === prev.id) ? (moved.find((item) => item.id === prev.id) ?? prev) : prev));
+    onMutate: async ({ ids, nextFolderId }) => {
+      await Promise.all([
+        qc.cancelQueries({ queryKey: ["media"] }),
+        qc.cancelQueries({ queryKey: ["media-folders"] }),
+      ]);
+      const previousMedia = qc.getQueryData<Media[]>(["media"]);
+      const previousFolders = qc.getQueryData<MediaFolder[]>(["media-folders"]);
+      const destName =
+        nextFolderId == null
+          ? null
+          : ((previousFolders ?? []).find((folder) => folder.id === nextFolderId)?.name ?? null);
+      const patched = applyMovedMediaBulk(
+        previousMedia ?? [],
+        previousFolders ?? [],
+        ids,
+        nextFolderId,
+        destName,
+      );
+      qc.setQueryData(["media"], patched.media);
+      qc.setQueryData(["media-folders"], patched.folders);
+      setSelected((prev) =>
+        prev && ids.includes(prev.id)
+          ? { ...prev, folderId: nextFolderId, folderName: destName }
+          : prev,
+      );
       setMoveIds([]);
       clearSelection();
-      const dest = first?.folderName;
+      return { previousMedia, previousFolders, destName };
+    },
+    onSuccess: (moved, _vars, ctx) => {
+      mergeIntoLibrary(moved);
+      const dest = moved[0]?.folderName ?? ctx?.destName;
       toast.success(
         moved.length === 1
           ? dest
@@ -320,8 +351,13 @@ function MediaPage() {
             : `Moved ${moved.length} files to Unfiled`,
       );
     },
-    onError: (error) => {
+    onError: (error, _vars, ctx) => {
+      if (ctx?.previousMedia) qc.setQueryData(["media"], ctx.previousMedia);
+      if (ctx?.previousFolders) qc.setQueryData(["media-folders"], ctx.previousFolders);
       toast.error(error instanceof Error ? error.message : "Could not move media.");
+    },
+    onSettled: () => {
+      invalidateKeysInBackground(qc, [["media"], ["media-folders"]]);
     },
   });
 
@@ -350,13 +386,14 @@ function MediaPage() {
       if (ctx?.previous) qc.setQueryData(["media"], ctx.previous);
       toast.error(error instanceof Error ? error.message : "Could not rename.");
     },
-    onSettled: async (m) => {
-      await qc.invalidateQueries({ queryKey: ["media"] });
-      if (!m) return;
-      setHiddenMediaIds((prev) => withoutIds(prev, [m.id]));
-      qc.setQueryData(["media"], (prev: Media[] | undefined) =>
-        applyRenamedMedia(mergeLibraryMedia(prev ?? [], [m]), m),
-      );
+    onSettled: (m) => {
+      void qc.invalidateQueries({ queryKey: ["media"] }).then(() => {
+        if (!m) return;
+        setHiddenMediaIds((prev) => withoutIds(prev, [m.id]));
+        qc.setQueryData(["media"], (prev: Media[] | undefined) =>
+          applyRenamedMedia(mergeLibraryMedia(prev ?? [], [m]), m),
+        );
+      });
     },
   });
 
@@ -364,9 +401,12 @@ function MediaPage() {
     mutationFn: ({ id, file }: { id: string; file: File }) => mediaService.replace(id, file),
     retry: 0,
     onSuccess: (m) => {
-      void qc.invalidateQueries({ queryKey: ["media"] });
+      qc.setQueryData(["media"], (prev: Media[] | undefined) =>
+        applyRenamedMedia(mergeLibraryMedia(prev ?? [], [m]), m),
+      );
       setSelected(m);
       toast.success("New version uploaded");
+      invalidateKeysInBackground(qc, [["media"]]);
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Replace failed.");
@@ -376,10 +416,9 @@ function MediaPage() {
   const archive = useMutation({
     mutationFn: mediaService.archive,
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["media"] });
-      void qc.invalidateQueries({ queryKey: ["media-folders"] });
       setSelected(null);
       toast.success("Archived");
+      invalidateKeysInBackground(qc, [["media"], ["media-folders"]]);
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Could not archive.");
@@ -408,12 +447,15 @@ function MediaPage() {
       if (ctx?.previousMedia) qc.setQueryData(["media"], ctx.previousMedia);
       toast.error(error instanceof Error ? error.message : "Could not delete.");
     },
-    onSettled: async (_data, _error, { id }) => {
-      await qc.invalidateQueries({ queryKey: ["media"] });
-      await qc.invalidateQueries({ queryKey: ["media-folders"] });
-      setHiddenMediaIds((prev) =>
-        releaseHiddenIfGone(prev, qc.getQueryData<Media[]>(["media"]) ?? [], [id]),
-      );
+    onSettled: (_data, _error, { id }) => {
+      void Promise.all([
+        qc.invalidateQueries({ queryKey: ["media"] }),
+        qc.invalidateQueries({ queryKey: ["media-folders"] }),
+      ]).then(() => {
+        setHiddenMediaIds((prev) =>
+          releaseHiddenIfGone(prev, qc.getQueryData<Media[]>(["media"]) ?? [], [id]),
+        );
+      });
     },
   });
 
@@ -444,12 +486,15 @@ function MediaPage() {
       if (ctx?.previousMedia) qc.setQueryData(["media"], ctx.previousMedia);
       toast.error(error instanceof Error ? error.message : "Could not delete.");
     },
-    onSettled: async (_data, _error, { ids }) => {
-      await qc.invalidateQueries({ queryKey: ["media"] });
-      await qc.invalidateQueries({ queryKey: ["media-folders"] });
-      setHiddenMediaIds((prev) =>
-        releaseHiddenIfGone(prev, qc.getQueryData<Media[]>(["media"]) ?? [], ids),
-      );
+    onSettled: (_data, _error, { ids }) => {
+      void Promise.all([
+        qc.invalidateQueries({ queryKey: ["media"] }),
+        qc.invalidateQueries({ queryKey: ["media-folders"] }),
+      ]).then(() => {
+        setHiddenMediaIds((prev) =>
+          releaseHiddenIfGone(prev, qc.getQueryData<Media[]>(["media"]) ?? [], ids),
+        );
+      });
     },
   });
 
