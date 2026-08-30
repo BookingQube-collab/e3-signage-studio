@@ -558,6 +558,9 @@ function NewCampaignPage() {
                 contentType={draft.contentType}
                 contentId={draft.contentId}
                 contentName={draft.contentName}
+                screenOrientations={(screens.data ?? [])
+                  .filter((s) => draft.screenIds.includes(s.id))
+                  .map((s) => s.orientation)}
               />
 
               <div className="rounded-2xl border border-border bg-card/60 p-5">

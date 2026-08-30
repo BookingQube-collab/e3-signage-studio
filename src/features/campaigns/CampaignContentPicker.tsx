@@ -5,6 +5,7 @@ import { E3EmptyState, E3Skeletons, MediaThumb } from "@/components/e3";
 import { CampaignContentPreview } from "@/features/campaigns/CampaignContentPreview";
 import { mediaForRef } from "@/features/layouts/LayoutCanvas";
 import { PlaylistPickerCards } from "@/features/playlists/PlaylistPickerCards";
+import { previewAspectRatio } from "@/lib/preview-orientation";
 import { cn } from "@/lib/utils";
 import type { Layout, Media, Playlist } from "@/types";
 
@@ -158,7 +159,6 @@ function LayoutPickerPreview({
   mediaLibrary: Media[];
 }) {
   const zones = Array.isArray(layout.zones) ? layout.zones : [];
-  const portrait = layout.orientation === "Portrait";
 
   if (zones.length === 0) {
     return (
@@ -176,7 +176,7 @@ function LayoutPickerPreview({
     <div
       className="relative w-full overflow-hidden rounded-xl border border-border"
       style={{
-        aspectRatio: portrait ? "9 / 16" : "16 / 9",
+        aspectRatio: previewAspectRatio(layout.orientation),
         background: layout.background || "#19161A",
       }}
       aria-hidden

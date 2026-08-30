@@ -2,6 +2,11 @@ import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { firstHttpUrl } from "@/lib/playlist-preview";
+import {
+  isPreviewPortrait,
+  isPreviewUpsideDown,
+  previewAspectRatio,
+} from "@/lib/preview-orientation";
 import { cn } from "@/lib/utils";
 import { isImageStillUrl, seekVideoToStillFrame, videoPreviewNeedsHydration } from "@/lib/video-poster";
 import { isUuid } from "@/services/inventory-map";
@@ -147,17 +152,19 @@ export function LayoutCanvas({
   onAssign?: (zoneId: string, media: Media) => void;
   className?: string;
 }) {
-  const portrait = layout.orientation === "Portrait";
+  const portrait = isPreviewPortrait(layout.orientation);
+  const upsideDown = isPreviewUpsideDown(layout.orientation);
 
   return (
     <div
       className={cn(
         "relative mx-auto w-full overflow-hidden rounded-xl border border-border",
         portrait ? "max-w-sm" : "",
+        upsideDown && "rotate-180",
         className,
       )}
       style={{
-        aspectRatio: portrait ? "9 / 16" : "16 / 9",
+        aspectRatio: previewAspectRatio(layout.orientation),
         background: layout.background,
       }}
     >

@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
-import { cn } from "@/lib/utils";
+import {
+  isPreviewPortrait,
+  isPreviewUpsideDown,
+  previewAspectRatio,
+} from "@/lib/preview-orientation";
 import {
   elapsedOffsetForMedia,
   firstHttpUrl,
@@ -9,6 +13,7 @@ import {
   type PreviewClip,
   type PreviewFrame,
 } from "@/lib/playlist-preview";
+import { cn } from "@/lib/utils";
 import { isUuid } from "@/services/inventory-map";
 import { mediaService } from "@/services";
 
@@ -201,12 +206,15 @@ export function PlaylistLoopPreview({
   className,
   emptyLabel = "Add media to preview",
   startMediaId,
+  orientation,
 }: {
   clips: PreviewClip[];
   loop?: boolean;
   className?: string;
   emptyLabel?: string;
   startMediaId?: string | null;
+  /** Screen / mount orientation — portrait uses a tall 9:16 stage. */
+  orientation?: string | null;
 }) {
   const originMs = useMemo(() => {
     if (!startMediaId) return 0;
@@ -261,13 +269,22 @@ export function PlaylistLoopPreview({
   const previous =
     frame && frame.progress < 1 && frame.prevIndex !== frame.index ? clips[frame.prevIndex] : undefined;
   const soundtrack = current?.kind === "image" ? firstHttpUrl(current.audioUrl) : null;
+  const portrait = isPreviewPortrait(orientation);
+  const upsideDown = isPreviewUpsideDown(orientation);
 
   return (
     <div
-      className={cn("relative overflow-hidden rounded-xl border border-border", className)}
+      className={cn(
+        "relative overflow-hidden rounded-xl border border-border",
+        portrait ? "mx-auto w-full max-w-sm" : "w-full",
+        className,
+      )}
       style={{ background: STAGE_BG }}
     >
-      <div className="relative aspect-video w-full overflow-hidden bg-black">
+      <div
+        className={cn("relative w-full overflow-hidden bg-black", upsideDown && "rotate-180")}
+        style={{ aspectRatio: previewAspectRatio(orientation) }}
+      >
         {clips.length === 0 || !current || !frame ? (
           <div className="grid size-full place-items-center text-center">
             <p className="text-sm text-muted-foreground">{emptyLabel}</p>

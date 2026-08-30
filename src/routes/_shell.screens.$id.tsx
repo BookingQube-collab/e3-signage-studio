@@ -218,6 +218,7 @@ function ScreenDetailPage() {
                     <PlaylistLoopPreview
                       clips={previewClips}
                       startMediaId={screen.nowPlayingMediaId}
+                      orientation={screen.orientation}
                       emptyLabel={
                         screen.nowPlaying
                           ? `${screen.nowPlaying} · ${screen.resolution} · ${screen.orientation}`
