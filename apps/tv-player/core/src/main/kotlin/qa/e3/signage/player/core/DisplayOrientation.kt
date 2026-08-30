@@ -74,10 +74,11 @@ object DisplayOrientation {
     }
 
     /**
-     * Non-uniform scale mapping a published layout canvas onto the oriented frame
-     * with **100% coverage** (no letterbox / pillarbox).
+     * Uniform contain/fit scale mapping a published layout canvas onto the oriented
+     * frame while preserving aspect ratio (letterbox / pillarbox when needed).
+     * Independent scaleX/scaleY exact-fill was the 0.24.0 zoom/crop failure mode.
      */
-    fun layoutFillScale(
+    fun layoutFitScale(
         layoutWidth: Int,
         layoutHeight: Int,
         frameWidthPx: Int,
@@ -87,7 +88,8 @@ object DisplayOrientation {
         val lh = layoutHeight.coerceAtLeast(1).toFloat()
         val fw = frameWidthPx.coerceAtLeast(1).toFloat()
         val fh = frameHeightPx.coerceAtLeast(1).toFloat()
-        return LayoutFillScale(scaleX = fw / lw, scaleY = fh / lh)
+        val scale = minOf(fw / lw, fh / lh)
+        return LayoutFillScale(scaleX = scale, scaleY = scale)
     }
 }
 

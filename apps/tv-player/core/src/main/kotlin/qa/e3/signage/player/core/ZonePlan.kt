@@ -46,7 +46,7 @@ fun effectiveLayout(manifest: ContentManifest): ManifestLayout {
                 y = 0,
                 width = layout?.width?.takeIf { it > 0 } ?: 1920,
                 height = layout?.height?.takeIf { it > 0 } ?: 1080,
-                fit = FitMode.COVER,
+                fit = FitMode.CONTAIN,
                 contentRef = null,
             ),
         ),

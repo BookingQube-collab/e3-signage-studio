@@ -168,5 +168,6 @@ class ZonePlanTest {
         val layout = effectiveLayout(manifest)
         assertEquals(1, layout.zones.size)
         assertEquals(1920, layout.zones[0].width)
+        assertEquals(FitMode.CONTAIN, layout.zones[0].fit)
     }
 }

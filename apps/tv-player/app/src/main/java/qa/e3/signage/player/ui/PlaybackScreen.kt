@@ -109,10 +109,11 @@ fun PlaybackScreen(state: PlaybackUiState, onVideoFinished: (Int, Boolean) -> Un
 }
 
 /**
- * Maps the published layout pixel canvas onto the oriented display frame at **100%**
- * coverage (independent scaleX/scaleY). Uniform `min` scale letterboxed portrait mounts
- * when the layout aspect differed; `requiredSize` prevents parent max-constraint clamping
- * from shrinking the canvas before scale (same failure mode as DisplayOrientedFrame).
+ * Maps the published layout pixel canvas onto the oriented display frame with
+ * **uniform contain/fit** (min scale) so authored aspect is preserved. Letterbox /
+ * pillarbox bars are OK. `requiredSize` prevents parent max-constraint clamping from
+ * shrinking the canvas before scale (same failure mode as DisplayOrientedFrame).
+ * Zone media still respects per-zone FitMode (Cover/Fill only when the zone asks).
  */
 @Composable
 private fun ScaledLayoutCanvas(
@@ -123,7 +124,7 @@ private fun ScaledLayoutCanvas(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val lw = layoutWidth.coerceAtLeast(1)
         val lh = layoutHeight.coerceAtLeast(1)
-        val fill = DisplayOrientation.layoutFillScale(
+        val fit = DisplayOrientation.layoutFitScale(
             layoutWidth = lw,
             layoutHeight = lh,
             frameWidthPx = constraints.maxWidth,
@@ -138,8 +139,8 @@ private fun ScaledLayoutCanvas(
                     with(density) { lh.toDp() },
                 )
                 .graphicsLayer {
-                    scaleX = fill.scaleX
-                    scaleY = fill.scaleY
+                    scaleX = fit.scaleX
+                    scaleY = fit.scaleY
                     transformOrigin = TransformOrigin.Center
                     clip = false
                 },

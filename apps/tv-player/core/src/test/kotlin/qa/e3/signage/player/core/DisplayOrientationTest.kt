@@ -58,23 +58,23 @@ class DisplayOrientationTest {
     }
 
     @Test
-    fun portraitLayoutFillsOrientedFrameExactly() {
+    fun portraitLayoutFitsOrientedFrameExactly() {
         val frame = DisplayOrientation.orientedChildSize(1920, 1080, DisplayOrientation.PORTRAIT)
-        val scale = DisplayOrientation.layoutFillScale(1080, 1920, frame.widthPx, frame.heightPx)
+        val scale = DisplayOrientation.layoutFitScale(1080, 1920, frame.widthPx, frame.heightPx)
         assertEquals(1f, scale.scaleX, 0.0001f)
         assertEquals(1f, scale.scaleY, 0.0001f)
     }
 
     @Test
-    fun landscapeLayoutOnPortraitFrameStretchesToFullBleed() {
-        // Even if CMS still publishes 1920×1080 into a portrait mount, fill 100% (no letterbox).
+    fun landscapeLayoutOnPortraitFrameUsesUniformContain() {
+        // CMS 1920×1080 into a portrait mount: preserve aspect (letterbox), do not stretch/crop.
         val frame = DisplayOrientation.orientedChildSize(1920, 1080, DisplayOrientation.PORTRAIT)
-        val scale = DisplayOrientation.layoutFillScale(1920, 1080, frame.widthPx, frame.heightPx)
-        assertEquals(1080 / 1920f, scale.scaleX, 0.0001f)
-        assertEquals(1920 / 1080f, scale.scaleY, 0.0001f)
-        // Uniform contain would be min(...) = 0.5625 and leave empty bars — we intentionally stretch.
-        val contain = minOf(scale.scaleX, scale.scaleY)
-        assertTrue(scale.scaleY > contain)
+        val scale = DisplayOrientation.layoutFitScale(1920, 1080, frame.widthPx, frame.heightPx)
+        val expected = minOf(1080 / 1920f, 1920 / 1080f)
+        assertEquals(expected, scale.scaleX, 0.0001f)
+        assertEquals(expected, scale.scaleY, 0.0001f)
+        assertEquals(scale.scaleX, scale.scaleY, 0.0001f)
+        assertTrue(scale.scaleX < 1f)
     }
 
     @Test
