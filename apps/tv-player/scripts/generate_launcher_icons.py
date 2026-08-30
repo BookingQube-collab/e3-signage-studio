@@ -1,4 +1,9 @@
-"""Rasterize E3 Signage launcher mipmaps and the TV banner from generated masters."""
+"""Rasterize Android launcher mipmaps + TV banner from CMS brand assets.
+
+Sources of truth (admin panel branding):
+  - ../../src/assets/e3-icon.png      → square launcher mark
+  - ../../src/assets/e3-full-logo.png → TV banner wordmark
+"""
 
 from __future__ import annotations
 
@@ -6,8 +11,11 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-ASSETS = Path(r"C:\Users\patha\.cursor\projects\a-Live-Projects-E3-Signage-Studio\assets")
+REPO_ROOT = Path(__file__).resolve().parents[3]
+CMS_ICON = REPO_ROOT / "src" / "assets" / "e3-icon.png"
+CMS_FULL_LOGO = REPO_ROOT / "src" / "assets" / "e3-full-logo.png"
 RES = Path(__file__).resolve().parents[1] / "app" / "src" / "main" / "res"
+MASTERS = Path(__file__).resolve().parent / "masters"
 
 MIPMAP_LEGACY = {
     "mipmap-mdpi": 48,
@@ -15,6 +23,14 @@ MIPMAP_LEGACY = {
     "mipmap-xhdpi": 96,
     "mipmap-xxhdpi": 144,
     "mipmap-xxxhdpi": 192,
+}
+
+ADAPTIVE_SIZES = {
+    "drawable-mdpi": 108,
+    "drawable-hdpi": 162,
+    "drawable-xhdpi": 216,
+    "drawable-xxhdpi": 324,
+    "drawable-xxxhdpi": 432,
 }
 
 
@@ -27,32 +43,15 @@ def resize(im: Image.Image, size: int) -> Image.Image:
     return im.resize((size, size), Image.Resampling.LANCZOS)
 
 
-def knockout_light_checker(im: Image.Image) -> Image.Image:
-    """AI 'transparent' masters often bake a gray/white checkerboard as RGB."""
-    rgba = im.convert("RGBA")
-    pixels = rgba.load()
-    w, h = rgba.size
-    for y in range(h):
-        for x in range(w):
-            r, g, b, _a = pixels[x, y]
-            sat = max(r, g, b) - min(r, g, b)
-            lum = (r + g + b) / 3
-            if sat < 28 and lum > 150:
-                pixels[x, y] = (0, 0, 0, 0)
-            elif sat < 18 and lum > 90:
-                pixels[x, y] = (0, 0, 0, 0)
-    return rgba
-
-
 def content_bbox(im: Image.Image, alpha_min: int = 24) -> tuple[int, int, int, int]:
     alpha = im.split()[-1]
     box = alpha.point(lambda a: 255 if a >= alpha_min else 0).getbbox()
     if box is None:
-        raise RuntimeError("Foreground has no opaque content")
+        raise RuntimeError("Image has no opaque content")
     return box
 
 
-def pad_to_safe_zone(im: Image.Image, canvas: int = 1024, fill_ratio: float = 0.58) -> Image.Image:
+def pad_to_safe_zone(im: Image.Image, canvas: int = 1024, fill_ratio: float = 0.62) -> Image.Image:
     """Center artwork in the adaptive-icon safe zone (~66dp of 108dp)."""
     bbox = content_bbox(im)
     cropped = im.crop(bbox)
@@ -63,6 +62,19 @@ def pad_to_safe_zone(im: Image.Image, canvas: int = 1024, fill_ratio: float = 0.
     fitted = cropped.resize((new_w, new_h), Image.Resampling.LANCZOS)
     out = Image.new("RGBA", (canvas, canvas), (0, 0, 0, 0))
     out.paste(fitted, ((canvas - new_w) // 2, (canvas - new_h) // 2), fitted)
+    return out
+
+
+def solid_background(canvas: int = 1024, color: tuple[int, int, int, int] = (0, 0, 0, 255)) -> Image.Image:
+    return Image.new("RGBA", (canvas, canvas), color)
+
+
+def compose_legacy(background: Image.Image, foreground: Image.Image) -> Image.Image:
+    out = background.convert("RGBA").copy()
+    fg = foreground.convert("RGBA")
+    if fg.size != out.size:
+        fg = fg.resize(out.size, Image.Resampling.LANCZOS)
+    out.alpha_composite(fg)
     return out
 
 
@@ -82,45 +94,59 @@ def make_round(im: Image.Image) -> Image.Image:
     return rgba
 
 
-def crop_banner_16x9(im: Image.Image) -> Image.Image:
-    w, h = im.size
-    target_h = int(round(w * 9 / 16))
-    if target_h <= h:
-        top = (h - target_h) // 2
-        return im.crop((0, top, w, top + target_h))
-    target_w = int(round(h * 16 / 9))
-    left = (w - target_w) // 2
-    return im.crop((left, 0, left + target_w, h))
+def make_tv_banner(logo: Image.Image, width: int = 1280, height: int = 720) -> Image.Image:
+    """Full CMS logo centered on black 16:9 (Android TV banner)."""
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 255))
+    rgba = logo.convert("RGBA")
+    bbox = content_bbox(rgba)
+    cropped = rgba.crop(bbox)
+    # Leave comfortable margins so the wordmark stays readable on Leanback.
+    max_w = int(width * 0.78)
+    max_h = int(height * 0.55)
+    scale = min(max_w / cropped.width, max_h / cropped.height)
+    new_w = max(1, int(cropped.width * scale))
+    new_h = max(1, int(cropped.height * scale))
+    fitted = cropped.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    canvas.paste(fitted, ((width - new_w) // 2, (height - new_h) // 2), fitted)
+    return canvas
 
 
 def main() -> None:
-    full = Image.open(ASSETS / "e3-launcher-icon-1024.png").convert("RGBA")
-    background = Image.open(ASSETS / "e3-launcher-background-1024.png").convert("RGBA")
-    foreground = pad_to_safe_zone(knockout_light_checker(Image.open(ASSETS / "e3-launcher-foreground-1024.png")))
-    banner = crop_banner_16x9(Image.open(ASSETS / "e3-tv-banner.png").convert("RGBA"))
+    if not CMS_ICON.is_file():
+        raise SystemExit(f"Missing CMS icon: {CMS_ICON}")
+    if not CMS_FULL_LOGO.is_file():
+        raise SystemExit(f"Missing CMS full logo: {CMS_FULL_LOGO}")
+
+    icon = Image.open(CMS_ICON).convert("RGBA")
+    full_logo = Image.open(CMS_FULL_LOGO).convert("RGBA")
+
+    background = solid_background(1024)
+    foreground = pad_to_safe_zone(icon, canvas=1024, fill_ratio=0.62)
+    full = compose_legacy(background, foreground)
+    banner = make_tv_banner(full_logo)
+
+    MASTERS.mkdir(parents=True, exist_ok=True)
+    save_png(full, MASTERS / "e3-launcher-icon-1024.png")
+    save_png(background, MASTERS / "e3-launcher-background-1024.png")
+    save_png(foreground, MASTERS / "e3-launcher-foreground-1024.png")
+    save_png(banner, MASTERS / "e3-tv-banner.png")
 
     for folder, size in MIPMAP_LEGACY.items():
         square = resize(full, size)
         save_png(square, RES / folder / "ic_launcher.png")
         save_png(make_round(square), RES / folder / "ic_launcher_round.png")
 
-    # High-res adaptive layers; XML in mipmap-anydpi-v26 references these drawables.
-    save_png(resize(background, 432), RES / "drawable-xxxhdpi" / "ic_launcher_background.png")
-    save_png(resize(foreground, 432), RES / "drawable-xxxhdpi" / "ic_launcher_foreground.png")
-    save_png(resize(background, 108), RES / "drawable-mdpi" / "ic_launcher_background.png")
-    save_png(resize(foreground, 108), RES / "drawable-mdpi" / "ic_launcher_foreground.png")
-    save_png(resize(background, 162), RES / "drawable-hdpi" / "ic_launcher_background.png")
-    save_png(resize(foreground, 162), RES / "drawable-hdpi" / "ic_launcher_foreground.png")
-    save_png(resize(background, 216), RES / "drawable-xhdpi" / "ic_launcher_background.png")
-    save_png(resize(foreground, 216), RES / "drawable-xhdpi" / "ic_launcher_foreground.png")
-    save_png(resize(background, 324), RES / "drawable-xxhdpi" / "ic_launcher_background.png")
-    save_png(resize(foreground, 324), RES / "drawable-xxhdpi" / "ic_launcher_foreground.png")
+    for folder, size in ADAPTIVE_SIZES.items():
+        save_png(resize(background, size), RES / folder / "ic_launcher_background.png")
+        save_png(resize(foreground, size), RES / folder / "ic_launcher_foreground.png")
 
-    # TV banner: 320x180 dp at xhdpi = 640x360 px
-    banner_xhdpi = banner.resize((640, 360), Image.Resampling.LANCZOS)
-    save_png(banner_xhdpi, RES / "drawable-xhdpi" / "tv_banner.png")
+    # TV banner: 320x180 dp — mdpi 320x180, xhdpi 640x360
+    save_png(banner.resize((640, 360), Image.Resampling.LANCZOS), RES / "drawable-xhdpi" / "tv_banner.png")
     save_png(banner.resize((320, 180), Image.Resampling.LANCZOS), RES / "drawable-mdpi" / "tv_banner.png")
 
+    print("CMS icon:", CMS_ICON)
+    print("CMS full logo:", CMS_FULL_LOGO)
+    print("Wrote masters under", MASTERS)
     print("Wrote launcher mipmaps under", RES)
 
 
