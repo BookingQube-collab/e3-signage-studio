@@ -138,6 +138,33 @@ export const mockServices: AppServices = {
         250,
       );
     },
+    duplicate: (id: string) => {
+      const source = store.screens.find((s) => s.id === id);
+      if (!source) return Promise.reject(new Error("Screen not found."));
+      const screen: Screen = {
+        ...source,
+        id: `scr-${Date.now()}`,
+        name: source.name.startsWith("Copy of ") ? source.name : `Copy of ${source.name}`,
+        status: "offline",
+        nowPlaying: null,
+        nowPlayingMediaId: null,
+        nowPlayingMediaType: null,
+        nowPlayingThumbnailUrl: null,
+        nowPlayingPreviewUrl: null,
+        syncState: "Waiting",
+        syncProgress: 0,
+        lastSeen: "never",
+        lastSync: "never",
+        localVersion: "—",
+        cloudVersion: "—",
+        storageUsedGb: 0,
+        storageTotalGb: 0,
+        appVersion: "—",
+        lastError: null,
+      };
+      store.screens = [screen, ...store.screens];
+      return delay(screen, 400);
+    },
     syncNow: (id: string) =>
       mockServices.screenService.update(id, {
         syncState: "Ready",

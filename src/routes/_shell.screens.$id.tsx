@@ -1,6 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { MonitorPlay, Pencil, PowerOff, RefreshCw, ScrollText, Trash2, Unlink, Wrench } from "lucide-react";
+import {
+  Copy,
+  MonitorPlay,
+  Pencil,
+  PowerOff,
+  RefreshCw,
+  ScrollText,
+  Trash2,
+  Unlink,
+  Wrench,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -132,6 +142,27 @@ function ScreenDetailPage() {
     },
     onError: (err: Error) => {
       toast.error(err.message || "Could not update screen");
+    },
+  });
+
+  const duplicate = useMutation({
+    mutationFn: () => screenService.duplicate(id),
+    onSuccess: (next) => {
+      writeEntityCache(qc, {
+        detailKey: ["screen", next.id],
+        listKey: ["screens"],
+        entity: next,
+      });
+      toast.success(`${next.name} created`);
+      invalidateKeysInBackground(qc, [
+        ["locations"],
+        ["dashboard"],
+        ["screens", "location", next.locationId],
+      ]);
+      void navigate({ to: "/screens/$id", params: { id: next.id } });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || "Could not duplicate screen");
     },
   });
 
@@ -296,6 +327,16 @@ function ScreenDetailPage() {
                         onClick={() => setEditOpen(true)}
                       >
                         <Pencil /> Edit
+                      </E3Button>
+                    ) : null}
+                    {canManageScreens ? (
+                      <E3Button
+                        variant="outline"
+                        className="w-full justify-start"
+                        loading={duplicate.isPending}
+                        onClick={() => duplicate.mutate()}
+                      >
+                        <Copy /> Duplicate
                       </E3Button>
                     ) : null}
                     {canManageScreens ? (

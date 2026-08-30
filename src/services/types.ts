@@ -79,6 +79,7 @@ export type ScreenService = {
   pair: (input: ScreenPairInput) => Promise<Screen>;
   repair: (id: string, code: string) => Promise<Screen>;
   update: (id: string, patch: Partial<Screen>) => Promise<Screen>;
+  duplicate: (id: string) => Promise<Screen>;
   syncNow: (id: string) => Promise<Screen>;
   unpair: (id: string) => Promise<boolean>;
   logs: (id: string) => Promise<DeviceLogLine[]>;

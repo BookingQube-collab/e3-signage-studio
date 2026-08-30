@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, MoreHorizontal, Pencil, Trash2, Wrench } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
+import { Copy, Loader2, MoreHorizontal, Pencil, Trash2, Wrench } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -13,15 +14,37 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { EditScreenDialog } from "@/features/screens/EditScreenDialog";
 import { RepairScreenDialog } from "@/features/screens/RepairScreenDialog";
-import { invalidateKeysInBackground, removeById } from "@/lib/query-cache";
+import { invalidateKeysInBackground, removeById, writeEntityCache } from "@/lib/query-cache";
 import { screenService } from "@/services";
 import type { Screen } from "@/types";
 
 export function ScreenRowMenu({ screen }: { screen: Screen }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [editOpen, setEditOpen] = useState(false);
   const [repairOpen, setRepairOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const duplicate = useMutation({
+    mutationFn: () => screenService.duplicate(screen.id),
+    onSuccess: (next) => {
+      writeEntityCache(qc, {
+        detailKey: ["screen", next.id],
+        listKey: ["screens"],
+        entity: next,
+      });
+      toast.success(`${next.name} created`);
+      invalidateKeysInBackground(qc, [
+        ["locations"],
+        ["dashboard"],
+        ["screens", "location", next.locationId],
+      ]);
+      void navigate({ to: "/screens/$id", params: { id: next.id } });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Could not duplicate screen.");
+    },
+  });
 
   const unpair = useMutation({
     mutationFn: () => screenService.unpair(screen.id),
@@ -39,6 +62,8 @@ export function ScreenRowMenu({ screen }: { screen: Screen }) {
     },
   });
 
+  const busy = duplicate.isPending || unpair.isPending;
+
   return (
     <div
       onClick={(e) => e.stopPropagation()}
@@ -50,10 +75,10 @@ export function ScreenRowMenu({ screen }: { screen: Screen }) {
           <button
             type="button"
             aria-label={`Actions for ${screen.name}`}
-            disabled={unpair.isPending}
+            disabled={busy}
             className="grid size-8 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
           >
-            {unpair.isPending ? (
+            {busy ? (
               <Loader2 className="size-4 animate-spin" aria-hidden />
             ) : (
               <MoreHorizontal className="size-4" />
@@ -64,6 +89,13 @@ export function ScreenRowMenu({ screen }: { screen: Screen }) {
           <DropdownMenuItem onSelect={() => setEditOpen(true)}>
             <Pencil />
             Edit
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={duplicate.isPending}
+            onSelect={() => duplicate.mutate()}
+          >
+            {duplicate.isPending ? <Loader2 className="animate-spin" /> : <Copy />}
+            Duplicate
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => setRepairOpen(true)}>
             <Wrench />

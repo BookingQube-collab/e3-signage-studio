@@ -30,6 +30,7 @@ export const apiServices: AppServices = {
     pair: () => notConfigured(),
     repair: () => notConfigured(),
     update: () => notConfigured(),
+    duplicate: () => notConfigured(),
     syncNow: () => notConfigured(),
     unpair: () => notConfigured(),
     logs: () => notConfigured(),

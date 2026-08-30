@@ -1,4 +1,5 @@
 import {
+  duplicateScreenFn,
   getScreenFn,
   listScreensByLocationFn,
   listScreensFn,
@@ -125,6 +126,10 @@ export const liveScreenService: ScreenService = {
     if (playlistId !== undefined) data.playlistId = playlistId;
 
     const row = await updateScreenFn({ data });
+    return toUiScreen(row);
+  },
+  duplicate: async (id) => {
+    const row = await duplicateScreenFn({ data: { accessToken: await accessToken(), id } });
     return toUiScreen(row);
   },
   syncNow: async (id) => {

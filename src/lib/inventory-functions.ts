@@ -138,6 +138,13 @@ export const updateScreenFn = createServerFn({ method: "POST" })
     return updateScreen(accessToken, id, patch);
   });
 
+export const duplicateScreenFn = createServerFn({ method: "POST" })
+  .validator(z.object({ accessToken: z.string(), id: z.string().uuid() }))
+  .handler(async ({ data }): Promise<ScreenRecord> => {
+    const { duplicateScreen } = await import("@/server/inventory.server");
+    return duplicateScreen(data.accessToken, data.id);
+  });
+
 export const syncNowFn = createServerFn({ method: "POST" })
   .validator(z.object({ accessToken: z.string(), id: z.string().uuid() }))
   .handler(async ({ data }): Promise<ScreenRecord> => {

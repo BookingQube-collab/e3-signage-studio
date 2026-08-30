@@ -895,6 +895,104 @@ export async function pairScreen(
   return record;
 }
 
+/** Clone display settings into a new unpaired screen (no device/pairing identity). */
+export async function duplicateScreen(
+  accessToken: string,
+  sourceId: string,
+): Promise<ScreenRecord> {
+  const auth = await requireCmsPermission(accessToken, "screens.manage");
+  const source = await getScreen(accessToken, sourceId);
+  if (!source) throw new Error("Screen not found.");
+  await requireScreenLocation(accessToken, auth, source);
+
+  const client = getUserClient(accessToken);
+  let playlistId: string | null = source.playlistId;
+  if (playlistId) {
+    const { data: playlist, error: plError } = await client
+      .from("playlists")
+      .select("id")
+      .eq("id", playlistId)
+      .maybeSingle();
+    throwIfError(plError, "Could not load playlist.");
+    if (!playlist) playlistId = null;
+  }
+
+  const copyName = source.name.startsWith("Copy of ")
+    ? source.name
+    : `Copy of ${source.name}`;
+
+  const admin = getServiceRoleClient();
+  const { data: inserted, error: insertError } = await admin
+    .from("screens")
+    .insert({
+      organization_id: auth.profile.organizationId,
+      location_id: source.locationId,
+      name: copyName.trim(),
+      device_id: null,
+      device_name: null,
+      screen_type: source.screenType,
+      orientation: source.orientation,
+      width: source.width,
+      height: source.height,
+      operational_status: "READY",
+      current_playlist_id: playlistId,
+      last_heartbeat_at: null,
+      last_sync_at: null,
+      local_config_version: 0,
+      cloud_config_version: 0,
+      local_manifest_version: null,
+      cloud_manifest_version: null,
+      total_storage: null,
+      available_storage: null,
+      currently_playing_media_id: null,
+      last_error: null,
+      app_version: null,
+      archived_at: null,
+      created_by: auth.userId,
+    })
+    .select(SCREEN_COLUMNS)
+    .single();
+  throwIfError(insertError, "Could not duplicate the screen.");
+  if (!inserted) throw new Error("Could not duplicate the screen.");
+  const screen = inserted as ScreenDb;
+
+  const { error: syncError } = await admin.from("device_sync_states").insert({
+    screen_id: screen.id,
+    sync_state: "WAITING",
+    sync_progress: 0,
+    package_state: "PENDING",
+  });
+  throwIfError(syncError, "Could not initialize sync state.");
+
+  const groupIds = [...new Set(source.groupIds)];
+  if (groupIds.length > 0) {
+    const { data: groups, error: groupError } = await admin
+      .from("screen_groups")
+      .select("id")
+      .eq("organization_id", auth.profile.organizationId)
+      .in("id", groupIds);
+    throwIfError(groupError, "Could not load screen groups.");
+    const valid = new Set((groups ?? []).map((g) => asString((g as { id: string }).id)));
+    const members = groupIds
+      .filter((id) => valid.has(id))
+      .map((screen_group_id) => ({ screen_group_id, screen_id: screen.id }));
+    if (members.length > 0) {
+      const { error: memberError } = await admin.from("screen_group_members").insert(members);
+      throwIfError(memberError, "Could not copy screen group membership.");
+    }
+  }
+
+  if (playlistId) {
+    const { resolveAndPublishScreenContent } = await import("./campaigns.server");
+    await resolveAndPublishScreenContent(accessToken, screen.id);
+  }
+
+  const records = await loadScreenRecords(client, auth.profile.organizationId, [screen]);
+  const record = records[0];
+  if (!record) throw new Error("Screen was duplicated but could not be loaded.");
+  return record;
+}
+
 export async function updateScreen(
   accessToken: string,
   id: string,
