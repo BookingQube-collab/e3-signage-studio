@@ -34,6 +34,7 @@ import type { CmsProfile } from "@/lib/auth-types";
 import { prefetchNavRoute } from "@/lib/nav-prefetch";
 import { hasPermission } from "@/lib/rbac";
 import { completeSignOut, redirectToLogin } from "@/lib/sign-out";
+import { useSidebarCollapsed } from "@/lib/view-preference";
 import { cn } from "@/lib/utils";
 import { UI_ROLE, type AppPermission } from "@e3/shared-types";
 
@@ -157,7 +158,7 @@ export function AppShell({
   fallbackEmail: string | null;
 }) {
   const queryClient = useQueryClient();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useSidebarCollapsed();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 

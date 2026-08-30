@@ -32,9 +32,12 @@ import { prefetchNavRoute } from "@/lib/nav-prefetch";
 import { hasPermission } from "@/lib/rbac";
 import { hasQueryClientContext } from "@/lib/router-preload";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
+import { useViewPreference } from "@/lib/view-preference";
 import { cn } from "@/lib/utils";
 import { playlistService } from "@/services";
 import type { Playlist, PlaylistStatus } from "@/types";
+
+const PLAYLIST_VIEWS = ["list", "grid"] as const;
 
 export const Route = createFileRoute("/_shell/playlists/")({
   loader: ({ context }) => {
@@ -89,7 +92,7 @@ function PlaylistsPage() {
   const [status, setStatus] = useState<StatusFilter>("all");
   const [usage, setUsage] = useState<UsageFilter>("all");
   const [itemsFilter, setItemsFilter] = useState<ItemsFilter>("all");
-  const [view, setView] = useState<"list" | "grid">("list");
+  const [view, setView] = useViewPreference("playlists", PLAYLIST_VIEWS, "list");
 
   const playlists = Array.isArray(data) ? data : [];
 

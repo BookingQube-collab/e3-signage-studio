@@ -38,9 +38,12 @@ import { hasPermission } from "@/lib/rbac";
 import { hasQueryClientContext } from "@/lib/router-preload";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
 import { useLiveMonitoring } from "@/lib/use-live-monitoring";
+import { useViewPreference } from "@/lib/view-preference";
 import { cn } from "@/lib/utils";
 import { locationService, screenGroupService, screenService } from "@/services";
 import type { Screen, ScreenGroup, ScreenStatus } from "@/types";
+
+const SCREEN_VIEWS = ["table", "grid"] as const;
 
 export const Route = createFileRoute("/_shell/screens/")({
   loader: ({ context }) => {
@@ -77,7 +80,7 @@ function ScreensPage() {
   const { auth } = Route.useRouteContext();
   const qc = useQueryClient();
   const canManageScreens = Boolean(auth?.ok && hasPermission(auth.profile.role, "screens.manage"));
-  const [view, setView] = useState<"table" | "grid">("table");
+  const [view, setView] = useViewPreference("screens", SCREEN_VIEWS, "table");
   const [pairOpen, setPairOpen] = useState(false);
   const [groupsOpen, setGroupsOpen] = useState(false);
   const [newGroup, setNewGroup] = useState("");

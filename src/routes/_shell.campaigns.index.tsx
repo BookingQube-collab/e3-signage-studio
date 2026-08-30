@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Download, Megaphone, Plus, Repeat, Search } from "lucide-react";
+import { Download, LayoutGrid, List, Megaphone, Plus, Repeat, Search } from "lucide-react";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -37,8 +37,12 @@ import { toCsv } from "@/lib/monitoring";
 import { prefetchNavRoute } from "@/lib/nav-prefetch";
 import { hasQueryClientContext } from "@/lib/router-preload";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
+import { useViewPreference } from "@/lib/view-preference";
+import { cn } from "@/lib/utils";
 import { campaignService, locationService } from "@/services";
 import type { Campaign, CampaignStatus, Location } from "@/types";
+
+const CAMPAIGN_VIEWS = ["list", "grid"] as const;
 
 export const Route = createFileRoute("/_shell/campaigns/")({
   loader: ({ context }) => {
@@ -143,6 +147,7 @@ function CampaignsPage() {
   const [locationId, setLocationId] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [view, setView] = useViewPreference("campaigns", CAMPAIGN_VIEWS, "list");
 
   const campaigns = Array.isArray(data) ? data : [];
   const locations = Array.isArray(locationsQuery.data) ? locationsQuery.data : [];
@@ -345,7 +350,7 @@ function CampaignsPage() {
       />
 
       <E3Card className="mb-5">
-        <E3CardBody className="grid items-end gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(12rem,1.4fr)_repeat(4,minmax(0,1fr))]">
+        <E3CardBody className="grid items-end gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(12rem,1.4fr)_repeat(4,minmax(0,1fr))_auto]">
           <FilterField label="Search">
             <div className="relative">
               <Search
@@ -403,6 +408,38 @@ function CampaignsPage() {
               onChange={(e) => setDateTo(e.target.value)}
               aria-label="Filter campaigns overlapping to date"
             />
+          </FilterField>
+          <FilterField label="View">
+            <div
+              className="flex w-fit overflow-hidden rounded-xl border border-border"
+              role="group"
+              aria-label="Result layout"
+            >
+              <button
+                type="button"
+                aria-label="List view"
+                aria-pressed={view === "list"}
+                onClick={() => setView("list")}
+                className={cn(
+                  "grid size-10 place-items-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98]",
+                  view === "list" && "bg-accent text-foreground",
+                )}
+              >
+                <List className="size-4" />
+              </button>
+              <button
+                type="button"
+                aria-label="Grid view"
+                aria-pressed={view === "grid"}
+                onClick={() => setView("grid")}
+                className={cn(
+                  "grid size-10 place-items-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98]",
+                  view === "grid" && "bg-accent text-foreground",
+                )}
+              >
+                <LayoutGrid className="size-4" />
+              </button>
+            </div>
           </FilterField>
         </E3CardBody>
       </E3Card>
@@ -487,7 +524,7 @@ function CampaignsPage() {
                         : "Publish a campaign with start and end dates to fill this list and the calendar."
                     }
                   />
-                ) : (
+                ) : view === "list" ? (
                   <E3Table
                     columns={scheduledColumns}
                     rows={scheduled}
@@ -495,6 +532,18 @@ function CampaignsPage() {
                     onRowClick={openCampaign}
                     caption="Scheduled campaigns"
                   />
+                ) : (
+                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                    {scheduled.map((c) => (
+                      <CampaignCard
+                        key={c.id}
+                        campaign={c}
+                        locations={locations}
+                        variant="scheduled"
+                        overflow={<CampaignRowMenu campaign={c} />}
+                      />
+                    ))}
+                  </div>
                 )}
               </section>
             ) : null}
@@ -515,7 +564,7 @@ function CampaignsPage() {
                         : "Choose Ongoing (no dates) when creating a campaign for looping content that should always play."
                     }
                   />
-                ) : (
+                ) : view === "list" ? (
                   <div className="space-y-4">
                     {ongoingGroups.map(({ location, campaigns: rows }) => (
                       <OngoingLocationGroup
@@ -535,22 +584,125 @@ function CampaignsPage() {
                       />
                     ) : null}
                   </div>
+                ) : (
+                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                    {ongoing.map((c) => (
+                      <CampaignCard
+                        key={c.id}
+                        campaign={c}
+                        locations={locations}
+                        variant="ongoing"
+                        overflow={<CampaignRowMenu campaign={c} />}
+                      />
+                    ))}
+                  </div>
                 )}
               </section>
             ) : null}
 
             {other.length > 0 ? (
-              <E3Table
-                columns={scheduledColumns}
-                rows={other}
-                rowKey={(c) => c.id}
-                onRowClick={openCampaign}
-                caption="Other campaigns"
-              />
+              view === "list" ? (
+                <E3Table
+                  columns={scheduledColumns}
+                  rows={other}
+                  rowKey={(c) => c.id}
+                  onRowClick={openCampaign}
+                  caption="Other campaigns"
+                />
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {other.map((c) => (
+                    <CampaignCard
+                      key={c.id}
+                      campaign={c}
+                      locations={locations}
+                      variant="scheduled"
+                      overflow={<CampaignRowMenu campaign={c} />}
+                    />
+                  ))}
+                </div>
+              )
             ) : null}
           </div>
         )}
       </E3QueryBoundary>
+    </div>
+  );
+}
+
+function CampaignCard({
+  campaign,
+  locations,
+  variant,
+  overflow,
+}: {
+  campaign: Campaign;
+  locations: Location[];
+  variant: "scheduled" | "ongoing";
+  overflow?: ReactNode;
+}) {
+  const effective = effectiveCampaignStatus(campaign.status, campaign.schedule);
+  const locationLabel = locationNamesFor(campaign, locations);
+  const screenCount = (campaign.screenIds ?? []).length;
+  const syncPct =
+    campaign.syncTotal === 0 ? 0 : (campaign.syncReady / campaign.syncTotal) * 100;
+
+  return (
+    <div className="relative rounded-2xl border border-border bg-card shadow-sm transition-all hover:-translate-y-0.5 hover:border-e3-purple/40 hover:shadow-md">
+      <Link
+        to="/campaigns/$id"
+        params={{ id: campaign.id }}
+        className="block rounded-2xl p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <div className="flex h-28 items-center justify-center rounded-xl bg-gradient-to-br from-e3-purple/15 via-muted to-e3-orange/10">
+          <Megaphone className="size-10 text-e3-purple/70" aria-hidden />
+        </div>
+        <div className="mt-3 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="font-display truncate text-lg font-semibold tracking-tight">
+              {campaign.name || "Untitled"}
+            </h3>
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+              {campaign.contentType}: {campaign.contentName || "—"}
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            {variant === "ongoing" ? <E3StatusBadge status="Ongoing" /> : null}
+            <E3StatusBadge status={effective} />
+          </div>
+        </div>
+        <div className="mt-3 space-y-2 text-xs tabular-nums text-muted-foreground">
+          <p>
+            {screenCount} screen{screenCount === 1 ? "" : "s"}
+            {locationLabel ? ` · ${locationLabel}` : ""}
+          </p>
+          {variant === "scheduled" && isDatedSchedule(campaign.schedule) ? (
+            <p>
+              {formatCampaignDateTime(
+                campaign.schedule.startDate,
+                campaign.schedule.startTime,
+                campaign.schedule.timezone,
+              )}{" "}
+              →{" "}
+              {formatCampaignDateTime(
+                campaign.schedule.endDate,
+                campaign.schedule.endTime,
+                campaign.schedule.timezone,
+              )}
+            </p>
+          ) : null}
+          {campaign.syncTotal > 0 ? (
+            <E3Progress
+              className="w-full"
+              value={syncPct}
+              label={`${campaign.syncReady}/${campaign.syncTotal}`}
+            />
+          ) : (
+            <p>Modified {campaign.modifiedAt || "—"}</p>
+          )}
+        </div>
+      </Link>
+      {overflow ? <div className="absolute right-3 top-3 z-10">{overflow}</div> : null}
     </div>
   );
 }

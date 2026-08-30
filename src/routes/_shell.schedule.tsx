@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { CalendarClock } from "lucide-react";
-import { useState } from "react";
 
 import {
   E3Card,
@@ -16,7 +15,10 @@ import { cn } from "@/lib/utils";
 import { effectiveCampaignStatus, formatCampaignDateTime, isDatedSchedule } from "@/lib/campaign-window";
 import { prefetchNavRoute } from "@/lib/nav-prefetch";
 import { hasQueryClientContext } from "@/lib/router-preload";
+import { useViewPreference } from "@/lib/view-preference";
 import { scheduleService } from "@/services";
+
+const SCHEDULE_VIEWS = ["calendar", "list"] as const;
 
 export const Route = createFileRoute("/_shell/schedule")({
   loader: ({ context }) => {
@@ -53,7 +55,7 @@ function monthMeta(date = new Date()) {
 }
 
 function SchedulePage() {
-  const [view, setView] = useState<"calendar" | "list">("calendar");
+  const [view, setView] = useViewPreference("schedule", SCHEDULE_VIEWS, "calendar");
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["schedule"],
     queryFn: scheduleService.list,

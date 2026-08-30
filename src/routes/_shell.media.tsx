@@ -66,10 +66,13 @@ import { prefetchNavRoute } from "@/lib/nav-prefetch";
 import { invalidateKeysInBackground } from "@/lib/query-cache";
 import { hasQueryClientContext } from "@/lib/router-preload";
 import { useIsClient } from "@/lib/use-is-client";
+import { useViewPreference } from "@/lib/view-preference";
 import { cn } from "@/lib/utils";
 import { mediaService } from "@/services";
 import type { Media, MediaFolder } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
+
+const MEDIA_VIEWS = ["grid", "list"] as const;
 
 export const Route = createFileRoute("/_shell/media")({
   loader: ({ context }) => {
@@ -100,7 +103,7 @@ function MediaPage() {
   const qc = useQueryClient();
   const isClient = useIsClient();
   const replaceInputRef = useRef<HTMLInputElement>(null);
-  const [view, setView] = useState<"grid" | "list">("grid");
+  const [view, setView] = useViewPreference("media", MEDIA_VIEWS, "grid");
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("All");
   const [search, setSearch] = useState("");
   const [folderId, setFolderId] = useState<string | null>(null);
