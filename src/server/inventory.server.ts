@@ -4,17 +4,20 @@ import {
   isPortraitOrientation,
   LOCATION_STATUSES,
   LOCATION_TYPES,
+  MEDIA_TYPES,
   ORIENTATIONS,
   SCREEN_OPERATIONAL_STATUSES,
   type DeviceSyncState,
   type LocationStatus,
   type LocationType,
+  type MediaType,
   type Orientation,
   type ScreenOperationalStatus,
 } from "@e3/shared-types";
 
 import { connectivityFromHeartbeat, DEFAULT_OFFLINE_AFTER_SECONDS } from "@/lib/connectivity";
 import { hashPairingCode } from "@/lib/device-crypto";
+import { mediaKeysToSign } from "@/lib/media-sign";
 import { assertPairingCodeDigits, pairingCodeLinkError } from "@/lib/pairing-code";
 
 import type { CmsProfile } from "@/lib/auth-types";
@@ -27,6 +30,7 @@ import {
 import type { LocationRecord, ScreenGroupRecord, ScreenRecord } from "@/services/inventory-map";
 import { requireCmsPermission, resolveAuthFromRequest } from "./auth.server";
 import { ensureSeedLocations } from "./location-seed.server";
+import { createObjectDownloadUrls } from "./storage.server";
 import { getServiceRoleClient, getUserClient } from "./supabase.server";
 
 const PENDING_PAIR_TTL_MS = 90 * 24 * 60 * 60 * 1000;
@@ -279,6 +283,82 @@ type ScreenDb = {
 const SCREEN_COLUMNS =
   "id, organization_id, location_id, name, screen_type, orientation, width, height, operational_status, app_version, local_manifest_version, cloud_manifest_version, last_heartbeat_at, last_sync_at, total_storage, available_storage, current_playlist_id, currently_playing_media_id, last_error, archived_at";
 
+function isMediaType(value: string): value is MediaType {
+  return (MEDIA_TYPES as readonly string[]).includes(value);
+}
+
+type NowPlayingPreview = {
+  name: string;
+  type: MediaType | null;
+  thumbnailUrl: string | null;
+  previewUrl: string | null;
+};
+
+/** Sign image/poster thumbs for currently-playing media on screen cards (not full video files). */
+async function loadNowPlayingPreviews(
+  client: ReturnType<typeof getUserClient>,
+  mediaIds: string[],
+): Promise<Map<string, NowPlayingPreview>> {
+  const out = new Map<string, NowPlayingPreview>();
+  if (mediaIds.length === 0) return out;
+
+  const { data: mediaRows, error: mediaError } = await client
+    .from("media")
+    .select("id, name, type, current_version_id")
+    .in("id", mediaIds);
+  throwIfError(mediaError, "Could not load now-playing media.");
+
+  const versionIds = (mediaRows ?? [])
+    .map((row) => asNullableString((row as { current_version_id?: string | null }).current_version_id))
+    .filter((id): id is string => Boolean(id));
+
+  const versionById = new Map<string, Record<string, unknown>>();
+  if (versionIds.length > 0) {
+    const { data: versionRows, error: versionError } = await client
+      .from("media_versions")
+      .select("id, storage_key, thumbnail_key, mime_type, status")
+      .in("id", versionIds);
+    throwIfError(versionError, "Could not load now-playing media files.");
+    for (const raw of versionRows ?? []) {
+      const row = raw as Record<string, unknown>;
+      versionById.set(asString(row["id"]), row);
+    }
+  }
+
+  const keys: string[] = [];
+  const picked = (mediaRows ?? []).map((raw) => {
+    const row = raw as Record<string, unknown>;
+    const id = asString(row["id"]);
+    const typeRaw = asString(row["type"]);
+    const type = isMediaType(typeRaw) ? typeRaw : null;
+    const current = versionById.get(asString(row["current_version_id"]));
+    const status = current ? asString(current["status"]) : "";
+    const previewKey =
+      current && status === "READY" ? asNullableString(current["storage_key"]) : null;
+    const mime = current ? asString(current["mime_type"]).toLowerCase() : "";
+    const isImage = mime.startsWith("image/");
+    const thumbnailKey =
+      asNullableString(current?.["thumbnail_key"]) ?? (isImage ? previewKey : null);
+    keys.push(...mediaKeysToSign({ previewKey, thumbnailKey, isImage, signAllPreviews: false }));
+    return { id, name: asString(row["name"]), type, previewKey, thumbnailKey, isImage };
+  });
+
+  const urls = await createObjectDownloadUrls(keys);
+  for (const item of picked) {
+    const thumbnailUrl = item.thumbnailKey ? (urls.get(item.thumbnailKey) ?? null) : null;
+    const previewUrl = item.isImage
+      ? (thumbnailUrl ?? (item.previewKey ? (urls.get(item.previewKey) ?? null) : null))
+      : null;
+    out.set(item.id, {
+      name: item.name,
+      type: item.type,
+      thumbnailUrl,
+      previewUrl,
+    });
+  }
+  return out;
+}
+
 async function loadScreenRecords(
   client: ReturnType<typeof getUserClient>,
   organizationId: string,
@@ -298,7 +378,7 @@ async function loadScreenRecords(
     ),
   ];
 
-  const [threshold, locRes, memberRes, syncRes, playlistRes, mediaRes] = await Promise.all([
+  const [threshold, locRes, memberRes, syncRes, playlistRes, nowPlayingByMedia] = await Promise.all([
     offlineThreshold != null
       ? Promise.resolve(offlineThreshold)
       : offlineAfterSeconds(client, organizationId),
@@ -316,9 +396,7 @@ async function loadScreenRecords(
     playlistIds.length > 0
       ? client.from("playlists").select("id, name").in("id", playlistIds)
       : Promise.resolve({ data: [] as Array<{ id: string; name: string }>, error: null }),
-    mediaIds.length > 0
-      ? client.from("media").select("id, name").in("id", mediaIds)
-      : Promise.resolve({ data: [] as Array<{ id: string; name: string }>, error: null }),
+    loadNowPlayingPreviews(client, mediaIds),
   ]);
 
   throwIfError(locRes.error, "Could not load locations.");
@@ -370,10 +448,6 @@ async function loadScreenRecords(
       asString((row as { name: string }).name),
     );
   }
-  const mediaName = new Map<string, string>();
-  for (const row of mediaRes.data ?? []) {
-    mediaName.set(asString((row as { id: string }).id), asString((row as { name: string }).name));
-  }
 
   const out: ScreenRecord[] = [];
   for (const row of screens) {
@@ -383,6 +457,9 @@ async function loadScreenRecords(
     const orientation = isOrientation(row.orientation) ? row.orientation : "LANDSCAPE";
     const sync = syncByScreen.get(row.id);
     const syncState = sync?.syncState ?? "WAITING";
+    const playing = row.currently_playing_media_id
+      ? nowPlayingByMedia.get(row.currently_playing_media_id)
+      : undefined;
     out.push({
       id: row.id,
       name: row.name,
@@ -399,10 +476,11 @@ async function loadScreenRecords(
       playlistName: row.current_playlist_id
         ? (playlistName.get(row.current_playlist_id) ?? null)
         : null,
-      nowPlaying: row.currently_playing_media_id
-        ? (mediaName.get(row.currently_playing_media_id) ?? null)
-        : null,
+      nowPlaying: playing?.name ?? null,
       nowPlayingMediaId: row.currently_playing_media_id,
+      nowPlayingMediaType: playing?.type ?? null,
+      nowPlayingThumbnailUrl: playing?.thumbnailUrl ?? null,
+      nowPlayingPreviewUrl: playing?.previewUrl ?? null,
       syncState,
       syncProgress: sync?.progress ?? 0,
       lastHeartbeatAt: row.last_heartbeat_at,

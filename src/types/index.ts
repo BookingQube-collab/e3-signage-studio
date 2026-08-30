@@ -60,6 +60,9 @@ export interface Screen {
   playlistName: string | null;
   nowPlaying: string | null;
   nowPlayingMediaId: string | null;
+  nowPlayingMediaType: MediaType | null;
+  nowPlayingThumbnailUrl: string | null;
+  nowPlayingPreviewUrl: string | null;
   syncState: SyncState;
   syncProgress: number;
   lastSeen: string;

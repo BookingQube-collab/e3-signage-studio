@@ -6,12 +6,13 @@ import {
   type DeviceSyncState,
   type LocationStatus as CanonicalLocationStatus,
   type LocationType as CanonicalLocationType,
+  type MediaType as CanonicalMediaType,
   type Orientation as CanonicalOrientation,
   type ScreenOperationalStatus,
 } from "@e3/shared-types";
 
 import { formatLastActive } from "@/lib/relative-time";
-import type { Location, Screen, ScreenGroup, ScreenStatus, SyncState } from "@/types";
+import type { Location, MediaType, Screen, ScreenGroup, ScreenStatus, SyncState } from "@/types";
 
 export const LOCATION_TYPE_FROM_UI = invert(UI_LOCATION_TYPE);
 export const LOCATION_STATUS_FROM_UI = invert(UI_LOCATION_STATUS);
@@ -57,6 +58,9 @@ export type ScreenRecord = {
   playlistName: string | null;
   nowPlaying: string | null;
   nowPlayingMediaId: string | null;
+  nowPlayingMediaType: CanonicalMediaType | null;
+  nowPlayingThumbnailUrl: string | null;
+  nowPlayingPreviewUrl: string | null;
   syncState: DeviceSyncState;
   syncProgress: number;
   lastHeartbeatAt: string | null;
@@ -125,13 +129,25 @@ function bytesToGb(bytes: number | null): number {
   return bytes / 1_000_000_000;
 }
 
+function nowPlayingMediaTypeLabel(type: CanonicalMediaType | null): MediaType | null {
+  if (!type) return null;
+  const label = UI_LABELS.mediaType[type];
+  return label === "Video" ||
+    label === "Image" ||
+    label === "QR" ||
+    label === "Logo" ||
+    label === "Audio"
+    ? label
+    : "Image";
+}
+
 export function toUiScreen(row: ScreenRecord): Screen {
   const usedBytes =
     row.totalStorageBytes != null && row.availableStorageBytes != null
       ? Math.max(0, row.totalStorageBytes - row.availableStorageBytes)
       : null;
   const syncLabel = UI_LABELS.syncState[row.syncState];
-  return {
+  const screen: Screen = {
     id: row.id,
     name: row.name,
     locationId: row.locationId,
@@ -145,6 +161,9 @@ export function toUiScreen(row: ScreenRecord): Screen {
     playlistName: row.playlistName,
     nowPlaying: row.nowPlaying,
     nowPlayingMediaId: row.nowPlayingMediaId,
+    nowPlayingMediaType: nowPlayingMediaTypeLabel(row.nowPlayingMediaType),
+    nowPlayingThumbnailUrl: row.nowPlayingThumbnailUrl,
+    nowPlayingPreviewUrl: row.nowPlayingPreviewUrl,
     syncState: syncLabel as SyncState,
     syncProgress: row.syncProgress,
     lastSeen: formatLastActive(row.lastHeartbeatAt),
@@ -156,6 +175,7 @@ export function toUiScreen(row: ScreenRecord): Screen {
     appVersion: row.appVersion ?? "—",
     lastError: row.lastError,
   };
+  return screen;
 }
 
 export function toUiScreenGroup(row: ScreenGroupRecord): ScreenGroup {

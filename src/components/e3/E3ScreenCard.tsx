@@ -2,10 +2,12 @@ import type { ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { MonitorPlay } from "lucide-react";
 
+import { MediaThumb } from "@/components/e3/E3MediaCard";
 import { E3Progress } from "@/components/e3/E3Progress";
 import { E3StatusBadge } from "@/components/e3/E3StatusBadge";
+import { isPreviewPortrait, previewAspectRatio } from "@/lib/preview-orientation";
 import { cn } from "@/lib/utils";
-import type { Screen, ScreenStatus } from "@/types";
+import type { Media, Screen, ScreenStatus } from "@/types";
 
 const statusBar: Record<ScreenStatus, string> = {
   online: "bg-success",
@@ -13,6 +15,29 @@ const statusBar: Record<ScreenStatus, string> = {
   syncing: "bg-info",
   disabled: "bg-muted-foreground/40",
 };
+
+function nowPlayingThumbMedia(screen: Screen): Media | null {
+  if (!screen.nowPlayingMediaId) return null;
+  const media: Media = {
+    id: screen.nowPlayingMediaId,
+    filename: screen.nowPlaying ?? "Now playing",
+    type: screen.nowPlayingMediaType ?? "Video",
+    dimensions: "",
+    durationSec: null,
+    sizeMb: 0,
+    modifiedAt: "",
+    uploadedBy: "",
+    uploadedAt: "",
+    version: "v1",
+    thumbnailHue: 265,
+    folderId: null,
+    folderName: null,
+    usedIn: { playlists: [], campaigns: [], screens: [] },
+  };
+  if (screen.nowPlayingThumbnailUrl) media.thumbnailUrl = screen.nowPlayingThumbnailUrl;
+  if (screen.nowPlayingPreviewUrl) media.previewUrl = screen.nowPlayingPreviewUrl;
+  return media;
+}
 
 export function E3ScreenCard({
   screen,
@@ -23,6 +48,9 @@ export function E3ScreenCard({
   className?: string;
   overflow?: ReactNode;
 }) {
+  const playing = nowPlayingThumbMedia(screen);
+  const portrait = isPreviewPortrait(screen.orientation);
+
   return (
     <div
       className={cn(
@@ -54,7 +82,26 @@ export function E3ScreenCard({
           <E3StatusBadge status={screen.status} />
         </div>
 
-        <dl className="mt-5 space-y-2 text-sm">
+        <div
+          className={cn(
+            "mt-4 overflow-hidden rounded-xl border border-border bg-muted/30",
+            portrait ? "mx-auto w-full max-w-[10.5rem]" : "w-full",
+          )}
+          style={{ aspectRatio: previewAspectRatio(screen.orientation) }}
+        >
+          {playing ? (
+            <MediaThumb item={playing} className="size-full rounded-none" />
+          ) : (
+            <div className="flex size-full flex-col items-center justify-center gap-1.5 px-3 text-muted-foreground">
+              <MonitorPlay className="size-8 opacity-40" aria-hidden />
+              <span className="line-clamp-2 text-center text-xs">
+                {screen.nowPlaying ?? "Nothing playing"}
+              </span>
+            </div>
+          )}
+        </div>
+
+        <dl className="mt-4 space-y-2 text-sm">
           <div className="flex min-w-0 items-center gap-2">
             <MonitorPlay className="size-4 shrink-0 text-muted-foreground" aria-hidden />
             <dt className="sr-only">Now playing</dt>
