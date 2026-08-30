@@ -4,16 +4,21 @@
  *   Emergency override     100
  *   Special event           80
  *   Campaign                50
- *   Normal playlist         10
+ *   Normal playlist         10  (screen-assigned default package)
  *
- * Tie-break, in order:
+ * Package resolution for a screen (CMS publish / Sync Now):
+ *   1. Active campaign in its overall date window for this screen
+ *   2. Else screen-assigned playlist (screens.current_playlist_id)
+ *   3. Else idle / waiting screen
+ *
+ * Tie-break among campaigns, in order:
  *   1. emergency flag on the campaign
  *   2. later schedule start (more specific window)
  *   3. later campaign.created_at
  *   4. campaign id (stable)
  *
  * Disabled screens never receive a new manifest.
- * Expired schedules drop out on the device using the local clock — no cloud call.
+ * Daily play hours within an active campaign window are enforced on-device.
  *
  * The Lovable campaign wizard currently treats 1 as “highest”. Convert at the
  * API boundary; do not change the wizard copy in this phase.

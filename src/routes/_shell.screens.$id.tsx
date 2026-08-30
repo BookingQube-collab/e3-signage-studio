@@ -85,7 +85,7 @@ function ScreenDetailPage() {
     mutationFn: () => screenService.syncNow(id),
     onSuccess: () => {
       invalidate();
-      toast.success("Sync requested");
+      toast.success("Sync started — playlist is being sent to the TV");
     },
     onError: (err: Error) => {
       toast.error(err.message || "Could not request sync");
@@ -109,7 +109,7 @@ function ScreenDetailPage() {
         entity: next,
       });
       setPlaylistOpen(false);
-      toast.success("Playlist changed");
+      toast.success("Playlist assigned and packaged — tap Sync Now to push to the TV now");
       invalidateKeysInBackground(qc, [["playlist", next.playlistId]]);
     },
     onError: (err: Error) => {
@@ -241,7 +241,7 @@ function ScreenDetailPage() {
                   <E3CardBody>
                     <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
                       {[
-                        ["Current playlist", screen.playlistName ?? "—"],
+                        ["Assigned playlist", screen.playlistName ?? "—"],
                         ["Local version", screen.localVersion],
                         ["Cloud version", screen.cloudVersion],
                         ["Resolution", screen.resolution],
@@ -392,7 +392,7 @@ function ScreenDetailPage() {
                 setPlaylistOpen(open);
               }}
               title="Change playlist"
-              description="The screen will download the new content on the next sync."
+              description="Assigns the always-on playlist for this screen (no campaign needed). Tap Sync Now after Apply to send it to the TV immediately."
               className="sm:max-w-2xl"
               footer={
                 <>

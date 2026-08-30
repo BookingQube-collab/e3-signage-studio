@@ -6,6 +6,8 @@ export type ScreenLite = {
   organizationId: string;
   operationalStatus: string;
   archivedAt: string | null;
+  /** Screen-assigned default playlist (always-on when no campaign is in window). */
+  currentPlaylistId?: string | null;
   lastHeartbeatAt?: string | null;
   currentlyPlayingMediaId?: string | null;
 };

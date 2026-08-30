@@ -909,6 +909,12 @@ export async function updateScreen(
     await bumpScreenConfigAndRequestSync(admin, id);
   }
 
+  // Change playlist: publish package so Sync Now / next poll can deliver without a campaign.
+  if (patch.playlistId !== undefined) {
+    const { resolveAndPublishScreenContent } = await import("./campaigns.server");
+    await resolveAndPublishScreenContent(accessToken, id);
+  }
+
   const next = await getScreen(accessToken, id);
   if (!next) throw new Error("Screen not found.");
   return next;
@@ -980,6 +986,11 @@ export async function requestScreenSync(accessToken: string, id: string): Promis
     asString((location as { type?: string } | null)?.type),
   );
 
+  // Build/refresh the content package first (campaign → screen playlist → idle),
+  // then flag the device so the player pulls immediately.
+  const { resolveAndPublishScreenContent } = await import("./campaigns.server");
+  await resolveAndPublishScreenContent(accessToken, id);
+
   const admin = getServiceRoleClient();
   const now = new Date().toISOString();
   const { data: existing, error: existingError } = await admin
@@ -991,7 +1002,7 @@ export async function requestScreenSync(accessToken: string, id: string): Promis
   if (existing) {
     const { error } = await admin
       .from("device_sync_states")
-      .update({ sync_requested_at: now })
+      .update({ sync_requested_at: now, updated_at: now })
       .eq("screen_id", id);
     throwIfError(error, "Could not request sync.");
   } else {

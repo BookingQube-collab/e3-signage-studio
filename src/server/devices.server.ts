@@ -639,6 +639,7 @@ async function buildManifest(
   let playlistId: string | null = null;
   let layoutId: string | null = null;
   let emergency = false;
+  const payloadRaw = manifestRow["payload"];
   if (campaignId) {
     const { data: campaign } = await admin
       .from("campaigns")
@@ -648,13 +649,18 @@ async function buildManifest(
     playlistId = asNullableString((campaign as { playlist_id?: string | null } | null)?.playlist_id);
     layoutId = asNullableString((campaign as { layout_id?: string | null } | null)?.layout_id);
     emergency = Boolean((campaign as { emergency?: boolean } | null)?.emergency);
+  } else if (payloadRaw && typeof payloadRaw === "object") {
+    // Screen-assigned default playlist (or layout) packages have no campaign_id.
+    const payload = payloadRaw as Record<string, unknown>;
+    playlistId = asNullableString(payload["playlistId"]);
+    layoutId = asNullableString(payload["layoutId"]);
   }
 
   let playlist: ContentManifest["playlist"] = null;
   const layoutIds = new Set<string>();
   if (layoutId) layoutIds.add(layoutId);
   if (playlistId) {
-    const payload = manifestRow["payload"];
+    const payload = payloadRaw;
     const frozenItems = parseFrozenPlaylistItems(payload);
     let draftItems: Array<{
       mediaId: string;

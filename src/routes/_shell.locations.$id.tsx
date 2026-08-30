@@ -315,7 +315,7 @@ function LocationDetailPage() {
                       <E3Alert
                         severity="info"
                         title="Content defaults"
-                        detail="Screens inherit the location playlist unless a campaign overrides it."
+                        detail="Each screen plays its assigned playlist until a campaign in its date window takes over. Waiting-screen branding below is only shown when nothing is assigned."
                       />
                       <E3Alert
                         severity="warning"

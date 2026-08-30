@@ -38,7 +38,7 @@ import {
 import { isUuid } from "@/services/inventory-map";
 import type { CampaignRecord } from "@/services/campaign-map";
 import type { SyncStatusItem } from "@/types";
-import { canonicalPriorityToUi, pickWinningSchedule, uiPriorityToCanonical } from "./priority";
+import { canonicalPriorityToUi, pickWinningSchedule, PRIORITY_NORMAL, uiPriorityToCanonical } from "./priority";
 import { requireCmsPermission } from "./auth.server";
 import { getServiceRoleClient, getUserClient } from "./supabase.server";
 
@@ -214,7 +214,7 @@ async function loadOrgScreens(client: UserClient, organizationId: string): Promi
   const { data, error } = await client
     .from("screens")
     .select(
-      "id, location_id, organization_id, operational_status, archived_at, last_heartbeat_at, currently_playing_media_id",
+      "id, location_id, organization_id, operational_status, archived_at, current_playlist_id, last_heartbeat_at, currently_playing_media_id",
     )
     .eq("organization_id", organizationId);
   throwIfError(error, "Could not load screens.");
@@ -226,6 +226,7 @@ async function loadOrgScreens(client: UserClient, organizationId: string): Promi
       organizationId: asString(row["organization_id"]),
       operationalStatus: asString(row["operational_status"], "READY"),
       archivedAt: asNullableString(row["archived_at"]),
+      currentPlaylistId: asNullableString(row["current_playlist_id"]),
       lastHeartbeatAt: asNullableString(row["last_heartbeat_at"]),
       currentlyPlayingMediaId: asNullableString(row["currently_playing_media_id"]),
     };
@@ -931,6 +932,22 @@ type ContestRow = {
   targets: Array<{ type: CampaignTargetType; targetId: string | null }>;
 };
 
+/** Overall campaign date window is Active (not Scheduled / Ended). Daily hours stay on-device. */
+function isCampaignInPlayWindow(campaign: ContestRow, nowMs = Date.now()): boolean {
+  return (
+    campaignLifecycleStatus(
+      {
+        startDate: campaign.schedule.startDate,
+        endDate: campaign.schedule.endDate,
+        startTime: campaign.schedule.startTime,
+        endTime: campaign.schedule.endTime,
+        timezone: campaign.schedule.timezone,
+      },
+      nowMs,
+    ) === "Active"
+  );
+}
+
 async function loadContest(client: UserClient, organizationId: string): Promise<ContestRow[]> {
   const { data: campaigns, error } = await client
     .from("campaigns")
@@ -1121,10 +1138,7 @@ async function writeManifestForScreen(
 
   const { error: screenError } = await admin
     .from("screens")
-    .update({
-      cloud_manifest_version: nextVersion,
-      current_playlist_id: winner.playlistId,
-    })
+    .update({ cloud_manifest_version: nextVersion })
     .eq("id", screen.id);
   throwIfError(screenError, "Could not update screen manifest version.");
 }
@@ -1191,17 +1205,150 @@ async function writeIdleManifestForScreen(
     manifest_id: manifestId,
     from_state: isSyncState(fromState) ? fromState : "WAITING",
     to_state: "NOTIFIED",
-    detail: "Campaign stopped — idle package",
+    detail: "No campaign or screen playlist — idle package",
   });
   throwIfError(eventError, "Could not record sync event.");
   const { error: screenError } = await admin
     .from("screens")
-    .update({
-      cloud_manifest_version: nextVersion,
-      current_playlist_id: null,
-    })
+    .update({ cloud_manifest_version: nextVersion })
     .eq("id", screen.id);
   throwIfError(screenError, "Could not update screen manifest version.");
+}
+
+/**
+ * Always-on package from the screen's assigned playlist (no campaign required).
+ * Empty schedules → player plays continuously until a campaign package replaces this.
+ */
+async function writeDefaultPlaylistManifestForScreen(
+  client: UserClient,
+  admin: ReturnType<typeof getServiceRoleClient>,
+  organizationId: string,
+  userId: string,
+  screen: ScreenLite,
+  playlistId: string,
+): Promise<void> {
+  const [assets, playlistItems] = await Promise.all([
+    collectAssets(client, organizationId, playlistId, null),
+    collectPlaylistItems(client, playlistId),
+  ]);
+  const { data: latest, error: latestError } = await admin
+    .from("content_manifests")
+    .select("manifest_version")
+    .eq("screen_id", screen.id)
+    .order("manifest_version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  throwIfError(latestError, "Could not load existing manifests.");
+  const nextVersion = asNumber((latest as { manifest_version?: number } | null)?.manifest_version, 0) + 1;
+  const payload = {
+    campaignId: null,
+    playlistId,
+    layoutId: null,
+    schedule: null,
+    priority: PRIORITY_NORMAL,
+    playlistItems,
+    layoutZones: [] as LayoutZoneSnapshot[],
+    assets: assets.map((asset) => ({
+      mediaId: asset.mediaId,
+      mediaVersionId: asset.mediaVersionId,
+      checksumSha256: asset.checksumSha256,
+      sizeBytes: asset.fileSize,
+      type: asset.assetType,
+    })),
+  };
+  const { data: manifest, error: manifestError } = await admin
+    .from("content_manifests")
+    .insert({
+      screen_id: screen.id,
+      campaign_id: null,
+      manifest_version: nextVersion,
+      config_version: 1,
+      payload,
+      created_by: userId && isUuid(userId) ? userId : null,
+    })
+    .select("id")
+    .single();
+  throwIfError(manifestError, "Could not create screen playlist package.");
+  const manifestId = asString((manifest as { id: string }).id);
+  if (assets.length > 0) {
+    const { error: assetError } = await admin.from("manifest_assets").insert(
+      assets.map((asset) => ({
+        manifest_id: manifestId,
+        media_id: asset.mediaId,
+        media_version_id: asset.mediaVersionId,
+        checksum_sha256: asset.checksumSha256,
+        file_size: asset.fileSize,
+        local_filename: asset.localFilename,
+        asset_type: asset.assetType,
+      })),
+    );
+    throwIfError(assetError, "Could not save manifest assets.");
+  }
+
+  const now = new Date().toISOString();
+  const { data: existing, error: existingError } = await admin
+    .from("device_sync_states")
+    .select("screen_id, sync_state")
+    .eq("screen_id", screen.id)
+    .maybeSingle();
+  throwIfError(existingError, "Could not load device sync state.");
+  const fromState = asString((existing as { sync_state?: string } | null)?.sync_state, "WAITING");
+  const syncPatch = {
+    cloud_manifest_version: nextVersion,
+    pending_manifest_id: manifestId,
+    package_state: "PENDING",
+    sync_state: "NOTIFIED",
+    sync_progress: 0,
+    sync_requested_at: now,
+    last_error: null,
+    updated_at: now,
+  };
+  if (existing) {
+    const { error } = await admin.from("device_sync_states").update(syncPatch).eq("screen_id", screen.id);
+    throwIfError(error, "Could not update device sync state.");
+  } else {
+    const { error } = await admin.from("device_sync_states").insert({
+      screen_id: screen.id,
+      ...syncPatch,
+    });
+    throwIfError(error, "Could not create device sync state.");
+  }
+  const { error: eventError } = await admin.from("sync_events").insert({
+    screen_id: screen.id,
+    manifest_id: manifestId,
+    from_state: isSyncState(fromState) ? fromState : "WAITING",
+    to_state: "NOTIFIED",
+    detail: `Screen default playlist ${playlistId} published`,
+  });
+  throwIfError(eventError, "Could not record sync event.");
+
+  const { error: screenError } = await admin
+    .from("screens")
+    .update({ cloud_manifest_version: nextVersion })
+    .eq("id", screen.id);
+  throwIfError(screenError, "Could not update screen manifest version.");
+}
+
+async function fallbackContentForScreen(
+  client: UserClient,
+  admin: ReturnType<typeof getServiceRoleClient>,
+  organizationId: string,
+  userId: string,
+  screen: ScreenLite,
+): Promise<void> {
+  const playlistId = screen.currentPlaylistId;
+  if (playlistId && isUuid(playlistId)) {
+    await writeDefaultPlaylistManifestForScreen(
+      client,
+      admin,
+      organizationId,
+      userId,
+      screen,
+      playlistId,
+    );
+    return;
+  }
+  await writeIdleManifestForScreen(admin, userId, screen);
 }
 
 async function notifyScreens(
@@ -1233,8 +1380,9 @@ async function notifyScreens(
       continue;
     }
     const campaignIds = new Set(campaignIdsTargetingScreen(screen, targets, groups));
+    // Priority: active in-window campaign → screen playlist → idle waiting.
     const candidates = contest
-      .filter((campaign) => campaignIds.has(campaign.id))
+      .filter((campaign) => campaignIds.has(campaign.id) && isCampaignInPlayWindow(campaign))
       .map((campaign) => ({
         campaignId: campaign.id,
         emergency: campaign.emergency,
@@ -1245,7 +1393,13 @@ async function notifyScreens(
     const winnerPick = pickWinningSchedule(candidates);
     if (!winnerPick) {
       if (!opts.onlyIfCampaignId) {
-        await writeIdleManifestForScreen(admin, auth.userId, screen);
+        await fallbackContentForScreen(
+          client,
+          admin,
+          auth.profile.organizationId,
+          auth.userId,
+          screen,
+        );
       }
       continue;
     }
@@ -1277,7 +1431,7 @@ function winnerForScreen(
   );
   const campaignIds = new Set(campaignIdsTargetingScreen(screen, targets, groups));
   const candidates = contest
-    .filter((campaign) => campaignIds.has(campaign.id))
+    .filter((campaign) => campaignIds.has(campaign.id) && isCampaignInPlayWindow(campaign))
     .map((campaign) => ({
       campaignId: campaign.id,
       emergency: campaign.emergency,
@@ -1433,7 +1587,7 @@ function parseFrozenLayoutZones(payload: unknown): LayoutZoneSnapshot[] {
   });
 }
 
-/** Rebuild packages for live campaigns that use this playlist so screens get new items. */
+/** Rebuild packages for screens using this playlist via campaigns OR screen assignment. */
 export async function republishScreensUsingPlaylist(
   accessToken: string,
   playlistId: string,
@@ -1443,7 +1597,6 @@ export async function republishScreensUsingPlaylist(
   const client = getUserClient(accessToken);
   const contest = await loadContest(client, auth.profile.organizationId);
   const using = contest.filter((campaign) => campaign.playlistId === playlistId);
-  if (using.length === 0) return 0;
   const screens = await loadOrgScreens(client, auth.profile.organizationId);
   const groups = await loadGroups(client, auth.profile.organizationId);
   const screenIds = new Set<string>();
@@ -1452,6 +1605,10 @@ export async function republishScreensUsingPlaylist(
       screenIds.add(id);
     }
   }
+  for (const screen of screens) {
+    if (screen.currentPlaylistId === playlistId) screenIds.add(screen.id);
+  }
+  if (screenIds.size === 0) return 0;
   await notifyScreens(accessToken, [...screenIds], {});
   return screenIds.size;
 }
@@ -1482,6 +1639,8 @@ export async function republishScreensUsingLayout(
 /**
  * If the live playlist/layout has new assets OR different order/zones than the
  * frozen package, bump a new manifest version so TVs pick up CMS edits.
+ * Also flips packages when a campaign enters/leaves its date window, or when
+ * falling back to the screen-assigned default playlist.
  */
 export async function republishScreenIfPlaylistStale(
   screenId: string,
@@ -1495,12 +1654,47 @@ export async function republishScreenIfPlaylistStale(
   const groups = await loadGroups(admin, organizationId);
   const contest = await loadContest(admin, organizationId);
   const winner = winnerForScreen(screen, contest, groups);
-  if (!winner) return false;
-  const [liveAssets, livePlaylistItems, liveLayoutZones, frozen] = await Promise.all([
+  const frozen = await frozenManifestSnapshot(admin, screenId);
+
+  if (!winner) {
+    const playlistId = screen.currentPlaylistId;
+    if (playlistId && isUuid(playlistId)) {
+      const [liveAssets, livePlaylistItems] = await Promise.all([
+        collectAssets(admin, organizationId, playlistId, null),
+        collectPlaylistItems(admin, playlistId),
+      ]);
+      const assetsStale = isPlaylistSnapshotStale(
+        liveAssets.map((asset) => asset.mediaVersionId),
+        frozen.versionIds,
+      );
+      const sequenceStale =
+        frozen.playlistItems.length === 0
+          ? livePlaylistItems.length > 0
+          : isPlaylistSequenceStale(livePlaylistItems, frozen.playlistItems);
+      const identityStale =
+        frozen.campaignId != null || frozen.playlistId !== playlistId || frozen.layoutId != null;
+      if (!assetsStale && !sequenceStale && !identityStale) return false;
+      await writeDefaultPlaylistManifestForScreen(
+        admin,
+        admin,
+        organizationId,
+        "",
+        screen,
+        playlistId,
+      );
+      return true;
+    }
+    if (frozen.campaignId != null || frozen.playlistId != null) {
+      await writeIdleManifestForScreen(admin, "", screen);
+      return true;
+    }
+    return false;
+  }
+
+  const [liveAssets, livePlaylistItems, liveLayoutZones] = await Promise.all([
     collectAssets(admin, organizationId, winner.playlistId, winner.layoutId),
     collectPlaylistItems(admin, winner.playlistId),
     collectLayoutZones(admin, winner.layoutId),
-    frozenManifestSnapshot(admin, screenId),
   ]);
   const assetsStale = isPlaylistSnapshotStale(
     liveAssets.map((asset) => asset.mediaVersionId),
@@ -1517,9 +1711,9 @@ export async function republishScreenIfPlaylistStale(
     frozenLayoutId: frozen.layoutId,
   });
   const identityStale =
-    (frozen.campaignId != null && frozen.campaignId !== winner.id) ||
-    (frozen.playlistId != null && frozen.playlistId !== (winner.playlistId ?? null)) ||
-    (frozen.layoutId != null && frozen.layoutId !== (winner.layoutId ?? null));
+    frozen.campaignId !== winner.id ||
+    frozen.playlistId !== (winner.playlistId ?? null) ||
+    frozen.layoutId !== (winner.layoutId ?? null);
 
   const evergreen = !winner.schedule.startDate?.trim() && !winner.schedule.endDate?.trim();
   let evergreenHoursStale = false;
@@ -1573,6 +1767,18 @@ export async function republishScreenIfPlaylistStale(
     winner,
   );
   return true;
+}
+
+/**
+ * Resolve content for one screen and publish a package:
+ * active campaign → screen playlist → idle. Used by Sync Now.
+ */
+export async function resolveAndPublishScreenContent(
+  accessToken: string,
+  screenId: string,
+): Promise<void> {
+  if (!isUuid(screenId)) return;
+  await notifyScreens(accessToken, [screenId], {});
 }
 
 export async function listCampaigns(accessToken: string): Promise<CampaignRecord[]> {
