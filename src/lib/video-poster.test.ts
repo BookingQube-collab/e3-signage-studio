@@ -61,7 +61,7 @@ test("isImageStillUrl only treats image files as posters", () => {
   assert.equal(isImageStillUrl("blob:https://e3-cms.vercel.app/abc"), false);
 });
 
-test("seekVideoToStillFrame pauses and moves off t=0 so a frame can paint", () => {
+test("seekVideoToStillFrame pauses and seeks ~2.5s for a useful still", () => {
   const video = {
     readyState: 1,
     duration: 55,
@@ -73,8 +73,18 @@ test("seekVideoToStillFrame pauses and moves off t=0 so a frame can paint", () =
   };
   seekVideoToStillFrame(video);
   assert.equal(video.paused, true);
-  assert.equal(video.currentTime > 0, true);
-  assert.equal(video.currentTime <= 0.25, true);
+  assert.equal(video.currentTime, 2.5);
+});
+
+test("seekVideoToStillFrame clamps to short clip duration", () => {
+  const video = {
+    readyState: 1,
+    duration: 1.2,
+    currentTime: 0,
+    pause() {},
+  };
+  seekVideoToStillFrame(video);
+  assert.equal(video.currentTime, 1.15);
 });
 
 test("seekVideoToStillFrame is a no-op before metadata is available", () => {

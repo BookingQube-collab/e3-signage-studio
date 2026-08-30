@@ -5,9 +5,11 @@ import { MonitorPlay } from "lucide-react";
 import { MediaThumb } from "@/components/e3/E3MediaCard";
 import { E3Progress } from "@/components/e3/E3Progress";
 import { E3StatusBadge } from "@/components/e3/E3StatusBadge";
-import { isPreviewPortrait, previewAspectRatio } from "@/lib/preview-orientation";
 import { cn } from "@/lib/utils";
 import type { Media, Screen, ScreenStatus } from "@/types";
+
+/** Card preview window — wider/shorter than true 9:16 so thumbs fill the card. */
+const SCREEN_CARD_THUMB_ASPECT = "4 / 3";
 
 const statusBar: Record<ScreenStatus, string> = {
   online: "bg-success",
@@ -49,7 +51,6 @@ export function E3ScreenCard({
   overflow?: ReactNode;
 }) {
   const playing = nowPlayingThumbMedia(screen);
-  const portrait = isPreviewPortrait(screen.orientation);
 
   return (
     <div
@@ -83,11 +84,8 @@ export function E3ScreenCard({
         </div>
 
         <div
-          className={cn(
-            "mt-4 overflow-hidden rounded-xl border border-border bg-muted/30",
-            portrait ? "mx-auto w-full max-w-[10.5rem]" : "w-full",
-          )}
-          style={{ aspectRatio: previewAspectRatio(screen.orientation) }}
+          className="mt-4 w-full overflow-hidden rounded-xl border border-border bg-muted/30"
+          style={{ aspectRatio: SCREEN_CARD_THUMB_ASPECT }}
         >
           {playing ? (
             <MediaThumb item={playing} className="size-full rounded-none" />

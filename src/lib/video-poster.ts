@@ -25,7 +25,10 @@ export function isImageStillUrl(url: string | null | undefined): boolean {
   return /\.(avif|bmp|gif|jpe?g|png|webp)(\?|#|$)/i.test(url.split("?")[0] ?? url);
 }
 
-/** Seek a paused video far enough to paint a frame without calling play(). */
+/** Prefer ~2.5s into the clip so stills skip black/empty intros (clamped to duration). */
+export const VIDEO_STILL_SEEK_SECONDS = 2.5;
+
+/** Seek a paused video far enough to paint a useful frame without calling play(). */
 export function seekVideoToStillFrame(video: {
   readyState: number;
   duration: number;
@@ -34,8 +37,12 @@ export function seekVideoToStillFrame(video: {
 }): void {
   if (video.readyState < 1) return;
   const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
-  const target = duration > 0 ? Math.min(0.25, Math.max(0.05, duration * 0.02)) : 0.1;
-  if (Math.abs(video.currentTime - target) < 0.04) return;
+  // ~2.5s into the clip; short videos land just before the end.
+  const target =
+    duration > 0
+      ? Math.min(VIDEO_STILL_SEEK_SECONDS, Math.max(0.05, duration - 0.05))
+      : VIDEO_STILL_SEEK_SECONDS;
+  if (Math.abs(video.currentTime - target) < 0.08) return;
   try {
     video.pause();
     video.currentTime = target;

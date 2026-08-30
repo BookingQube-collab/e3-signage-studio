@@ -113,10 +113,15 @@ export function MediaThumb({
           autoPlay={false}
           controls={playback}
           loop={false}
-          preload={playback ? "auto" : "metadata"}
+          // Still thumbs need bytes past t=0 so mid-intro seek (~2.5s) can paint.
+          preload="auto"
           referrerPolicy="no-referrer"
           onLoadedMetadata={(event) => seekVideoToStillFrame(event.currentTarget)}
           onLoadedData={(event) => seekVideoToStillFrame(event.currentTarget)}
+          onCanPlay={(event) => seekVideoToStillFrame(event.currentTarget)}
+          onSeeked={(event) => {
+            event.currentTarget.pause();
+          }}
         />
       ) : (
         <Icon className="size-7 text-foreground/70" />

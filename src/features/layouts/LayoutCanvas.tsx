@@ -119,12 +119,18 @@ function ZoneMediaFill({
         className={cn("absolute inset-0 size-full", objectClass)}
         muted
         playsInline
-        preload="metadata"
+        preload="auto"
         onLoadedMetadata={(event) => {
           seekVideoToStillFrame(event.currentTarget);
         }}
         onLoadedData={(event) => {
           seekVideoToStillFrame(event.currentTarget);
+        }}
+        onCanPlay={(event) => {
+          seekVideoToStillFrame(event.currentTarget);
+        }}
+        onSeeked={(event) => {
+          event.currentTarget.pause();
         }}
       />
     );
