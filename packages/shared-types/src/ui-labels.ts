@@ -49,6 +49,7 @@ export const UI_LABELS = {
   orientation: {
     LANDSCAPE: "Landscape",
     PORTRAIT: "Portrait",
+    LANDSCAPE_UPSIDE_DOWN: "Landscape (upside down)",
     PORTRAIT_UPSIDE_DOWN: "Portrait (upside down)",
   },
   mediaType: { VIDEO: "Video", IMAGE: "Image", QR: "QR", LOGO: "Logo", AUDIO: "Audio" },

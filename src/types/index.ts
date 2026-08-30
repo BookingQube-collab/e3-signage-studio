@@ -31,7 +31,11 @@ export interface Location {
 }
 
 export type ScreenStatus = "online" | "offline" | "syncing" | "disabled";
-export type Orientation = "Landscape" | "Portrait" | "Portrait (upside down)";
+export type Orientation =
+  | "Landscape"
+  | "Portrait"
+  | "Landscape (upside down)"
+  | "Portrait (upside down)";
 export type SyncState =
   | "Waiting"
   | "Notified"

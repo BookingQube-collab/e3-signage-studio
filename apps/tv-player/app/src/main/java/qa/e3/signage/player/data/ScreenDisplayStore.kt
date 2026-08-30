@@ -11,6 +11,12 @@ import kotlinx.coroutines.flow.asStateFlow
  *
  * Android TV panels report landscape metrics even when mounted vertically, so the
  * activity stays landscape and [qa.e3.signage.player.ui.DisplayOrientedFrame] rotates.
+ *
+ * Four Windows-style corners (clockwise):
+ * - LANDSCAPE → 0°
+ * - PORTRAIT_UPSIDE_DOWN → 90°
+ * - LANDSCAPE_UPSIDE_DOWN → 180°
+ * - PORTRAIT → 270°
  */
 class ScreenDisplayStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -31,6 +37,7 @@ class ScreenDisplayStore(context: Context) {
         private const val KEY_ORIENTATION = "orientation"
         const val LANDSCAPE = "LANDSCAPE"
         const val PORTRAIT = "PORTRAIT"
+        const val LANDSCAPE_UPSIDE_DOWN = "LANDSCAPE_UPSIDE_DOWN"
         const val PORTRAIT_UPSIDE_DOWN = "PORTRAIT_UPSIDE_DOWN"
 
         fun normalize(raw: String?): String {
@@ -42,6 +49,11 @@ class ScreenDisplayStore(context: Context) {
                 "REVERSE_PORTRAIT",
                 "PORTRAIT_INVERTED",
                 -> PORTRAIT_UPSIDE_DOWN
+                LANDSCAPE_UPSIDE_DOWN,
+                "LANDSCAPE_REVERSE",
+                "REVERSE_LANDSCAPE",
+                "LANDSCAPE_INVERTED",
+                -> LANDSCAPE_UPSIDE_DOWN
                 else -> LANDSCAPE
             }
         }
@@ -49,11 +61,19 @@ class ScreenDisplayStore(context: Context) {
         fun isPortrait(orientation: String): Boolean =
             orientation == PORTRAIT || orientation == PORTRAIT_UPSIDE_DOWN
 
-        /** Compose rotationZ degrees for [DisplayOrientedFrame]. */
+        /** True when the child must lay out at swapped (height × width) before rotating. */
+        fun swapsAxes(orientation: String): Boolean =
+            when (normalize(orientation)) {
+                PORTRAIT, PORTRAIT_UPSIDE_DOWN -> true
+                else -> false
+            }
+
+        /** Compose rotationZ degrees for [DisplayOrientedFrame] (clockwise). */
         fun rotationDegrees(orientation: String): Float =
             when (normalize(orientation)) {
                 PORTRAIT -> 270f
                 PORTRAIT_UPSIDE_DOWN -> 90f
+                LANDSCAPE_UPSIDE_DOWN -> 180f
                 else -> 0f
             }
     }

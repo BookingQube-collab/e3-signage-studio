@@ -16,6 +16,7 @@ import {
   CONTENT_PACKAGE_STATES,
   DEVICE_SYNC_STATES,
   FIT_MODES,
+  isLandscapeOrientation,
   isPortraitOrientation,
   MEDIA_TYPES,
   TRANSITIONS,
@@ -502,14 +503,16 @@ export async function deviceSyncStatus(
       ? "PORTRAIT_UPSIDE_DOWN"
       : orientationRaw === "PORTRAIT"
         ? "PORTRAIT"
-        : "LANDSCAPE";
+        : orientationRaw === "LANDSCAPE_UPSIDE_DOWN"
+          ? "LANDSCAPE_UPSIDE_DOWN"
+          : "LANDSCAPE";
   let width = asNumber(auth.screen.width, 0);
   let height = asNumber(auth.screen.height, 0);
   if (isPortraitOrientation(orientation) && width > height) {
     const swapped = width;
     width = height;
     height = swapped;
-  } else if (orientation === "LANDSCAPE" && height > width) {
+  } else if (isLandscapeOrientation(orientation) && height > width) {
     const swapped = width;
     width = height;
     height = swapped;

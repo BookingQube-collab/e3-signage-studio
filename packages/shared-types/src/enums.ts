@@ -25,13 +25,38 @@ export type UserRole = (typeof USER_ROLES)[number];
 export const USER_STATUSES = ["ACTIVE", "INVITED", "DISABLED"] as const;
 export type UserStatus = (typeof USER_STATUSES)[number];
 
-export const ORIENTATIONS = ["LANDSCAPE", "PORTRAIT", "PORTRAIT_UPSIDE_DOWN"] as const;
+/** Screen mount / playback rotation: 0°, 90°, 180°, 270° (Windows-style 4-corner rotate). */
+export const ORIENTATIONS = [
+  "LANDSCAPE",
+  "PORTRAIT",
+  "LANDSCAPE_UPSIDE_DOWN",
+  "PORTRAIT_UPSIDE_DOWN",
+] as const;
 export type Orientation = (typeof ORIENTATIONS)[number];
+
+/** Layout canvases are only landscape vs portrait (mount rotation is a screen setting). */
+export const LAYOUT_ORIENTATIONS = ["LANDSCAPE", "PORTRAIT"] as const;
+export type LayoutOrientation = (typeof LAYOUT_ORIENTATIONS)[number];
 
 /** Portrait and portrait-upside-down share a tall logical canvas (e.g. 1080×1920). */
 export function isPortraitOrientation(orientation: string | null | undefined): boolean {
   const value = (orientation ?? "").toUpperCase();
   return value === "PORTRAIT" || value === "PORTRAIT_UPSIDE_DOWN";
+}
+
+/** Landscape and landscape-upside-down share a wide logical canvas (e.g. 1920×1080). */
+export function isLandscapeOrientation(orientation: string | null | undefined): boolean {
+  const value = (orientation ?? "").toUpperCase();
+  return value === "LANDSCAPE" || value === "LANDSCAPE_UPSIDE_DOWN";
+}
+
+/** Compose / CSS rotation degrees for full-bleed software rotate (positive = clockwise). */
+export function orientationRotationDegrees(orientation: string | null | undefined): 0 | 90 | 180 | 270 {
+  const value = (orientation ?? "").toUpperCase();
+  if (value === "PORTRAIT") return 270;
+  if (value === "PORTRAIT_UPSIDE_DOWN") return 90;
+  if (value === "LANDSCAPE_UPSIDE_DOWN") return 180;
+  return 0;
 }
 
 /** Operational status reported/derived for a screen. Connectivity is separate. */

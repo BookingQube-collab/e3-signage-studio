@@ -288,6 +288,7 @@ function ScreensPage() {
                 <SelectItem value="all">Any</SelectItem>
                 <SelectItem value="Landscape">Landscape</SelectItem>
                 <SelectItem value="Portrait">Portrait</SelectItem>
+                <SelectItem value="Landscape (upside down)">Landscape (upside down)</SelectItem>
                 <SelectItem value="Portrait (upside down)">Portrait (upside down)</SelectItem>
               </SelectContent>
             </Select>

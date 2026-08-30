@@ -1,5 +1,6 @@
 import {
   DEVICE_SYNC_STATES,
+  isLandscapeOrientation,
   isPortraitOrientation,
   LOCATION_STATUSES,
   LOCATION_TYPES,
@@ -101,7 +102,7 @@ function normalizeSizeForOrientation(
   if (isPortraitOrientation(orientation) && width > height) {
     return { width: height, height: width };
   }
-  if (orientation === "LANDSCAPE" && height > width) {
+  if (isLandscapeOrientation(orientation) && height > width) {
     return { width: height, height: width };
   }
   return { width, height };

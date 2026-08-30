@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import {
   FIT_MODES,
+  LAYOUT_ORIENTATIONS,
   LAYOUT_PRESETS,
-  ORIENTATIONS,
   ZONE_CONTENT_TYPES,
   type FitMode,
   type LayoutPreset,
@@ -78,7 +78,7 @@ function isPreset(value: string): value is LayoutPreset {
 }
 
 function isOrientation(value: string): value is Orientation {
-  return (ORIENTATIONS as readonly string[]).includes(value);
+  return (LAYOUT_ORIENTATIONS as readonly string[]).includes(value);
 }
 
 function isFit(value: string): value is FitMode {

@@ -29,14 +29,16 @@ function parsePatchResolution(patch: Partial<Screen>): { width?: number; height?
   let width = Number(first);
   let height = Number(second);
   if (width <= 0 || height <= 0) return {};
-  // Portrait (+ upside-down) + landscape-labeled resolution → swap to tall logical canvas.
+  // Align labeled resolution with mount orientation (portrait tall / landscape wide).
   const portrait =
     patch.orientation === "Portrait" || patch.orientation === "Portrait (upside down)";
+  const landscape =
+    patch.orientation === "Landscape" || patch.orientation === "Landscape (upside down)";
   if (portrait && width > height) {
     const tmp = width;
     width = height;
     height = tmp;
-  } else if (patch.orientation === "Landscape" && height > width) {
+  } else if (landscape && height > width) {
     const tmp = width;
     width = height;
     height = tmp;

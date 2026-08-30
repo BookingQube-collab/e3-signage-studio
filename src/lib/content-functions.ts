@@ -3,8 +3,8 @@ import { z } from "zod";
 
 import {
   FIT_MODES,
+  LAYOUT_ORIENTATIONS,
   LAYOUT_PRESETS,
-  ORIENTATIONS,
   PLAYLIST_STATUSES,
   TRANSITIONS,
   ZONE_CONTENT_TYPES,
@@ -25,7 +25,7 @@ function presetEnum() {
   return z.enum(LAYOUT_PRESETS);
 }
 function orientationEnum() {
-  return z.enum(ORIENTATIONS);
+  return z.enum(LAYOUT_ORIENTATIONS);
 }
 function fitEnum() {
   return z.enum(FIT_MODES);

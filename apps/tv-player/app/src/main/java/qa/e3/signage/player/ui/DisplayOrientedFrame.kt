@@ -17,12 +17,16 @@ import qa.e3.signage.player.data.ScreenDisplayStore
  * glass is mounted vertically. Locking [android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT]
  * letterboxes or ignores rotation on many TCL / OEM builds.
  *
- * Keep the activity in landscape and rotate a full-bleed child instead:
- * - [ScreenDisplayStore.PORTRAIT] → 270° (content upright on a CW-mounted panel)
- * - [ScreenDisplayStore.PORTRAIT_UPSIDE_DOWN] → 90° (opposite mount)
+ * Keep the activity in landscape and rotate a full-bleed child instead (Windows-style
+ * 4-corner rotate):
+ * - [ScreenDisplayStore.LANDSCAPE] → 0°
+ * - [ScreenDisplayStore.PORTRAIT_UPSIDE_DOWN] → 90°
+ * - [ScreenDisplayStore.LANDSCAPE_UPSIDE_DOWN] → 180°
+ * - [ScreenDisplayStore.PORTRAIT] → 270°
  *
- * The child lays out at swapped size (panelHeight × panelWidth) so waiting UI and
- * zone playback fill the entire physical panel after rotation.
+ * At 90° / 270° the child lays out at swapped size (panelHeight × panelWidth) so
+ * waiting UI and zone playback fill the entire physical panel after rotation.
+ * At 180° size stays landscape; only the transform flips.
  */
 @Composable
 fun DisplayOrientedFrame(
@@ -35,16 +39,22 @@ fun DisplayOrientedFrame(
         Box(modifier.fillMaxSize()) { content() }
         return
     }
+    val swapAxes = ScreenDisplayStore.swapsAxes(orientation)
     BoxWithConstraints(modifier.fillMaxSize()) {
+        val childModifier =
+            if (swapAxes) {
+                Modifier
+                    .align(Alignment.Center)
+                    .width(maxHeight)
+                    .height(maxWidth)
+            } else {
+                Modifier.fillMaxSize()
+            }
         Box(
-            Modifier
-                .align(Alignment.Center)
-                .width(maxHeight)
-                .height(maxWidth)
-                .graphicsLayer {
-                    rotationZ = degrees
-                    transformOrigin = TransformOrigin.Center
-                },
+            childModifier.graphicsLayer {
+                rotationZ = degrees
+                transformOrigin = TransformOrigin.Center
+            },
         ) {
             content()
         }

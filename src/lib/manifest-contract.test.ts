@@ -69,7 +69,9 @@ const deviceSyncStatusResponseSchema = z.object({
   manifestVersion: z.number().int().min(0),
   configVersion: z.number().int().min(0),
   syncRequested: z.boolean(),
-  orientation: z.enum(["LANDSCAPE", "PORTRAIT", "PORTRAIT_UPSIDE_DOWN"]).default("LANDSCAPE"),
+  orientation: z
+    .enum(["LANDSCAPE", "PORTRAIT", "LANDSCAPE_UPSIDE_DOWN", "PORTRAIT_UPSIDE_DOWN"])
+    .default("LANDSCAPE"),
   width: z.number().int().positive().optional(),
   height: z.number().int().positive().optional(),
 });
@@ -205,4 +207,16 @@ test("sync-status accepts portrait upside-down orientation", () => {
     height: 1920,
   });
   assert.equal(status.orientation, "PORTRAIT_UPSIDE_DOWN");
+});
+
+test("sync-status accepts landscape upside-down orientation", () => {
+  const status = deviceSyncStatusResponseSchema.parse({
+    manifestVersion: 24,
+    configVersion: 1,
+    syncRequested: true,
+    orientation: "LANDSCAPE_UPSIDE_DOWN",
+    width: 1920,
+    height: 1080,
+  });
+  assert.equal(status.orientation, "LANDSCAPE_UPSIDE_DOWN");
 });
