@@ -91,6 +91,21 @@ function locationCodeFromName(name: string): string {
   return code.length > 0 ? code : "LOC";
 }
 
+/** Align pixel size with orientation: Portrait + "1920×1080" → 1080×1920 logical canvas. */
+function normalizeSizeForOrientation(
+  width: number,
+  height: number,
+  orientation: Orientation,
+): { width: number; height: number } {
+  if (orientation === "PORTRAIT" && width > height) {
+    return { width: height, height: width };
+  }
+  if (orientation === "LANDSCAPE" && height > width) {
+    return { width: height, height: width };
+  }
+  return { width, height };
+}
+
 function parseResolution(
   resolution: string,
   orientation: Orientation,
@@ -101,7 +116,9 @@ function parseResolution(
   if (first && second) {
     const width = Number(first);
     const height = Number(second);
-    if (width > 0 && height > 0) return { width, height };
+    if (width > 0 && height > 0) {
+      return normalizeSizeForOrientation(width, height, orientation);
+    }
   }
   return orientation === "PORTRAIT" ? { width: 1080, height: 1920 } : { width: 1920, height: 1080 };
 }
@@ -831,10 +848,19 @@ export async function updateScreen(
   const updates: Record<string, unknown> = {};
   if (patch.name != null) updates["name"] = patch.name;
   if (patch.screenType != null) updates["screen_type"] = patch.screenType;
-  if (patch.orientation != null) updates["orientation"] = patch.orientation;
-  if (patch.width != null) updates["width"] = patch.width;
-  if (patch.height != null) updates["height"] = patch.height;
   if (patch.operationalStatus != null) updates["operational_status"] = patch.operationalStatus;
+
+  const nextOrientation = patch.orientation ?? current.orientation;
+  const sizeTouched =
+    patch.orientation != null || patch.width != null || patch.height != null;
+  if (sizeTouched) {
+    const rawW = patch.width ?? current.width;
+    const rawH = patch.height ?? current.height;
+    const normalized = normalizeSizeForOrientation(rawW, rawH, nextOrientation);
+    updates["orientation"] = nextOrientation;
+    updates["width"] = normalized.width;
+    updates["height"] = normalized.height;
+  }
   if (patch.playlistId !== undefined) {
     if (patch.playlistId == null) {
       updates["current_playlist_id"] = null;

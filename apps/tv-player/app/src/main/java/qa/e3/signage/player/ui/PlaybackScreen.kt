@@ -10,7 +10,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
@@ -18,16 +20,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -43,9 +44,11 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import qa.e3.signage.player.R
 import qa.e3.signage.player.core.FitMode
 import qa.e3.signage.player.core.ITEM_TRANSITION_MS
@@ -58,6 +61,7 @@ import java.io.File
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import java.util.LinkedHashMap
 
 @Composable
 fun PlaybackRoute(viewModel: PlaybackViewModel = viewModel()) {
@@ -78,14 +82,16 @@ fun PlaybackScreen(state: PlaybackUiState, onVideoFinished: (Int, Boolean) -> Un
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val density = LocalDensity.current
             state.zones.forEach { zone ->
-                val widthDp = with(density) { zone.width.toDp() }
-                val heightDp = with(density) { zone.height.toDp() }
-                Box(
-                    modifier = Modifier
-                        .offset { IntOffset(zone.x, zone.y) }
-                        .size(widthDp, heightDp),
-                ) {
-                    TransitioningZone(zone, state.timezone, onVideoFinished)
+                key(zone.id) {
+                    val widthDp = with(density) { zone.width.toDp() }
+                    val heightDp = with(density) { zone.height.toDp() }
+                    Box(
+                        modifier = Modifier
+                            .offset { IntOffset(zone.x, zone.y) }
+                            .size(widthDp, heightDp),
+                    ) {
+                        TransitioningZone(zone, state.timezone, onVideoFinished)
+                    }
                 }
             }
         }
@@ -112,6 +118,7 @@ private fun TransitioningZone(zone: ZoneUiState, timezone: String, onVideoFinish
     var outgoing by remember { mutableStateOf<ZonePresentation?>(null) }
     var incoming by remember { mutableStateOf(presentation) }
     val progress = remember { Animatable(1f) }
+    var readyGate by remember { mutableStateOf(CompletableDeferred(Unit)) }
 
     LaunchedEffect(presentation.layerKey()) {
         if (incoming.layerKey() == presentation.layerKey()) {
@@ -119,16 +126,20 @@ private fun TransitioningZone(zone: ZoneUiState, timezone: String, onVideoFinish
             return@LaunchedEffect
         }
         outgoing = incoming
+        val gate = CompletableDeferred<Unit>()
+        readyGate = gate
         incoming = presentation
         val effect = presentation.itemTransition()
         if (effect.isInstant() || outgoing == null) {
             progress.snapTo(1f)
             outgoing = null
-        } else {
-            progress.snapTo(0f)
-            progress.animateTo(1f, tween(ITEM_TRANSITION_MS))
-            outgoing = null
+            return@LaunchedEffect
         }
+        // Hold previous frame until incoming image/video has something to show.
+        progress.snapTo(0f)
+        withTimeoutOrNull(2_500) { gate.await() }
+        progress.animateTo(1f, tween(ITEM_TRANSITION_MS))
+        outgoing = null
     }
 
     Box(Modifier.fillMaxSize().clipToBounds()) {
@@ -136,69 +147,87 @@ private fun TransitioningZone(zone: ZoneUiState, timezone: String, onVideoFinish
         val t = progress.value
         val effect = incoming.itemTransition()
         if (out != null) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .itemEnterLayer(LayerRole.PREVIOUS, effect, t),
-            ) {
-                ZoneMedia(out, zone.fit, timezone, onVideoFinished)
+            TransitionLayer(LayerRole.PREVIOUS, effect, t) {
+                ZoneMedia(out, zone.fit, timezone, onVideoFinished, layerAlpha = layerAlpha(LayerRole.PREVIOUS, effect, t), onReady = {})
             }
         }
-        Box(
-            Modifier
-                .fillMaxSize()
-                .itemEnterLayer(LayerRole.CURRENT, effect, t),
-        ) {
-            ZoneMedia(incoming, zone.fit, timezone, onVideoFinished)
+        TransitionLayer(LayerRole.CURRENT, effect, t) {
+            ZoneMedia(
+                incoming,
+                zone.fit,
+                timezone,
+                onVideoFinished,
+                layerAlpha = layerAlpha(LayerRole.CURRENT, effect, t),
+                onReady = { readyGate.complete(Unit) },
+            )
         }
     }
 }
 
 private enum class LayerRole { CURRENT, PREVIOUS }
 
-private fun Modifier.itemEnterLayer(role: LayerRole, effect: ItemTransition, progress: Float): Modifier {
+private fun layerAlpha(role: LayerRole, effect: ItemTransition, progress: Float): Float {
+    val t = progress.coerceIn(0f, 1f)
+    val incoming = role == LayerRole.CURRENT
+    return when (effect) {
+        ItemTransition.CUT -> if (incoming) 1f else 0f
+        ItemTransition.FADE, ItemTransition.DISSOLVE, ItemTransition.ZOOM -> if (incoming) t else 1f - t
+        ItemTransition.WIPE, ItemTransition.SLIDE, ItemTransition.SLIDE_RIGHT,
+        ItemTransition.SLIDE_UP, ItemTransition.SLIDE_DOWN,
+        -> 1f
+    }
+}
+
+@Composable
+private fun TransitionLayer(
+    role: LayerRole,
+    effect: ItemTransition,
+    progress: Float,
+    content: @Composable () -> Unit,
+) {
     val t = progress.coerceIn(0f, 1f)
     val eased = 1f - (1f - t) * (1f - t) * (1f - t)
     val incoming = role == LayerRole.CURRENT
-    val wipe = this.then(
-        if (effect == ItemTransition.WIPE && incoming) {
-            Modifier.drawWithContent {
-                clipRect(left = 0f, top = 0f, right = size.width * t, bottom = size.height) {
-                    this@drawWithContent.drawContent()
-                }
-            }
-        } else {
+    val base = when {
+        effect == ItemTransition.WIPE && incoming ->
             Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(t.coerceAtLeast(0.001f))
+                .clipToBounds()
+        else -> Modifier.fillMaxSize()
+    }
+    Box(
+        modifier = base.graphicsLayer {
+            when (effect) {
+                ItemTransition.CUT -> alpha = if (incoming) 1f else 0f
+                ItemTransition.FADE, ItemTransition.DISSOLVE -> alpha = if (incoming) t else 1f - t
+                ItemTransition.SLIDE -> {
+                    alpha = 1f
+                    translationX = if (incoming) size.width * (1f - eased) else -size.width * eased
+                }
+                ItemTransition.SLIDE_RIGHT -> {
+                    alpha = 1f
+                    translationX = if (incoming) -size.width * (1f - eased) else size.width * eased
+                }
+                ItemTransition.SLIDE_UP -> {
+                    alpha = 1f
+                    translationY = if (incoming) size.height * (1f - eased) else -size.height * eased
+                }
+                ItemTransition.SLIDE_DOWN -> {
+                    alpha = 1f
+                    translationY = if (incoming) -size.height * (1f - eased) else size.height * eased
+                }
+                ItemTransition.ZOOM -> {
+                    alpha = if (incoming) t else 1f - t
+                    val s = if (incoming) 0.78f + 0.22f * t else 1f + 0.14f * t
+                    scaleX = s
+                    scaleY = s
+                }
+                ItemTransition.WIPE -> alpha = 1f
+            }
         },
-    )
-    return wipe.graphicsLayer {
-        when (effect) {
-            ItemTransition.CUT -> alpha = if (incoming) 1f else 0f
-            ItemTransition.FADE, ItemTransition.DISSOLVE -> alpha = if (incoming) t else 1f - t
-            ItemTransition.SLIDE -> {
-                alpha = 1f
-                translationX = if (incoming) size.width * (1f - eased) else -size.width * eased
-            }
-            ItemTransition.SLIDE_RIGHT -> {
-                alpha = 1f
-                translationX = if (incoming) -size.width * (1f - eased) else size.width * eased
-            }
-            ItemTransition.SLIDE_UP -> {
-                alpha = 1f
-                translationY = if (incoming) size.height * (1f - eased) else -size.height * eased
-            }
-            ItemTransition.SLIDE_DOWN -> {
-                alpha = 1f
-                translationY = if (incoming) -size.height * (1f - eased) else size.height * eased
-            }
-            ItemTransition.ZOOM -> {
-                alpha = if (incoming) t else 1f - t
-                val s = if (incoming) 0.78f + 0.22f * t else 1f + 0.14f * t
-                scaleX = s
-                scaleY = s
-            }
-            ItemTransition.WIPE -> alpha = 1f
-        }
+    ) {
+        content()
     }
 }
 
@@ -208,6 +237,8 @@ private fun ZoneMedia(
     fit: FitMode,
     timezone: String,
     onVideoFinished: (Int, Boolean) -> Unit,
+    layerAlpha: Float,
+    onReady: () -> Unit,
 ) {
     when (presentation) {
         is ZonePresentation.Video -> LocalVideoZone(
@@ -216,12 +247,23 @@ private fun ZoneMedia(
             generation = presentation.generation,
             loop = presentation.loop,
             fit = fit,
+            layerAlpha = layerAlpha,
             onFinished = onVideoFinished,
+            onReady = onReady,
         )
-        is ZonePresentation.Image -> LocalImageZone(presentation.fileUri, fit)
-        ZonePresentation.Clock -> ClockZone(timezone, "HH:mm")
-        ZonePresentation.Date -> ClockZone(timezone, "dd MMM yyyy")
-        ZonePresentation.Empty -> Box(Modifier.fillMaxSize())
+        is ZonePresentation.Image -> LocalImageZone(presentation.fileUri, fit, onReady)
+        ZonePresentation.Clock -> {
+            LaunchedEffect(Unit) { onReady() }
+            ClockZone(timezone, "HH:mm")
+        }
+        ZonePresentation.Date -> {
+            LaunchedEffect(Unit) { onReady() }
+            ClockZone(timezone, "dd MMM yyyy")
+        }
+        ZonePresentation.Empty -> {
+            LaunchedEffect(Unit) { onReady() }
+            Box(Modifier.fillMaxSize())
+        }
     }
 }
 
@@ -232,7 +274,9 @@ private fun LocalVideoZone(
     generation: Int,
     loop: Boolean,
     fit: FitMode,
+    layerAlpha: Float,
     onFinished: (Int, Boolean) -> Unit,
+    onReady: () -> Unit,
 ) {
     val context = LocalContext.current
     val player = remember(key, generation) {
@@ -245,16 +289,31 @@ private fun LocalVideoZone(
         }
     }
     DisposableEffect(player, generation) {
+        var readySent = false
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
+                if (!readySent &&
+                    (playbackState == Player.STATE_READY || playbackState == Player.STATE_ENDED)
+                ) {
+                    readySent = true
+                    onReady()
+                }
                 if (!loop && playbackState == Player.STATE_ENDED) onFinished(generation, false)
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                if (!readySent) {
+                    readySent = true
+                    onReady()
+                }
                 if (!loop) onFinished(generation, true)
             }
         }
         player.addListener(listener)
+        if (player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_ENDED) {
+            readySent = true
+            onReady()
+        }
         onDispose {
             player.removeListener(listener)
             player.release()
@@ -282,19 +341,49 @@ private fun LocalVideoZone(
             view.player = player
             view.useController = false
             view.resizeMode = resize
+            // OEMs often ignore Compose graphicsLayer alpha on TextureView — set view alpha too.
+            view.alpha = layerAlpha.coerceIn(0f, 1f)
         },
         modifier = Modifier.fillMaxSize(),
     )
 }
 
+private object DecodedImageCache {
+    private const val MAX = 16
+    private val map = object : LinkedHashMap<String, android.graphics.Bitmap>(MAX, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, android.graphics.Bitmap>?): Boolean =
+            size > MAX
+    }
+
+    @Synchronized
+    fun get(path: String): android.graphics.Bitmap? = map[path]
+
+    @Synchronized
+    fun put(path: String, bitmap: android.graphics.Bitmap) {
+        map[path] = bitmap
+    }
+}
+
 @Composable
-private fun LocalImageZone(fileUri: String, fit: FitMode) {
-    var bitmap by remember(fileUri) { mutableStateOf<android.graphics.Bitmap?>(null) }
-    LaunchedEffect(fileUri) {
-        bitmap = withContext(Dispatchers.IO) {
-            val file = File(requireLocalPlaybackUri(fileUri))
-            if (file.isFile) BitmapFactory.decodeFile(file.path) else null
+private fun LocalImageZone(fileUri: String, fit: FitMode, onReady: () -> Unit) {
+    val path = remember(fileUri) {
+        runCatching { File(requireLocalPlaybackUri(fileUri)).path }.getOrNull()
+    }
+    var bitmap by remember(fileUri) {
+        mutableStateOf(path?.let { DecodedImageCache.get(it) })
+    }
+    LaunchedEffect(fileUri, path) {
+        if (bitmap != null) {
+            onReady()
+            return@LaunchedEffect
         }
+        val decoded = withContext(Dispatchers.IO) {
+            val file = path?.let { File(it) } ?: return@withContext null
+            if (!file.isFile) return@withContext null
+            BitmapFactory.decodeFile(file.path)?.also { DecodedImageCache.put(file.path, it) }
+        }
+        bitmap = decoded
+        onReady()
     }
     val image = bitmap
     if (image != null) {

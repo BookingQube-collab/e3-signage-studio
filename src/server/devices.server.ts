@@ -60,6 +60,9 @@ type DeviceScreen = {
   device_id: string | null;
   archived_at: string | null;
   operational_status: string;
+  orientation: string | null;
+  width: number | null;
+  height: number | null;
   cloud_manifest_version: number | null;
   cloud_config_version: number | null;
   local_manifest_version: number | null;
@@ -115,23 +118,36 @@ function isTransition(value: string): value is Transition {
   return (TRANSITIONS as readonly string[]).includes(value);
 }
 
+/** Canonicalize CMS/DB transition labels so the player always gets CUT/FADE/WIPE/…. */
+function normalizeTransition(raw: unknown): Transition {
+  const key = asString(raw, "FADE").trim().toUpperCase().replace(/\s+/g, "_");
+  if (isTransition(key)) return key;
+  return "FADE";
+}
+
 /** Playlist order + transitions frozen into content_manifests.payload at publish time. */
 function parseFrozenPlaylistItems(payload: unknown): Array<{
   mediaId: string;
   mediaVersionId: string;
   durationSeconds: number;
   transition: string;
+  audioMediaId?: string;
+  audioMediaVersionId?: string;
 }> {
   if (!payload || typeof payload !== "object") return [];
   const raw = (payload as { playlistItems?: unknown }).playlistItems;
   if (!Array.isArray(raw)) return [];
   return raw.map((entry) => {
     const row = (entry ?? {}) as Record<string, unknown>;
+    const audioMediaId = asNullableString(row["audioMediaId"]);
+    const audioMediaVersionId = asNullableString(row["audioMediaVersionId"]);
     return {
       mediaId: asString(row["mediaId"]),
       mediaVersionId: asString(row["mediaVersionId"]),
       durationSeconds: Math.max(0.1, asNumber(row["durationSeconds"], 10)),
-      transition: asString(row["transition"], "FADE"),
+      transition: normalizeTransition(row["transition"]),
+      ...(audioMediaId ? { audioMediaId } : {}),
+      ...(audioMediaVersionId ? { audioMediaVersionId } : {}),
     };
   });
 }
@@ -204,7 +220,7 @@ export async function requireDevice(
   const { data: screen, error: screenError } = await admin
     .from("screens")
     .select(
-      "id, organization_id, location_id, device_id, archived_at, operational_status, cloud_manifest_version, cloud_config_version, local_manifest_version",
+      "id, organization_id, location_id, device_id, archived_at, operational_status, orientation, width, height, cloud_manifest_version, cloud_config_version, local_manifest_version",
     )
     .eq("id", screenId)
     .maybeSingle();
@@ -432,10 +448,26 @@ export async function deviceSyncStatus(
     auth.screen.organization_id,
     auth.screen.location_id,
   );
+  const orientationRaw = asString(auth.screen.orientation, "LANDSCAPE").toUpperCase();
+  const orientation = orientationRaw === "PORTRAIT" ? "PORTRAIT" : "LANDSCAPE";
+  let width = asNumber(auth.screen.width, 0);
+  let height = asNumber(auth.screen.height, 0);
+  if (orientation === "PORTRAIT" && width > height) {
+    const swapped = width;
+    width = height;
+    height = swapped;
+  } else if (orientation === "LANDSCAPE" && height > width) {
+    const swapped = width;
+    width = height;
+    height = swapped;
+  }
   return ok({
     manifestVersion: cloud,
     configVersion: configVersion > 0 ? configVersion : 1,
     syncRequested: Boolean(requestedAt) || cloud > local || Boolean(pending),
+    orientation,
+    ...(width > 0 ? { width } : {}),
+    ...(height > 0 ? { height } : {}),
     waitingScreen,
     ...(rotatedToken ? { rotatedToken } : {}),
   });
@@ -592,7 +624,7 @@ async function buildManifest(
           mediaId: asString(row["media_id"]),
           mediaVersionId: asString(row["media_version_id"]),
           durationSeconds: Math.max(0.1, asNumber(row["duration_seconds"], 10)),
-          transition: asString(row["transition"], "FADE"),
+          transition: normalizeTransition(row["transition"]),
         };
       });
     }
@@ -606,7 +638,7 @@ async function buildManifest(
         mediaId: item.mediaId,
         mediaVersionId: item.mediaVersionId,
         durationSeconds: item.durationSeconds,
-        transition: isTransition(item.transition) ? item.transition : "FADE",
+        transition: normalizeTransition(item.transition),
         localFilename: item.localFilename,
       })),
     };

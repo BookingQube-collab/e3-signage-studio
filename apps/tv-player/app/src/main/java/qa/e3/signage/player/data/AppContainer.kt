@@ -29,6 +29,7 @@ class AppContainer(context: Context) {
         downloader = downloader,
         json = json,
     )
+    val display = ScreenDisplayStore(context)
     val telemetry = DeviceTelemetry(
         context = context,
         api = api,
@@ -45,6 +46,7 @@ class AppContainer(context: Context) {
         downloader = downloader,
         filesDir = PlayerFiles.root(context),
         waitingScreen = waitingScreen,
+        display = display,
         onActivated = { telemetry.noteSuccessfulSync() },
     )
 

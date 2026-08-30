@@ -313,12 +313,17 @@ async function validateContent(
     }
     const { data: items, error: itemError } = await client
       .from("playlist_items")
-      .select("media_id")
+      .select("media_id, audio_media_id")
       .eq("playlist_id", fields.playlist_id);
     throwIfError(itemError, "Could not load playlist items.");
     const mediaIds = [
-      ...new Set((items ?? []).map((row) => asString((row as { media_id: string }).media_id))),
-    ].filter(Boolean);
+      ...new Set(
+        (items ?? []).flatMap((row) => {
+          const record = row as { media_id: string; audio_media_id?: string | null };
+          return [asString(record.media_id), asString(record.audio_media_id)].filter(Boolean);
+        }),
+      ),
+    ];
     if (requireReady && mediaIds.length === 0) {
       throw new Error("The selected playlist has no media.");
     }
@@ -414,17 +419,24 @@ async function collectPlaylistItems(
   if (!playlistId || !isUuid(playlistId)) return [];
   const { data, error } = await client
     .from("playlist_items")
-    .select("media_id, media_version_id, duration_seconds, transition, position")
+    .select("media_id, media_version_id, duration_seconds, transition, position, audio_media_id, audio_media_version_id")
     .eq("playlist_id", playlistId)
     .order("position");
   throwIfError(error, "Could not load playlist items.");
   return (data ?? []).map((raw) => {
     const row = raw as Record<string, unknown>;
+    const audioMediaId = asNullableString(row["audio_media_id"]);
+    const audioMediaVersionId = asNullableString(row["audio_media_version_id"]);
     return {
       mediaId: asString(row["media_id"]),
       mediaVersionId: asString(row["media_version_id"]),
       durationSeconds: Math.max(0.1, asNumber(row["duration_seconds"], 10)),
-      transition: asString(row["transition"], "FADE"),
+      transition: (() => {
+        const key = asString(row["transition"], "FADE").trim().toUpperCase().replace(/\s+/g, "_");
+        return key.length > 0 ? key : "FADE";
+      })(),
+      ...(audioMediaId ? { audioMediaId } : {}),
+      ...(audioMediaVersionId ? { audioMediaVersionId } : {}),
     };
   });
 }
@@ -438,7 +450,10 @@ async function collectAssets(
   const mediaIds: string[] = [];
   if (playlistId) {
     const items = await collectPlaylistItems(client, playlistId);
-    for (const item of items) mediaIds.push(item.mediaId);
+    for (const item of items) {
+      mediaIds.push(item.mediaId);
+      if (item.audioMediaId) mediaIds.push(item.audioMediaId);
+    }
   } else if (layoutId) {
     const { data, error } = await client
       .from("layout_zones")
@@ -1315,11 +1330,15 @@ function parseFrozenPlaylistItems(payload: unknown): PlaylistSnapshotItem[] {
   if (!Array.isArray(raw)) return [];
   return raw.map((entry) => {
     const row = (entry ?? {}) as Record<string, unknown>;
+    const audioMediaId = asNullableString(row["audioMediaId"]);
+    const audioMediaVersionId = asNullableString(row["audioMediaVersionId"]);
     return {
       mediaId: asString(row["mediaId"]),
       mediaVersionId: asString(row["mediaVersionId"]),
       durationSeconds: Math.max(0.1, asNumber(row["durationSeconds"], 10)),
       transition: asString(row["transition"], "FADE"),
+      ...(audioMediaId ? { audioMediaId } : {}),
+      ...(audioMediaVersionId ? { audioMediaVersionId } : {}),
     };
   });
 }

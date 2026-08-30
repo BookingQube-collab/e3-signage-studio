@@ -69,6 +69,9 @@ const deviceSyncStatusResponseSchema = z.object({
   manifestVersion: z.number().int().min(0),
   configVersion: z.number().int().min(0),
   syncRequested: z.boolean(),
+  orientation: z.enum(["LANDSCAPE", "PORTRAIT"]).default("LANDSCAPE"),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
 });
 
 const uuid = "11111111-1111-4111-8111-111111111111";
@@ -175,4 +178,19 @@ test("sync-status does not imply a full manifest fetch", () => {
   });
   assert.equal(status.syncRequested, false);
   assert.equal(status.manifestVersion, 21);
+  assert.equal(status.orientation, "LANDSCAPE");
+});
+
+test("sync-status carries CMS orientation for the player", () => {
+  const status = deviceSyncStatusResponseSchema.parse({
+    manifestVersion: 22,
+    configVersion: 1,
+    syncRequested: true,
+    orientation: "PORTRAIT",
+    width: 1080,
+    height: 1920,
+  });
+  assert.equal(status.orientation, "PORTRAIT");
+  assert.equal(status.width, 1080);
+  assert.equal(status.height, 1920);
 });

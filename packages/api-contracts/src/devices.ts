@@ -80,6 +80,10 @@ export const deviceSyncStatusResponseSchema = z.object({
   manifestVersion: z.number().int().min(0),
   configVersion: z.number().int().min(0),
   syncRequested: z.boolean(),
+  /** CMS screen orientation — player locks Android activity to match. */
+  orientation: orientationSchema.default("LANDSCAPE"),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
   rotatedToken: z.string().min(16).optional(),
   waitingScreen: deviceWaitingScreenSchema.optional(),
 });
@@ -131,6 +135,9 @@ export const manifestPlaylistItemSchema = z.object({
   durationSeconds: z.number().positive(),
   transition: enumOf(TRANSITIONS),
   localFilename: z.string(),
+  audioMediaId: uuidSchema.optional().nullable(),
+  audioMediaVersionId: uuidSchema.optional().nullable(),
+  audioLocalFilename: z.string().optional().nullable(),
 });
 
 export const manifestPlaylistSchema = z.object({
