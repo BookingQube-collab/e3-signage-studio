@@ -38,6 +38,7 @@ import {
   isDeviceTokenExpired,
   shouldRotateDeviceToken,
 } from "@/lib/device-token";
+import { canReissueConsumedPairingCode } from "@/lib/pairing-activate";
 import { uiTime } from "@/lib/schedule-days";
 import { wallTimeToIso } from "@/lib/zoned-time";
 import { bindPlaylistItemsToAssets } from "@/lib/playlist-snapshot";
@@ -52,6 +53,21 @@ const POLL_AFTER_MS = 2000;
 const MANIFEST_URL_TTL_SECONDS = Math.max(DOWNLOAD_URL_TTL_SECONDS, 6 * 60 * 60);
 
 type AdminClient = ReturnType<typeof getServiceRoleClient>;
+
+type PairingCodeRow = {
+  id: string;
+  expires_at: string;
+  consumed_at: string | null;
+  screen_id: string | null;
+  app_version: string | null;
+  device_name: string | null;
+};
+
+type ScreenPairRow = {
+  id: string;
+  device_id: string | null;
+  archived_at: string | null;
+};
 
 type DeviceScreen = {
   id: string;
@@ -87,6 +103,68 @@ function asNumber(value: unknown, fallback = 0): number {
 
 function asNullableString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function isoNow(): string {
+  return new Date().toISOString();
+}
+
+/**
+ * Issue (or re-issue) device credentials after CMS has linked a pairing code.
+ * Re-issue is required when the TV lost the first ACTIVATED response but the code was consumed.
+ */
+async function issueActivatedCredentials(
+  admin: AdminClient,
+  screen: ScreenPairRow,
+  pair: Pick<PairingCodeRow, "app_version" | "device_name">,
+): Promise<DeviceActivateResponse> {
+  const screenId = asString(screen.id);
+  let deviceId = asNullableString(screen.device_id);
+  if (!deviceId) deviceId = randomUUID();
+
+  const now = isoNow();
+  const rawToken = generateDeviceToken();
+  await admin
+    .from("device_tokens")
+    .update({ revoked_at: now })
+    .eq("screen_id", screenId)
+    .is("revoked_at", null);
+
+  const { error: tokenError } = await admin.from("device_tokens").insert({
+    screen_id: screenId,
+    token_hash: hashDeviceToken(rawToken),
+    last_used_at: now,
+  });
+  throwIfError(tokenError, "Could not issue a device token.");
+
+  const { error: screenUpdateError } = await admin
+    .from("screens")
+    .update({
+      device_id: deviceId,
+      device_name: pair.device_name,
+      app_version: pair.app_version,
+    })
+    .eq("id", screenId);
+  throwIfError(screenUpdateError, "Could not attach the device.");
+
+  const { error: syncError } = await admin.from("device_sync_states").upsert(
+    {
+      screen_id: screenId,
+      sync_state: "WAITING",
+      sync_progress: 0,
+      package_state: "PENDING",
+      updated_at: now,
+    },
+    { onConflict: "screen_id" },
+  );
+  throwIfError(syncError, "Could not initialize sync state.");
+
+  return {
+    status: "ACTIVATED",
+    deviceToken: rawToken,
+    deviceId,
+    screenId,
+  };
 }
 
 function asDayNums(value: unknown): number[] {
@@ -158,10 +236,6 @@ function fail<T>(status: number, message: string): JsonResult<T> {
 
 function ok<T>(body: T, status = 200): JsonResult<T> {
   return { status, body };
-}
-
-function isoNow(): string {
-  return new Date().toISOString();
 }
 
 async function pairingTtlSeconds(admin: AdminClient): Promise<number> {
@@ -331,17 +405,14 @@ export async function activateDevice(
     .maybeSingle();
   throwIfError(error, "Could not look up pairing code.");
   if (!data) return ok({ status: "INVALID" });
-  const row = data as {
-    id: string;
-    expires_at: string;
-    consumed_at: string | null;
-    screen_id: string | null;
-    app_version: string | null;
-    device_name: string | null;
-  };
-  if (row.consumed_at) return ok({ status: "INVALID" });
-  if (new Date(row.expires_at).getTime() < Date.now()) return ok({ status: "EXPIRED" });
-  if (!row.screen_id) return ok({ status: "PENDING" });
+  const row = data as PairingCodeRow;
+  const nowMs = Date.now();
+  const expired = new Date(row.expires_at).getTime() < nowMs;
+
+  if (!row.screen_id) {
+    if (expired) return ok({ status: "EXPIRED" });
+    return ok({ status: "PENDING" });
+  }
 
   const { data: screen, error: screenError } = await admin
     .from("screens")
@@ -349,62 +420,38 @@ export async function activateDevice(
     .eq("id", row.screen_id)
     .maybeSingle();
   throwIfError(screenError, "Could not load screen.");
-  if (!screen || asNullableString((screen as { archived_at: string | null }).archived_at)) {
+  const screenRow = screen as ScreenPairRow | null;
+  if (!screenRow || asNullableString(screenRow.archived_at)) {
     return ok({ status: "INVALID" });
   }
-  const screenId = asString((screen as { id: string }).id);
-  let deviceId = asNullableString((screen as { device_id: string | null }).device_id);
-  if (!deviceId) deviceId = randomUUID();
+
+  // Already consumed: re-issue while the code TTL window is open (lost response / retry).
+  if (row.consumed_at) {
+    if (!canReissueConsumedPairingCode(row.expires_at, nowMs)) {
+      return ok({ status: "INVALID" });
+    }
+    return ok(await issueActivatedCredentials(admin, screenRow, row));
+  }
+
+  if (expired) return ok({ status: "EXPIRED" });
 
   const now = isoNow();
-  const rawToken = generateDeviceToken();
-  await admin
-    .from("device_tokens")
-    .update({ revoked_at: now })
-    .eq("screen_id", screenId)
-    .is("revoked_at", null);
-
-  const { error: tokenError } = await admin.from("device_tokens").insert({
-    screen_id: screenId,
-    token_hash: hashDeviceToken(rawToken),
-    last_used_at: now,
-  });
-  throwIfError(tokenError, "Could not issue a device token.");
-
-  const { error: consumeError } = await admin
+  const screenId = asString(screenRow.id);
+  // Race-safe consume: only one activate wins; losers fall through to re-issue.
+  const { data: consumed, error: consumeError } = await admin
     .from("device_pairing_codes")
     .update({ consumed_at: now, screen_id: screenId })
-    .eq("id", row.id);
+    .eq("id", row.id)
+    .is("consumed_at", null)
+    .select("id")
+    .maybeSingle();
   throwIfError(consumeError, "Could not consume pairing code.");
 
-  const { error: screenUpdateError } = await admin
-    .from("screens")
-    .update({
-      device_id: deviceId,
-      device_name: row.device_name,
-      app_version: row.app_version,
-    })
-    .eq("id", screenId);
-  throwIfError(screenUpdateError, "Could not attach the device.");
+  if (!consumed && !canReissueConsumedPairingCode(row.expires_at, nowMs)) {
+    return ok({ status: "INVALID" });
+  }
 
-  const { error: syncError } = await admin.from("device_sync_states").upsert(
-    {
-      screen_id: screenId,
-      sync_state: "WAITING",
-      sync_progress: 0,
-      package_state: "PENDING",
-      updated_at: now,
-    },
-    { onConflict: "screen_id" },
-  );
-  throwIfError(syncError, "Could not initialize sync state.");
-
-  return ok({
-    status: "ACTIVATED",
-    deviceToken: rawToken,
-    deviceId,
-    screenId,
-  });
+  return ok(await issueActivatedCredentials(admin, screenRow, row));
 }
 
 export async function deviceSyncStatus(

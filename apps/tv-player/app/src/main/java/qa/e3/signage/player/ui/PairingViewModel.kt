@@ -124,6 +124,26 @@ class PairingViewModel(application: Application) : AndroidViewModel(application)
                     )
                     SyncStatusWorker.enqueue(app)
                     HeartbeatWorker.enqueue(app)
+                    // Do not wait for WorkManager (15 min) or PlaybackViewModel —
+                    // CMS shows Heartbeat "Never" until the first successful check-in.
+                    withContext(Dispatchers.IO) {
+                        try {
+                            app.container.telemetry.sendHeartbeat(
+                                playingMediaId = null,
+                                playlistId = null,
+                                manifestVersion = null,
+                                packageState = null,
+                                lastError = null,
+                            )
+                        } catch (error: Exception) {
+                            Log.w(TAG, "post-pair heartbeat: ${error.message}")
+                        }
+                        try {
+                            app.container.sync.syncIfNeeded()
+                        } catch (error: Exception) {
+                            Log.w(TAG, "post-pair sync: ${error.message}")
+                        }
+                    }
                     _ui.update { it.copy(paired = true, error = null, message = "Paired") }
                 }
             }

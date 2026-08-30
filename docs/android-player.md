@@ -18,7 +18,7 @@ gradlew.bat :app:bundleRelease
 | Debug APK (sideload) | `:app:assembleDebug` | `dist/e3-signage-player-<versionName>-debug.apk` |
 | Release AAB (Play / internal app sharing) | `:app:bundleRelease` | `app/build/outputs/bundle/release/app-release.aab` |
 
-`assembleDebug` (and `assembleRelease`) also copy the APK into the repo `dist/` folder as `e3-signage-player-<versionName>-<buildType>.apk` (currently **0.20.0**). `dist/` is gitignored.
+`assembleDebug` (and `assembleRelease`) also copy the APK into the repo `dist/` folder as `e3-signage-player-<versionName>-<buildType>.apk` (currently **0.21.0**). `dist/` is gitignored.
 
 `local.properties` (gitignored; see `local.properties.example`):
 
@@ -29,7 +29,7 @@ api.base.url=https://e3-cms.vercel.app
 
 `api.base.url` must be reachable from the TV. Do not use `localhost` or the emulator alias on a physical box. Release signing is not stored in this repo; `bundleRelease` is unsigned unless you configure a keystore locally.
 
-Current player version: **0.20.0** (`versionCode` 20).
+Current player version: **0.21.0** (`versionCode` 21).
 
 Unpaired pairing screen branding is loaded from `GET /api/devices/player-branding` (no device token): org waiting-screen mode/image plus CMS logo. Install this APK (or newer) for admin branding to appear before pair.
 
@@ -44,11 +44,12 @@ Screen orientation is driven by CMS **Edit screen → Orientation**. Sync-status
 
    ```
    adb connect <tv-ip>
-   adb install -r dist/e3-signage-player-0.20.0-debug.apk
+   adb install -r dist/e3-signage-player-0.21.0-debug.apk
    ```
 
 3. Open **E3 Signage** from Apps. Enter the 6-digit pairing code in the CMS **Pair a screen** dialog.
-4. After a version bump, uninstall the previous player if Android refuses the upgrade, then sideload. Pairing tokens stay valid until the 7-day rotation window. To pick up a new launcher icon, uninstall the old APK first — Android TV often keeps a cached generic icon across `-r` reinstalls.
+4. Within a few seconds the CMS screen detail **Heartbeat** should leave **Never** and the badge should flip to **Online**. If Heartbeat stays **Never**, the TV did not finish activation — use **Repair** with a fresh code from the TV (do not rely on **Sync Now**; that only flags a pull when the player already has a token).
+5. After a version bump, uninstall the previous player if Android refuses the upgrade, then sideload. Pairing tokens stay valid until the 7-day rotation window. To pick up a new launcher icon, uninstall the old APK first — Android TV often keeps a cached generic icon across `-r` reinstalls.
 
 ### CMS direct download
 
