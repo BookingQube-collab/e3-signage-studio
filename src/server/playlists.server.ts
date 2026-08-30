@@ -20,13 +20,14 @@ import { getUserClient } from "./supabase.server";
 
 const PLAYLIST_SELECT = "id, organization_id, name, status, archived_at, created_at, updated_at, created_by";
 const ITEM_SELECT =
-  "id, playlist_id, media_id, media_version_id, position, duration_seconds, transition, layout_id, priority";
+  "id, playlist_id, media_id, media_version_id, position, duration_seconds, transition, layout_id, priority, audio_media_id, audio_media_version_id";
 
 export type PlaylistItemInput = {
   id: string;
   mediaId: string;
   durationSec: number;
   transition: Transition;
+  audioMediaId?: string | null;
 };
 
 function throwIfError(error: { message: string } | null, fallback: string): void {
@@ -136,7 +137,9 @@ function mediaIdsForPreviewSign(
 ): Set<string> {
   if (mode === "full") {
     return new Set(
-      itemRows.map((row) => asString(row["media_id"])).filter(Boolean),
+      itemRows.flatMap((row) =>
+        [asString(row["media_id"]), asString(row["audio_media_id"])].filter(Boolean),
+      ),
     );
   }
   const out = new Set<string>();
@@ -166,8 +169,13 @@ async function toRecords(
   ]);
 
   const mediaIds = [
-    ...new Set((itemRows ?? []).map((row) => asString((row as { media_id: string }).media_id))),
-  ].filter(Boolean);
+    ...new Set(
+      (itemRows ?? []).flatMap((row) => {
+        const record = row as { media_id: string; audio_media_id?: string | null };
+        return [asString(record.media_id), asString(record.audio_media_id)].filter(Boolean);
+      }),
+    ),
+  ];
   const { data: mediaRows } = mediaIds.length
     ? await client.from("media").select("id, name, type, current_version_id").in("id", mediaIds)
     : { data: [] as Array<Record<string, unknown>> };
@@ -202,6 +210,9 @@ async function toRecords(
     const meta = mediaMeta.get(mediaId);
     const signed = signedUrls.get(mediaId);
     const transition = asString(row["transition"], "FADE");
+    const audioMediaId = asNullableString(row["audio_media_id"]);
+    const audioMeta = audioMediaId ? mediaMeta.get(audioMediaId) : undefined;
+    const audioSigned = audioMediaId ? signedUrls.get(audioMediaId) : undefined;
     const item: PlaylistItemRecord = {
       id: asString(row["id"]),
       mediaId,
@@ -212,6 +223,11 @@ async function toRecords(
     };
     if (signed?.thumbnailUrl) item.thumbnailUrl = signed.thumbnailUrl;
     if (signed?.previewUrl) item.previewUrl = signed.previewUrl;
+    if (audioMediaId && audioMeta?.type === "AUDIO") {
+      item.audioMediaId = audioMediaId;
+      item.audioFilename = audioMeta.name;
+      if (audioSigned?.previewUrl) item.audioUrl = audioSigned.previewUrl;
+    }
     const list = itemsByPlaylist.get(playlistId) ?? [];
     list.push(item);
     itemsByPlaylist.set(playlistId, list);
@@ -308,18 +324,36 @@ export async function savePlaylist(
   }
 
   const mediaIds = [...new Set(input.items.map((item) => item.mediaId))];
+  const audioMediaIds = [
+    ...new Set(input.items.map((item) => item.audioMediaId).filter((id): id is string => Boolean(id))),
+  ];
   for (const mediaId of mediaIds) {
     if (!isUuid(mediaId)) throw new Error("Playlist items must use media from the library.");
   }
-  const { data: mediaRows, error: mediaError } = mediaIds.length
+  for (const mediaId of audioMediaIds) {
+    if (!isUuid(mediaId)) throw new Error("Image soundtrack must be an MP3 from the library.");
+  }
+  const lookupIds = [...new Set([...mediaIds, ...audioMediaIds])];
+  const { data: mediaRows, error: mediaError } = lookupIds.length
     ? await client
         .from("media")
-        .select("id, current_version_id, status, organization_id")
-        .in("id", mediaIds)
+        .select("id, current_version_id, status, organization_id, type, mime_type")
+        .in("id", lookupIds)
         .eq("organization_id", auth.profile.organizationId)
-    : { data: [] as Array<{ id: string; current_version_id: string | null; status: string }>, error: null };
+    : {
+        data: [] as Array<{
+          id: string;
+          current_version_id: string | null;
+          status: string;
+          type: string;
+          mime_type: string;
+        }>,
+        error: null,
+      };
   throwIfError(mediaError, "Could not load media for this playlist.");
   const versions = new Map<string, string>();
+  const mediaTypeById = new Map<string, string>();
+  const mimeById = new Map<string, string>();
   for (const row of mediaRows ?? []) {
     const id = asString((row as { id: string }).id);
     const versionId = asString((row as { current_version_id: string | null }).current_version_id);
@@ -328,9 +362,18 @@ export async function savePlaylist(
       throw new Error("Every playlist item must be ready media. Finish uploads first.");
     }
     versions.set(id, versionId);
+    mediaTypeById.set(id, asString((row as { type: string }).type));
+    mimeById.set(id, asString((row as { mime_type: string }).mime_type).toLowerCase());
   }
-  if (versions.size !== mediaIds.length) {
+  if (versions.size !== lookupIds.length) {
     throw new Error("One or more media items were not found in the library.");
+  }
+  for (const audioId of audioMediaIds) {
+    const type = mediaTypeById.get(audioId);
+    const mime = mimeById.get(audioId) ?? "";
+    if (type !== "AUDIO" && mime !== "audio/mpeg") {
+      throw new Error("Image soundtrack must be an MP3.");
+    }
   }
 
   const existingId = isUuid(input.id) ? input.id : null;
@@ -373,17 +416,26 @@ export async function savePlaylist(
   throwIfError(deleteError, "Could not update playlist items.");
 
   if (input.items.length > 0) {
-    const payload = input.items.map((item, position) => ({
-      id: isUuid(item.id) ? item.id : randomUUID(),
-      playlist_id: playlistId,
-      media_id: item.mediaId,
-      media_version_id: versions.get(item.mediaId),
-      position,
-      duration_seconds: Math.max(1, item.durationSec),
-      transition: item.transition,
-      layout_id: null,
-      priority: 10,
-    }));
+    const payload = input.items.map((item, position) => {
+      const visualType = mediaTypeById.get(item.mediaId);
+      const audioId =
+        visualType === "IMAGE" && item.audioMediaId && versions.has(item.audioMediaId)
+          ? item.audioMediaId
+          : null;
+      return {
+        id: isUuid(item.id) ? item.id : randomUUID(),
+        playlist_id: playlistId,
+        media_id: item.mediaId,
+        media_version_id: versions.get(item.mediaId),
+        position,
+        duration_seconds: Math.max(1, item.durationSec),
+        transition: item.transition,
+        layout_id: null,
+        priority: 10,
+        audio_media_id: audioId,
+        audio_media_version_id: audioId ? (versions.get(audioId) ?? null) : null,
+      };
+    });
     const { error: insertError } = await client.from("playlist_items").insert(payload);
     throwIfError(insertError, "Could not save playlist items.");
   }

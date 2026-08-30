@@ -15,6 +15,9 @@ export type PlaylistItemRecord = {
   transition: Transition;
   thumbnailUrl?: string | null;
   previewUrl?: string | null;
+  audioMediaId?: string | null;
+  audioFilename?: string | null;
+  audioUrl?: string | null;
 };
 
 export type PlaylistRecord = {
@@ -35,7 +38,7 @@ function playlistStatusLabel(status: PlaylistStatus | undefined): Playlist["stat
 
 function mediaTypeLabel(type: MediaType | undefined): Playlist["items"][number]["type"] {
   const label = type ? UI_LABELS.mediaType[type] : undefined;
-  return label === "Video" || label === "Image" || label === "QR" || label === "Logo"
+  return label === "Video" || label === "Image" || label === "QR" || label === "Logo" || label === "Audio"
     ? label
     : "Image";
 }
@@ -61,6 +64,9 @@ export function toUiPlaylist(row: PlaylistRecord): Playlist {
       };
       if (item?.thumbnailUrl) mapped.thumbnailUrl = item.thumbnailUrl;
       if (item?.previewUrl) mapped.previewUrl = item.previewUrl;
+      if (item?.audioMediaId) mapped.audioMediaId = item.audioMediaId;
+      if (item?.audioFilename) mapped.audioFilename = item.audioFilename;
+      if (item?.audioUrl) mapped.audioUrl = item.audioUrl;
       return mapped;
     }),
     usedByScreens: Number.isFinite(row?.usedByScreens) ? row.usedByScreens : 0,

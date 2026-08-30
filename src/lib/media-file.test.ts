@@ -21,6 +21,8 @@ import {
   restoredLibraryFilename,
   ensurePlayableFilename,
   inferOrphanMediaMime,
+  isPlaylistMp3File,
+  playlistMp3Error,
   safeMediaFilename,
   uniqueLibraryFilename,
   uploadLimitsHint,
@@ -31,12 +33,15 @@ test("infers mime from extension when the browser omits type", () => {
   assert.equal(inferMediaMime("loop.mp4", "video/mp4"), "video/mp4");
   assert.equal(inferMediaMime("WhatsApp Video.mp4", "application/octet-stream"), "video/mp4");
   assert.equal(inferMediaMime("clip.mp4", ""), "video/mp4");
+  assert.equal(inferMediaMime("theme.mp3", ""), "audio/mpeg");
+  assert.equal(inferMediaMime("theme.mp3", "audio/mp3"), "audio/mpeg");
   assert.equal(inferMediaMime("bad.gif", "image/gif"), null);
 });
 
 test("maps mime to canonical media type", () => {
   assert.equal(mediaTypeFromMime("video/mp4"), "VIDEO");
   assert.equal(mediaTypeFromMime("image/webp"), "IMAGE");
+  assert.equal(mediaTypeFromMime("audio/mpeg"), "AUDIO");
 });
 
 test("builds append-only storage keys that include org, media, version, and checksum", () => {
@@ -77,6 +82,20 @@ test("collectUploadableFiles rejects oversize before upload starts", () => {
   assert.equal(accepted[0]?.name, "loop.mp4");
   assert.match(errors[0] ?? "", /hero\.jpg/);
   assert.match(errors[0] ?? "", /25 MB/);
+});
+
+test("playlist image soundtrack accepts MP3 only", () => {
+  assert.equal(isPlaylistMp3File({ name: "bed.mp3", type: "audio/mpeg" }), true);
+  assert.equal(isPlaylistMp3File({ name: "bed.MP3", type: "" }), true);
+  assert.equal(isPlaylistMp3File({ name: "clip.wav", type: "audio/wav" }), false);
+  assert.equal(isPlaylistMp3File({ name: "loop.mp4", type: "video/mp4" }), false);
+  assert.match(playlistMp3Error({ name: "theme.wav", type: "audio/wav" }) ?? "", /MP3/);
+  assert.equal(playlistMp3Error({ name: "theme.mp3", type: "audio/mpeg" }), null);
+  const { accepted, errors } = collectUploadableFiles([
+    { name: "theme.mp3", type: "audio/mpeg", size: 1200 } as File,
+  ]);
+  assert.equal(accepted.length, 0);
+  assert.match(errors[0] ?? "", /theme\.mp3/);
 });
 
 test("normalizes filenames and checksums", () => {
@@ -131,6 +150,15 @@ test("storage keys round-trip org, media id, version, and checksum", () => {
     mime: "video/mp4",
   });
   assert.equal(parseMediaStorageKey(videoKey)?.mime, "video/mp4");
+  const audioKey = buildStorageKey({
+    organizationId: "11111111-1111-4111-8111-111111111111",
+    mediaId: "22222222-2222-4222-8222-222222222222",
+    versionNumber: 1,
+    checksumSha256: "ef".repeat(32),
+    mime: "audio/mpeg",
+  });
+  assert.ok(audioKey.endsWith(".mp3"));
+  assert.equal(parseMediaStorageKey(audioKey)?.mime, "audio/mpeg");
   const extensionless = videoKey.replace(/\.mp4$/i, "");
   assert.equal(parseMediaStorageKey(extensionless)?.mime, null);
   assert.equal(parseMediaStorageKey(extensionless)?.checksumSha256, "cd".repeat(32));

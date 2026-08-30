@@ -26,7 +26,11 @@ fun requireLocalPlaybackUri(uri: String): URI {
     return URI(uri)
 }
 
-fun mediaFolder(type: MediaKind): String = if (type == MediaKind.VIDEO) "video" else "image"
+fun mediaFolder(type: MediaKind): String = when (type) {
+    MediaKind.VIDEO -> "video"
+    MediaKind.AUDIO -> "audio"
+    else -> "image"
+}
 
 fun safeLocalFilename(filename: String): String? {
     val name = filename.substringAfterLast('/').substringAfterLast('\\')
@@ -36,8 +40,11 @@ fun safeLocalFilename(filename: String): String? {
 
 fun resolveLocalMedia(root: File, type: MediaKind, filename: String): File? {
     val name = safeLocalFilename(filename) ?: return null
-    val primary = File(File(root, "media/${mediaFolder(type)}"), name)
-    val secondary = File(File(root, "media/${mediaFolder(if (type == MediaKind.VIDEO) MediaKind.IMAGE else MediaKind.VIDEO)}"), name)
-    val loose = File(root, name)
-    return listOf(primary, secondary, loose).firstOrNull { it.isFile }
+    val folders = when (type) {
+        MediaKind.VIDEO -> listOf("video", "image", "audio")
+        MediaKind.AUDIO -> listOf("audio", "image", "video")
+        else -> listOf("image", "video", "audio")
+    }
+    val candidates = folders.map { File(File(root, "media/$it"), name) } + File(root, name)
+    return candidates.firstOrNull { it.isFile }
 }

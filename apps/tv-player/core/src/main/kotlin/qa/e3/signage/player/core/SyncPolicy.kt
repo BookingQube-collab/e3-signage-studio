@@ -25,7 +25,8 @@ fun shouldFetchManifest(
 fun playlistSequenceKey(playlist: ManifestPlaylist?): String {
     if (playlist == null) return ""
     return playlist.items.joinToString("|") { item ->
-        "${item.mediaVersionId}:${item.durationSeconds}:${item.transition.trim().uppercase()}"
+        val audio = item.audioLocalFilename?.takeIf { it.isNotBlank() }?.let { ":$it" }.orEmpty()
+        "${item.mediaVersionId}:${item.durationSeconds}:${item.transition.trim().uppercase()}$audio"
     }
 }
 

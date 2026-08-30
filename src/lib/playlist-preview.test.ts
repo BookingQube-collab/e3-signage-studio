@@ -124,6 +124,34 @@ test("bindPreviewClips uses library preview URLs in playlist order", () => {
   assert.equal(elapsedOffsetForMedia(clips, "m2"), 10_000);
 });
 
+test("bindPreviewClips keeps image soundtrack URLs and never attaches them to video", () => {
+  const clips = bindPreviewClips(
+    [
+      {
+        id: "1",
+        mediaId: "m1",
+        filename: "hero.jpg",
+        type: "Image",
+        durationSec: 10,
+        transition: "Fade",
+        audioUrl: "https://signed.example/bed.mp3",
+      },
+      {
+        id: "2",
+        mediaId: "m2",
+        filename: "clip.mp4",
+        type: "Video",
+        durationSec: 8,
+        transition: "Cut",
+        audioUrl: "https://signed.example/should-ignore.mp3",
+      },
+    ],
+    new Map(),
+  );
+  assert.equal(clips[0]?.audioUrl, "https://signed.example/bed.mp3");
+  assert.equal(clips[1]?.audioUrl, null);
+});
+
 test("bindPreviewClips ignores storage keys and uses playlist-signed URLs", () => {
   const clips = bindPreviewClips(
     [

@@ -85,6 +85,15 @@ fun planZones(
     return ZonePlan(layout.width, layout.height, layout.background, zones)
 }
 
+/** Layout campaigns publish zone files with no playlist. Those still have something to show. */
+fun hasPlayableLayoutContent(plan: ZonePlan): Boolean =
+    plan.zones.any { zone ->
+        when (zone.source) {
+            is ZoneSource.StaticFile, ZoneSource.Clock, ZoneSource.Date -> true
+            else -> false
+        }
+    }
+
 fun exoResizeMode(fit: FitMode): String = when (fit) {
     FitMode.STRETCH -> "FILL"
     FitMode.COVER, FitMode.FILL -> "ZOOM"
@@ -107,7 +116,7 @@ private fun sourceFor(
     val ref = zone.contentRef
     if (!ref.isNullOrBlank()) {
         val asset = byFile[ref] ?: byId[ref]
-        val type = asset?.type ?: MediaKind.IMAGE
+        val type = asset?.type ?: if (zone.type == ZoneKind.VIDEO) MediaKind.VIDEO else MediaKind.IMAGE
         val file = resolveLocalMedia(root, type, asset?.localFilename ?: ref)
         val uri = file?.let { runCatching { localFileUri(it) }.getOrNull() }
         if (uri != null) {

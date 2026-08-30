@@ -30,6 +30,7 @@ import { UI_TRANSITIONS, type Media, type Playlist, type PlaylistItem } from "@/
 import { bindPreviewClips, playlistItemThumbMedia } from "@/lib/playlist-preview";
 import { MediaPicker } from "@/features/media/MediaPicker";
 import { PlaylistLoopPreview } from "./PlaylistLoopPreview";
+import { PlaylistItemAudioControl } from "./PlaylistItemAudioControl";
 import { invalidateKeysInBackground, removeById, writeEntityCache } from "@/lib/query-cache";
 
 export function PlaylistBuilder({
@@ -226,7 +227,7 @@ export function PlaylistBuilder({
                       if (dragIndex !== null) move(dragIndex, index);
                       setDragIndex(null);
                     }}
-                    className="grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-3 rounded-xl border border-border bg-background/40 p-3 lg:grid-cols-[auto_auto_minmax(0,1fr)_auto_auto_auto]"
+                    className="grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-3 rounded-xl border border-border bg-background/40 p-3 lg:grid-cols-[auto_auto_minmax(0,1fr)_auto_auto_auto_auto]"
                   >
                     <div className="flex shrink-0 items-center gap-2">
                       <GripVertical className="size-4 text-muted-foreground" aria-hidden />
@@ -277,6 +278,15 @@ export function PlaylistBuilder({
                         ))}
                       </SelectContent>
                     </Select>
+                    {item.type === "Image" ? (
+                      <PlaylistItemAudioControl
+                        item={item}
+                        disabled={!canManage}
+                        onChange={(patch) => patchItem(item.id, patch)}
+                      />
+                    ) : (
+                      <span className="hidden lg:block" aria-hidden />
+                    )}
                     {canManage ? (
                       <div className="flex items-center gap-1">
                         <button
@@ -381,11 +391,12 @@ export function PlaylistBuilder({
       >
         <div className="max-h-[60vh] overflow-y-auto pr-1">
           <MediaPicker
-            media={mediaQuery.data ?? []}
+            media={(mediaQuery.data ?? []).filter((item) => item.type !== "Audio")}
             folders={foldersQuery.data ?? []}
             selectedIds={new Set(items.map((item) => item.mediaId))}
             onPick={(m) =>
               setPlaylist((p) => {
+                if (m.type === "Audio") return p;
                 const current = Array.isArray(p.items) ? p.items : [];
                 const lastIdx = current.map((item) => item.mediaId).lastIndexOf(m.id);
                 if (lastIdx >= 0) {

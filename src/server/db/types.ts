@@ -168,6 +168,8 @@ export type PlaylistItemRow = {
   transition: string;
   layout_id: string | null;
   priority: number;
+  audio_media_id: string | null;
+  audio_media_version_id: string | null;
 };
 
 export type LayoutRow = {

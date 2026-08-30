@@ -82,7 +82,7 @@ export interface ScreenGroup {
   screenIds: string[];
 }
 
-export type MediaType = "Video" | "Image" | "QR" | "Logo";
+export type MediaType = "Video" | "Image" | "QR" | "Logo" | "Audio";
 
 export interface MediaFolder {
   id: string;
@@ -135,6 +135,10 @@ export interface PlaylistItem {
   transition: Transition;
   thumbnailUrl?: string;
   previewUrl?: string;
+  /** Optional MP3 that plays with this image on the signage player. Images only. */
+  audioMediaId?: string | null;
+  audioFilename?: string | null;
+  audioUrl?: string | null;
 }
 
 export interface Playlist {

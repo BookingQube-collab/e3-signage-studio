@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isImageStillUrl, seekVideoToStillFrame, videoStillNeedsHydration } from "./video-poster.ts";
+import {
+  isImageStillUrl,
+  seekVideoToStillFrame,
+  videoPreviewNeedsHydration,
+  videoStillNeedsHydration,
+} from "./video-poster.ts";
 
 test("images never need video still hydration", () => {
   assert.equal(
@@ -18,6 +23,18 @@ test("videos without a signed poster or preview need hydration", () => {
   assert.equal(
     videoStillNeedsHydration({ type: "Video", thumbnailUrl: "not-a-url", previewUrl: "" }),
     true,
+  );
+});
+
+test("videos still need a signed preview URL even when a poster exists", () => {
+  assert.equal(videoPreviewNeedsHydration({ type: "Image" }), false);
+  assert.equal(videoPreviewNeedsHydration({ type: "Video" }), true);
+  assert.equal(
+    videoPreviewNeedsHydration({
+      type: "Video",
+      previewUrl: "https://cdn.example/clip.mp4",
+    }),
+    false,
   );
 });
 

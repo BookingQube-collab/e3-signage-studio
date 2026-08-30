@@ -19,6 +19,7 @@ export type PreviewClip = {
   transition: Transition;
   previewUrl: string | null;
   thumbnailUrl: string | null;
+  audioUrl: string | null;
 };
 
 export type PreviewFrame = {
@@ -37,7 +38,10 @@ export type PreviewMediaLookup = {
   type?: string;
 };
 
-type PreviewItem = Pick<PlaylistItem, "id" | "mediaId" | "filename" | "type" | "durationSec" | "transition"> & {
+type PreviewItem = Pick<
+  PlaylistItem,
+  "id" | "mediaId" | "filename" | "type" | "durationSec" | "transition" | "audioUrl"
+> & {
   previewUrl?: string | null;
   thumbnailUrl?: string | null;
 };
@@ -182,6 +186,7 @@ export function bindPreviewClips(
       transition: asTransition(item.transition),
       previewUrl,
       thumbnailUrl: thumbnailUrl ?? (kind === "image" ? previewUrl : null),
+      audioUrl: kind === "image" ? firstHttpUrl(item.audioUrl) : null,
     };
   });
 }

@@ -7,6 +7,7 @@ import {
 } from "@e3/shared-types";
 import type { AllowedMediaMime } from "@e3/validation";
 import {
+  MAX_AUDIO_UPLOAD_BYTES,
   MAX_IMAGE_UPLOAD_BYTES,
   MAX_VIDEO_UPLOAD_BYTES,
   parseUploadByteLimit,
@@ -109,11 +110,12 @@ function isUnknownColumn(error: { message: string } | null, column: string): boo
   );
 }
 
-function serverUploadLimits(): { imageBytes: number; videoBytes: number } {
+function serverUploadLimits(): { imageBytes: number; videoBytes: number; audioBytes: number } {
   const env = getServerEnv();
   return {
     imageBytes: parseUploadByteLimit(env.mediaMaxImageBytes, MAX_IMAGE_UPLOAD_BYTES),
     videoBytes: parseUploadByteLimit(env.mediaMaxVideoBytes, MAX_VIDEO_UPLOAD_BYTES),
+    audioBytes: MAX_AUDIO_UPLOAD_BYTES,
   };
 }
 
@@ -234,12 +236,19 @@ async function loadUsedIn(
   }
   if (mediaIds.length === 0) return map;
 
-  const { data: itemRows } = await client
-    .from("playlist_items")
-    .select("media_id, playlist_id")
-    .in("media_id", mediaIds);
+  const [{ data: itemRows }, { data: audioRows }] = await Promise.all([
+    client.from("playlist_items").select("media_id, playlist_id").in("media_id", mediaIds),
+    client
+      .from("playlist_items")
+      .select("audio_media_id, playlist_id")
+      .in("audio_media_id", mediaIds),
+  ]);
   const playlistIds = [
-    ...new Set((itemRows ?? []).map((row) => asString((row as { playlist_id: string }).playlist_id))),
+    ...new Set(
+      [...(itemRows ?? []), ...(audioRows ?? [])].map((row) =>
+        asString((row as { playlist_id: string }).playlist_id),
+      ),
+    ),
   ].filter(Boolean);
 
   const [{ data: playlists }, { data: campaigns }, { data: playingScreens }, { data: assignedScreens }] =
@@ -1841,8 +1850,8 @@ async function detachNonLivePlaylistItems(
 ): Promise<void> {
   const { data: itemRows, error } = await client
     .from("playlist_items")
-    .select("id, playlist_id")
-    .eq("media_id", mediaId);
+    .select("id, playlist_id, media_id, audio_media_id")
+    .or(`media_id.eq.${mediaId},audio_media_id.eq.${mediaId}`);
   throwIfError(error, "Could not check media usage.");
   const playlistIds = [
     ...new Set((itemRows ?? []).map((row) => asString((row as { playlist_id: string }).playlist_id))),
@@ -1861,14 +1870,34 @@ async function detachNonLivePlaylistItems(
       archived_at: asNullableString((row as { archived_at: string | null }).archived_at),
     })),
   );
-  const staleIds = (itemRows ?? [])
-    .filter((row) => !liveIds.has(asString((row as { playlist_id: string }).playlist_id)))
+  const staleVisualIds = (itemRows ?? [])
+    .filter(
+      (row) =>
+        asString((row as { media_id: string }).media_id) === mediaId &&
+        !liveIds.has(asString((row as { playlist_id: string }).playlist_id)),
+    )
     .map((row) => asString((row as { id: string }).id))
     .filter(Boolean);
-  if (staleIds.length === 0) return;
-
-  const { error: deleteError } = await client.from("playlist_items").delete().in("id", staleIds);
-  throwIfError(deleteError, "Could not clear archived playlist usage.");
+  const staleAudioIds = (itemRows ?? [])
+    .filter(
+      (row) =>
+        asString((row as { audio_media_id?: string | null }).audio_media_id) === mediaId &&
+        asString((row as { media_id: string }).media_id) !== mediaId &&
+        !liveIds.has(asString((row as { playlist_id: string }).playlist_id)),
+    )
+    .map((row) => asString((row as { id: string }).id))
+    .filter(Boolean);
+  if (staleVisualIds.length > 0) {
+    const { error: deleteError } = await client.from("playlist_items").delete().in("id", staleVisualIds);
+    throwIfError(deleteError, "Could not clear archived playlist usage.");
+  }
+  if (staleAudioIds.length > 0) {
+    const { error: clearError } = await client
+      .from("playlist_items")
+      .update({ audio_media_id: null, audio_media_version_id: null })
+      .in("id", staleAudioIds);
+    throwIfError(clearError, "Could not clear archived playlist soundtrack.");
+  }
 }
 
 async function purgeMediaRow(

@@ -110,3 +110,38 @@ test("playlist sequence fingerprint changes on reorder or transition", () => {
     true,
   );
 });
+
+test("image soundtrack binds as a separate local file without dropping the image", () => {
+  const bound = bindPlaylistItemsToAssets(
+    [
+      {
+        mediaId: "media-rajan",
+        mediaVersionId: "ver-rajan",
+        durationSeconds: 10,
+        transition: "FADE",
+        audioMediaId: "media-bed",
+        audioMediaVersionId: "ver-bed",
+      },
+    ],
+    new Map([
+      ["ver-rajan", "rajan.jpeg"],
+      ["ver-bed", "lobby.mp3"],
+    ]),
+  );
+  assert.equal(bound.length, 1);
+  assert.equal(bound[0]?.localFilename, "rajan.jpeg");
+  assert.equal(bound[0]?.audioLocalFilename, "lobby.mp3");
+  assert.equal(
+    playlistSequenceFingerprint([
+      { mediaVersionId: "ver-rajan", durationSeconds: 10, transition: "FADE", audioMediaVersionId: "ver-bed" },
+    ]),
+    "ver-rajan:10:FADE:ver-bed",
+  );
+  assert.equal(
+    isPlaylistSequenceStale(
+      [{ mediaVersionId: "ver-rajan", durationSeconds: 10, transition: "FADE", audioMediaVersionId: "ver-bed" }],
+      [{ mediaVersionId: "ver-rajan", durationSeconds: 10, transition: "FADE" }],
+    ),
+    true,
+  );
+});

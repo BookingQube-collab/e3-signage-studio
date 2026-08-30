@@ -65,7 +65,7 @@ export const CONTENT_PACKAGE_STATES = [
 ] as const;
 export type ContentPackageState = (typeof CONTENT_PACKAGE_STATES)[number];
 
-export const MEDIA_TYPES = ["VIDEO", "IMAGE", "QR", "LOGO"] as const;
+export const MEDIA_TYPES = ["VIDEO", "IMAGE", "QR", "LOGO", "AUDIO"] as const;
 export type MediaType = (typeof MEDIA_TYPES)[number];
 
 export const MEDIA_STATUSES = ["PROCESSING", "READY", "FAILED", "ARCHIVED"] as const;

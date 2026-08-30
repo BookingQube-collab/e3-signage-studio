@@ -60,6 +60,7 @@ export const savePlaylistFn = createServerFn({ method: "POST" })
           mediaId: z.string().min(1),
           durationSec: z.number().positive(),
           transition: transitionEnum(),
+          audioMediaId: z.string().uuid().nullable().optional(),
         }),
       ),
     }),

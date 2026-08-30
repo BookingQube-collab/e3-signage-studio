@@ -10,6 +10,15 @@ export function videoStillNeedsHydration(input: {
   return !firstHttpUrl(input.thumbnailUrl, input.previewUrl);
 }
 
+/** Playback needs the signed file URL — a poster still is not enough. */
+export function videoPreviewNeedsHydration(input: {
+  type?: string | null;
+  previewUrl?: string | null;
+}): boolean {
+  if (input.type !== "Video") return false;
+  return !firstHttpUrl(input.previewUrl);
+}
+
 /** True when the URL is a still image (not an mp4 blob/file used as a poster fallback). */
 export function isImageStillUrl(url: string | null | undefined): boolean {
   if (!url) return false;

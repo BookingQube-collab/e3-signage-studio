@@ -1,6 +1,7 @@
 import {
   ALLOWED_MEDIA_MIME,
   HARD_MAX_UPLOAD_BYTES,
+  MAX_AUDIO_UPLOAD_BYTES,
   MAX_IMAGE_UPLOAD_BYTES,
   MAX_VIDEO_UPLOAD_BYTES,
   isAllowedMediaMime,
@@ -16,6 +17,7 @@ const MIME_BY_EXT: Record<string, AllowedMediaMime> = {
   ".webp": "image/webp",
   ".mp4": "video/mp4",
   ".webm": "video/mp4",
+  ".mp3": "audio/mpeg",
 };
 
 export function fileExtension(filename: string): string {
@@ -59,7 +61,7 @@ export type ParsedMediaStorageKey = {
 };
 
 const STORAGE_KEY_RE =
-  /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/v(\d+)\/([a-f0-9]{64})(?:\.(jpg|jpeg|png|webp|mp4|webm))?$/i;
+  /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/v(\d+)\/([a-f0-9]{64})(?:\.(jpg|jpeg|png|webp|mp4|webm|mp3))?$/i;
 
 export function parseMediaStorageKey(key: string): ParsedMediaStorageKey | null {
   const match = STORAGE_KEY_RE.exec(key.trim());
@@ -125,21 +127,37 @@ export function uniqueLibraryFilename(existingNames: string[], filename: string)
 }
 
 export function inferMediaMime(filename: string, reportedType: string): AllowedMediaMime | null {
-  const reported = reportedType.trim().toLowerCase();
+  const reported = reportedType.trim().toLowerCase().split(";")[0]?.trim() ?? "";
   if (isAllowedMediaMime(reported)) return reported;
+  if (reported === "audio/mp3" || reported === "audio/x-mpeg" || reported === "audio/x-mp3") {
+    return "audio/mpeg";
+  }
   const fromExt = MIME_BY_EXT[fileExtension(filename)];
   return fromExt ?? null;
 }
 
-export function mediaTypeFromMime(mime: AllowedMediaMime): "VIDEO" | "IMAGE" {
-  return mime.startsWith("video/") ? "VIDEO" : "IMAGE";
+export function mediaTypeFromMime(mime: AllowedMediaMime): "VIDEO" | "IMAGE" | "AUDIO" {
+  if (mime.startsWith("video/")) return "VIDEO";
+  if (mime.startsWith("audio/")) return "AUDIO";
+  return "IMAGE";
 }
 
 export function extensionForMime(mime: AllowedMediaMime): string {
   if (mime === "image/jpeg") return "jpg";
   if (mime === "image/png") return "png";
   if (mime === "image/webp") return "webp";
+  if (mime === "audio/mpeg") return "mp3";
   return "mp4";
+}
+
+export function isPlaylistMp3File(file: Pick<File, "name" | "type">): boolean {
+  const mime = inferMediaMime(file.name, file.type);
+  return mime === "audio/mpeg";
+}
+
+export function playlistMp3Error(file: Pick<File, "name" | "type">): string | null {
+  if (isPlaylistMp3File(file)) return null;
+  return `Only MP3 files can play with an image. “${file.name}” is not an MP3.`;
 }
 
 export function uploadLimitMb(bytes: number): number {
@@ -152,7 +170,7 @@ export function uploadLimitsHint(): string {
 
 export class MediaUploadTooLargeError extends Error {
   readonly status = 413;
-  constructor(kind: "Image" | "Video", maxMb: number) {
+  constructor(kind: "Image" | "Video" | "Audio", maxMb: number) {
     super(`${kind} is too large. Maximum is ${maxMb} MB.`);
     this.name = "MediaUploadTooLargeError";
   }
@@ -166,7 +184,7 @@ export function assertUploadSize(
   const max = maxUploadBytesForMime(mime, limits);
   if (sizeBytes <= 0) throw new Error("File is empty.");
   if (sizeBytes > max) {
-    const kind = mime.startsWith("video/") ? "Video" : "Image";
+    const kind = mime.startsWith("video/") ? "Video" : mime.startsWith("audio/") ? "Audio" : "Image";
     throw new MediaUploadTooLargeError(kind, uploadLimitMb(max));
   }
 }
@@ -176,7 +194,7 @@ export function collectUploadableFiles(files: File[]): { accepted: File[]; error
   const errors: string[] = [];
   for (const file of files) {
     const mime = inferMediaMime(file.name, file.type);
-    if (!mime) {
+    if (!mime || mediaTypeFromMime(mime) === "AUDIO") {
       errors.push(`Unsupported file type: ${file.name}. Use JPEG, PNG, WebP, or MP4.`);
       continue;
     }
@@ -223,6 +241,7 @@ export const ACCEPT_MEDIA =
 export {
   ALLOWED_MEDIA_MIME,
   HARD_MAX_UPLOAD_BYTES,
+  MAX_AUDIO_UPLOAD_BYTES,
   MAX_IMAGE_UPLOAD_BYTES,
   MAX_VIDEO_UPLOAD_BYTES,
 };

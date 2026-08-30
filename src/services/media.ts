@@ -123,6 +123,7 @@ function localMediaPreview(file: File): string | undefined {
   if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") return undefined;
   if (file.type.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(file.name)) return URL.createObjectURL(file);
   if (file.type.startsWith("video/") || /\.mp4$/i.test(file.name)) return URL.createObjectURL(file);
+  if (file.type.startsWith("audio/") || /\.mp3$/i.test(file.name)) return URL.createObjectURL(file);
   return undefined;
 }
 

@@ -260,6 +260,7 @@ export function PlaylistLoopPreview({
   const current = frame ? clips[frame.index] : undefined;
   const previous =
     frame && frame.progress < 1 && frame.prevIndex !== frame.index ? clips[frame.prevIndex] : undefined;
+  const soundtrack = current?.kind === "image" ? firstHttpUrl(current.audioUrl) : null;
 
   return (
     <div
@@ -291,6 +292,15 @@ export function PlaylistLoopPreview({
                 {current.durationSec}s · {current.transition}
               </p>
             </div>
+            {soundtrack ? (
+              <audio
+                key={`${current.id}:${soundtrack}`}
+                src={soundtrack}
+                autoPlay
+                playsInline
+                preload="auto"
+              />
+            ) : null}
           </>
         )}
       </div>

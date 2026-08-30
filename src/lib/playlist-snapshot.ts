@@ -5,10 +5,13 @@ export type PlaylistSnapshotItem = {
   mediaVersionId: string;
   durationSeconds: number;
   transition: string;
+  audioMediaId?: string | null;
+  audioMediaVersionId?: string | null;
 };
 
 export type BoundPlaylistItem = PlaylistSnapshotItem & {
   localFilename: string;
+  audioLocalFilename?: string | null;
 };
 
 /** Map each playlist item to a local filename. Missing assets are dropped — they never reach the player. */
@@ -22,12 +25,21 @@ export function bindPlaylistItemsToAssets(
     const localFilename =
       localFilenameByVersionId.get(item.mediaVersionId) ?? localFilenameByMediaId.get(item.mediaId);
     if (!localFilename) continue;
+    const audioLocalFilename =
+      (item.audioMediaVersionId
+        ? localFilenameByVersionId.get(item.audioMediaVersionId)
+        : undefined) ??
+      (item.audioMediaId ? localFilenameByMediaId.get(item.audioMediaId) : undefined) ??
+      null;
     bound.push({
       mediaId: item.mediaId,
       mediaVersionId: item.mediaVersionId,
       durationSeconds: Math.max(0.1, item.durationSeconds),
       transition: item.transition,
       localFilename,
+      ...(item.audioMediaId ? { audioMediaId: item.audioMediaId } : {}),
+      ...(item.audioMediaVersionId ? { audioMediaVersionId: item.audioMediaVersionId } : {}),
+      ...(audioLocalFilename ? { audioLocalFilename } : {}),
     });
   }
   return bound;
@@ -38,21 +50,28 @@ export function bindPlaylistItemsToAssets(
  * Used to detect reorder/transition-only edits that do not change asset version IDs.
  */
 export function playlistSequenceFingerprint(
-  items: Array<Pick<PlaylistSnapshotItem, "mediaVersionId" | "durationSeconds" | "transition">>,
+  items: Array<
+    Pick<PlaylistSnapshotItem, "mediaVersionId" | "durationSeconds" | "transition" | "audioMediaVersionId">
+  >,
 ): string {
   return items
     .map((item) => {
       const duration = Math.max(0.1, Number(item.durationSeconds) || 0);
       const transition = String(item.transition ?? "FADE").trim().toUpperCase() || "FADE";
-      return `${item.mediaVersionId}:${duration}:${transition}`;
+      const audio = item.audioMediaVersionId ? `:${item.audioMediaVersionId}` : "";
+      return `${item.mediaVersionId}:${duration}:${transition}${audio}`;
     })
     .join("|");
 }
 
 /** True when live order/duration/transition differs from the frozen package sequence. */
 export function isPlaylistSequenceStale(
-  liveItems: Array<Pick<PlaylistSnapshotItem, "mediaVersionId" | "durationSeconds" | "transition">>,
-  frozenItems: Array<Pick<PlaylistSnapshotItem, "mediaVersionId" | "durationSeconds" | "transition">>,
+  liveItems: Array<
+    Pick<PlaylistSnapshotItem, "mediaVersionId" | "durationSeconds" | "transition" | "audioMediaVersionId">
+  >,
+  frozenItems: Array<
+    Pick<PlaylistSnapshotItem, "mediaVersionId" | "durationSeconds" | "transition" | "audioMediaVersionId">
+  >,
 ): boolean {
   return playlistSequenceFingerprint(liveItems) !== playlistSequenceFingerprint(frozenItems);
 }

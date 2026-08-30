@@ -38,15 +38,17 @@ export const storageKeySchema = z.string().min(1).max(1024);
 
 export const ALLOWED_IMAGE_MIME = ["image/jpeg", "image/png", "image/webp"] as const;
 export const ALLOWED_VIDEO_MIME = ["video/mp4"] as const;
-export const ALLOWED_MEDIA_MIME = [...ALLOWED_IMAGE_MIME, ...ALLOWED_VIDEO_MIME] as const;
+export const ALLOWED_AUDIO_MIME = ["audio/mpeg"] as const;
+export const ALLOWED_MEDIA_MIME = [...ALLOWED_IMAGE_MIME, ...ALLOWED_VIDEO_MIME, ...ALLOWED_AUDIO_MIME] as const;
 export type AllowedMediaMime = (typeof ALLOWED_MEDIA_MIME)[number];
 
 /** CMS upload caps. Player download-plan skip sizes are separate (not an upload limit). */
 export const MAX_IMAGE_UPLOAD_BYTES = 25 * 1024 * 1024;
 export const MAX_VIDEO_UPLOAD_BYTES = 500 * 1024 * 1024;
+export const MAX_AUDIO_UPLOAD_BYTES = 25 * 1024 * 1024;
 export const HARD_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 
-export const mediaMimeSchema = z.enum(["image/jpeg", "image/png", "image/webp", "video/mp4"]);
+export const mediaMimeSchema = z.enum(["image/jpeg", "image/png", "image/webp", "video/mp4", "audio/mpeg"]);
 
 export function isAllowedMediaMime(value: string): value is AllowedMediaMime {
   return (ALLOWED_MEDIA_MIME as readonly string[]).includes(value);
@@ -55,6 +57,7 @@ export function isAllowedMediaMime(value: string): value is AllowedMediaMime {
 export type UploadByteLimits = {
   imageBytes?: number;
   videoBytes?: number;
+  audioBytes?: number;
 };
 
 export function parseUploadByteLimit(raw: string | undefined, fallback: number): number {
@@ -66,6 +69,7 @@ export function parseUploadByteLimit(raw: string | undefined, fallback: number):
 
 export function maxUploadBytesForMime(mime: AllowedMediaMime, limits?: UploadByteLimits): number {
   if (mime.startsWith("video/")) return limits?.videoBytes ?? MAX_VIDEO_UPLOAD_BYTES;
+  if (mime.startsWith("audio/")) return limits?.audioBytes ?? MAX_AUDIO_UPLOAD_BYTES;
   return limits?.imageBytes ?? MAX_IMAGE_UPLOAD_BYTES;
 }
 

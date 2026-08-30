@@ -8,6 +8,7 @@ enum class MediaKind {
     IMAGE,
     QR,
     LOGO,
+    AUDIO,
 }
 
 @Serializable
@@ -71,6 +72,9 @@ data class ManifestPlaylistItem(
     val durationSeconds: Double,
     val transition: String,
     val localFilename: String,
+    val audioLocalFilename: String? = null,
+    val audioMediaId: String? = null,
+    val audioMediaVersionId: String? = null,
 )
 
 @Serializable

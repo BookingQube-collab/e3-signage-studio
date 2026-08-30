@@ -50,7 +50,8 @@ export function canPromoteIncompleteWithoutHead(input: {
   if (!input.storageKey) return false;
   return (
     input.versionMimeType.startsWith("image/") ||
-    input.versionMimeType.startsWith("video/")
+    input.versionMimeType.startsWith("video/") ||
+    input.versionMimeType.startsWith("audio/")
   );
 }
 
@@ -127,7 +128,7 @@ export function buildOptimisticLibraryMedia(input: {
 }): {
   id: string;
   filename: string;
-  type: "Video" | "Image";
+  type: "Video" | "Image" | "Audio";
   dimensions: string;
   durationSec: number | null;
   sizeMb: number;
@@ -144,12 +145,13 @@ export function buildOptimisticLibraryMedia(input: {
 } {
   const day = (input.uploadedAtIso ?? new Date().toISOString()).slice(0, 10);
   const isVideo = input.mimeType.startsWith("video/");
+  const isAudio = input.mimeType.startsWith("audio/");
   const dimensions =
     input.width && input.height ? `${input.width} × ${input.height}` : "—";
   const media: ReturnType<typeof buildOptimisticLibraryMedia> = {
     id: input.id,
     filename: input.filename,
-    type: isVideo ? "Video" : "Image",
+    type: isVideo ? "Video" : isAudio ? "Audio" : "Image",
     dimensions,
     durationSec: input.durationMs ? Math.round(input.durationMs / 1000) : null,
     sizeMb: Number((input.sizeBytes / 1_000_000).toFixed(1)),

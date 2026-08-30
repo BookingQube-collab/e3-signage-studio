@@ -18,6 +18,7 @@ import qa.e3.signage.player.E3PlayerApplication
 import qa.e3.signage.player.core.FitMode
 import qa.e3.signage.player.core.HEARTBEAT_INTERVAL_MS
 import qa.e3.signage.player.core.ContentPackageState
+import qa.e3.signage.player.core.ManifestSchedule
 import qa.e3.signage.player.core.OpenPlayback
 import qa.e3.signage.player.core.PlaybackResult
 import qa.e3.signage.player.core.PlaylistItemKind
@@ -27,6 +28,7 @@ import qa.e3.signage.player.core.ScheduleEngine
 import qa.e3.signage.player.core.ZonePlan
 import qa.e3.signage.player.core.ZoneSource
 import qa.e3.signage.player.core.completePlayback
+import qa.e3.signage.player.core.hasPlayableLayoutContent
 import qa.e3.signage.player.core.isPreparingNewerPackage
 import qa.e3.signage.player.core.nextSyncPollDelayMs
 import qa.e3.signage.player.core.planZones
@@ -43,6 +45,8 @@ data class PlaybackUiState(
     val waitingOverrides: WaitingOverrides = WaitingOverrides(),
     val timezone: String = "Asia/Qatar",
     val playingMediaId: String? = null,
+    val soundtrackUri: String? = null,
+    val soundtrackGeneration: Int = 0,
 )
 
 data class ZoneUiState(
@@ -112,6 +116,9 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     @Volatile
     private var videoGeneration = 0
 
+    @Volatile
+    private var soundtrackGeneration = 0
+
     fun onVideoFinished(generation: Int, failed: Boolean = false) {
         if (generation == videoGeneration) {
             videoFailed = failed
@@ -155,6 +162,11 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             val sequencer = PlaylistSequencer(items, manifest.playlist?.loop ?: true)
             if (sequencer.isEmpty()) {
                 closeOpenPlay(PlaybackResult.INTERRUPTED)
+                if (hasPlayableLayoutContent(plan)) {
+                    _ui.value = buildUi(plan, null, tz, videoGeneration, soundtrackGeneration)
+                    holdLayoutUntilChange(manifest.schedules, manifest.manifestVersion, plan.background, tz)
+                    continue
+                }
                 _ui.value = PlaybackUiState(
                     playing = false,
                     background = plan.background,
@@ -198,7 +210,10 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     campaignId = ScheduleEngine.selectActive(manifest.schedules)?.campaignId,
                     playlistId = manifest.playlist?.id,
                 )
-                _ui.value = buildUi(plan, item, tz, videoGeneration)
+                if (item.kind == PlaylistItemKind.IMAGE && !item.audioFileUri.isNullOrBlank()) {
+                    soundtrackGeneration += 1
+                }
+                _ui.value = buildUi(plan, item, tz, videoGeneration, soundtrackGeneration)
                 val result = when (item.kind) {
                     PlaylistItemKind.IMAGE -> {
                         awaitItemHold(
@@ -257,6 +272,29 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             packages.currentPackageState(),
         )
 
+    private suspend fun holdLayoutUntilChange(
+        schedules: List<ManifestSchedule>,
+        activeVersion: Int,
+        background: String,
+        timezone: String,
+    ) {
+        while (viewModelScope.isActive && ScheduleEngine.shouldPlay(schedules)) {
+            if (packages.activeVersion() != activeVersion) return
+            if (shouldShowLoadingForNewerPackage(activeVersion)) {
+                _ui.value = PlaybackUiState(
+                    playing = false,
+                    background = background,
+                    waitingKind = WaitingKind.LOADING_CONTENT,
+                    waitingOverrides = waitingOverrides(),
+                    timezone = timezone,
+                )
+                withTimeoutOrNull(2_000) { app.container.sync.activations.first() }
+                return
+            }
+            delay(2_000)
+        }
+    }
+
     private suspend fun awaitItemHold(totalMs: Long, activeVersion: Int): PlaybackResult {
         var waited = 0L
         while (waited < totalMs) {
@@ -310,6 +348,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         item: ResolvedPlaylistItem?,
         timezone: String,
         videoGeneration: Int,
+        soundtrackGeneration: Int,
     ): PlaybackUiState {
         val zones = plan.zones.map { zone ->
             ZoneUiState(
@@ -341,6 +380,8 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             waitingKind = null,
             timezone = timezone,
             playingMediaId = item?.mediaId,
+            soundtrackUri = if (item?.kind == PlaylistItemKind.IMAGE) item.audioFileUri else null,
+            soundtrackGeneration = soundtrackGeneration,
         )
     }
 

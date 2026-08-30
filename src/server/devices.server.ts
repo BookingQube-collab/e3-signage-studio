@@ -605,6 +605,8 @@ async function buildManifest(
       mediaVersionId: string;
       durationSeconds: number;
       transition: string;
+      audioMediaId?: string;
+      audioMediaVersionId?: string;
     }>;
     const extraLayouts: string[] = [];
     if (frozenItems.length > 0) {
@@ -612,7 +614,7 @@ async function buildManifest(
     } else {
       const { data: items, error: itemError } = await admin
         .from("playlist_items")
-        .select("media_id, media_version_id, duration_seconds, transition, layout_id, position")
+        .select("media_id, media_version_id, duration_seconds, transition, layout_id, position, audio_media_id, audio_media_version_id")
         .eq("playlist_id", playlistId)
         .order("position");
       throwIfError(itemError, "Could not load playlist items.");
@@ -620,11 +622,15 @@ async function buildManifest(
         const row = raw as Record<string, unknown>;
         const extraLayout = asNullableString(row["layout_id"]);
         if (extraLayout) extraLayouts.push(extraLayout);
+        const audioMediaId = asNullableString(row["audio_media_id"]);
+        const audioMediaVersionId = asNullableString(row["audio_media_version_id"]);
         return {
           mediaId: asString(row["media_id"]),
           mediaVersionId: asString(row["media_version_id"]),
           durationSeconds: Math.max(0.1, asNumber(row["duration_seconds"], 10)),
           transition: normalizeTransition(row["transition"]),
+          ...(audioMediaId ? { audioMediaId } : {}),
+          ...(audioMediaVersionId ? { audioMediaVersionId } : {}),
         };
       });
     }
@@ -640,6 +646,9 @@ async function buildManifest(
         durationSeconds: item.durationSeconds,
         transition: normalizeTransition(item.transition),
         localFilename: item.localFilename,
+        ...(item.audioMediaId ? { audioMediaId: item.audioMediaId } : {}),
+        ...(item.audioMediaVersionId ? { audioMediaVersionId: item.audioMediaVersionId } : {}),
+        ...(item.audioLocalFilename ? { audioLocalFilename: item.audioLocalFilename } : {}),
       })),
     };
   }

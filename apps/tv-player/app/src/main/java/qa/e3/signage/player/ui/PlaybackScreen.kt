@@ -76,6 +76,10 @@ fun PlaybackScreen(state: PlaybackUiState, onVideoFinished: (Int, Boolean) -> Un
             .fillMaxSize()
             .background(parseHex(state.background)),
     ) {
+        ImageSoundtrackPlayer(
+            fileUri = if (state.playing) state.soundtrackUri else null,
+            generation = state.soundtrackGeneration,
+        )
         if (!state.playing && state.waitingKind != null) {
             WaitingScreen(state.waitingKind, state.waitingOverrides)
         }
@@ -264,6 +268,24 @@ private fun ZoneMedia(
             LaunchedEffect(Unit) { onReady() }
             Box(Modifier.fillMaxSize())
         }
+    }
+}
+
+@Composable
+private fun ImageSoundtrackPlayer(fileUri: String?, generation: Int) {
+    val context = LocalContext.current
+    DisposableEffect(fileUri, generation) {
+        if (fileUri.isNullOrBlank()) {
+            return@DisposableEffect onDispose { }
+        }
+        val player = ExoPlayer.Builder(context).build().apply {
+            val uri = Uri.parse(requireLocalPlaybackUri(fileUri).toString())
+            setMediaItem(MediaItem.fromUri(uri))
+            volume = 1f
+            playWhenReady = true
+            prepare()
+        }
+        onDispose { player.release() }
     }
 }
 

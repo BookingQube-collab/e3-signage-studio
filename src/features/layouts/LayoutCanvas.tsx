@@ -1,6 +1,11 @@
+import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+
 import { firstHttpUrl } from "@/lib/playlist-preview";
 import { cn } from "@/lib/utils";
-import { isImageStillUrl, seekVideoToStillFrame } from "@/lib/video-poster";
+import { isImageStillUrl, seekVideoToStillFrame, videoPreviewNeedsHydration } from "@/lib/video-poster";
+import { isUuid } from "@/services/inventory-map";
+import { mediaService } from "@/services";
 import type { FitMode, Layout, LayoutZone, Media } from "@/types";
 
 function fitObjectClass(fit: FitMode | null | undefined): string {
@@ -30,18 +35,61 @@ function ZoneMediaFill({
   fit: FitMode;
   playback?: boolean;
 }) {
-  const poster = firstHttpUrl(media.thumbnailUrl);
-  const videoSrc =
-    media.type === "Video"
-      ? firstHttpUrl(media.previewUrl, isImageStillUrl(poster) ? null : poster)
-      : null;
+  const qc = useQueryClient();
+  const [resolved, setResolved] = useState(media);
+
+  useEffect(() => {
+    setResolved(media);
+    if (!videoPreviewNeedsHydration(media) || !isUuid(media.id)) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const full = await mediaService.get(media.id);
+        const previewUrl = firstHttpUrl(full?.previewUrl);
+        const next = previewUrl
+          ? full
+          : {
+              ...(full ?? media),
+              previewUrl: firstHttpUrl((await mediaService.downloadUrl(media.id)).url) ?? undefined,
+            };
+        if (cancelled || !next) return;
+        setResolved(next);
+        qc.setQueryData<Media[]>(["media"], (prev) =>
+          Array.isArray(prev) ? prev.map((row) => (row.id === next.id ? { ...row, ...next } : row)) : prev,
+        );
+      } catch {
+        // Keep the list row; overlay still names the file.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [media, media.id, media.previewUrl, media.type, qc]);
+
+  const poster = firstHttpUrl(resolved.thumbnailUrl);
+  const videoSrc = resolved.type === "Video" ? firstHttpUrl(resolved.previewUrl) : null;
   const imageSrc =
-    media.type === "Video"
+    resolved.type === "Video"
       ? isImageStillUrl(poster)
         ? poster
         : null
-      : firstHttpUrl(media.thumbnailUrl, media.previewUrl);
+      : firstHttpUrl(resolved.thumbnailUrl, resolved.previewUrl);
   const objectClass = fitObjectClass(fit);
+
+  if (playback && videoSrc) {
+    return (
+      <video
+        src={videoSrc}
+        poster={poster ?? undefined}
+        className={cn("absolute inset-0 size-full", objectClass)}
+        muted
+        playsInline
+        autoPlay
+        loop
+        preload="auto"
+      />
+    );
+  }
 
   if (imageSrc) {
     return (
@@ -66,14 +114,12 @@ function ZoneMediaFill({
         className={cn("absolute inset-0 size-full", objectClass)}
         muted
         playsInline
-        autoPlay={playback}
-        loop={playback}
-        preload={playback ? "auto" : "metadata"}
+        preload="metadata"
         onLoadedMetadata={(event) => {
-          if (!playback) seekVideoToStillFrame(event.currentTarget);
+          seekVideoToStillFrame(event.currentTarget);
         }}
         onLoadedData={(event) => {
-          if (!playback) seekVideoToStillFrame(event.currentTarget);
+          seekVideoToStillFrame(event.currentTarget);
         }}
       />
     );

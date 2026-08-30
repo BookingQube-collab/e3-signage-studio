@@ -1,6 +1,7 @@
 package qa.e3.signage.player.core
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -60,6 +61,72 @@ class ZonePlanTest {
         val static = plan.zones[1].source as ZoneSource.StaticFile
         assertTrue(static.fileUri.startsWith("file:"))
         assertEquals(PlaylistItemKind.IMAGE, static.kind)
+    }
+
+    @Test
+    fun layoutOnlyCampaignResolvesStaticVideoAndImages() {
+        val root = createTempDirectory("e3-layout-only").toFile()
+        File(root, "media/video").mkdirs()
+        File(root, "media/image").mkdirs()
+        File(root, "media/video/dd.mp4").writeText("mp4")
+        File(root, "media/image/jianna.jpeg").writeText("jpg")
+        File(root, "media/image/rupert.jpeg").writeText("jpg")
+        val manifest = ContentManifest(
+            screenId = "s",
+            manifestVersion = 1,
+            configVersion = 1,
+            generatedAt = "2026-08-30T00:00:00Z",
+            playlist = null,
+            layouts = listOf(
+                ManifestLayout(
+                    "lay",
+                    1920,
+                    1080,
+                    "#19161A",
+                    listOf(
+                        ManifestZone("main", ZoneKind.VIDEO, 0, 0, 1280, 1080, FitMode.CONTAIN, "dd.mp4"),
+                        ManifestZone("top", ZoneKind.IMAGE, 1280, 0, 640, 540, FitMode.CONTAIN, "jianna.jpeg"),
+                        ManifestZone("bottom", ZoneKind.IMAGE, 1280, 540, 640, 540, FitMode.CONTAIN, "rupert.jpeg"),
+                    ),
+                ),
+            ),
+            assets = listOf(
+                ManifestAsset("vid", 1, MediaKind.VIDEO, "a".repeat(64), 1, "dd.mp4", "video/mp4"),
+                ManifestAsset("img1", 1, MediaKind.IMAGE, "b".repeat(64), 1, "jianna.jpeg", "image/jpeg"),
+                ManifestAsset("img2", 1, MediaKind.IMAGE, "c".repeat(64), 1, "rupert.jpeg", "image/jpeg"),
+            ),
+        )
+        val plan = planZones(manifest, root, 1920, 1080)
+        assertTrue(hasPlayableLayoutContent(plan))
+        val main = plan.zones[0].source as ZoneSource.StaticFile
+        assertEquals(PlaylistItemKind.VIDEO, main.kind)
+        assertTrue(main.fileUri.startsWith("file:"))
+        assertEquals(PlaylistItemKind.IMAGE, (plan.zones[1].source as ZoneSource.StaticFile).kind)
+        assertEquals(PlaylistItemKind.IMAGE, (plan.zones[2].source as ZoneSource.StaticFile).kind)
+    }
+
+    @Test
+    fun layoutWithoutFilesAndWithoutPlaylistIsEmpty() {
+        val root = createTempDirectory("e3-empty-layout").toFile()
+        val manifest = ContentManifest(
+            screenId = "s",
+            manifestVersion = 1,
+            configVersion = 1,
+            generatedAt = "2026-08-30T00:00:00Z",
+            playlist = null,
+            layouts = listOf(
+                ManifestLayout(
+                    "lay",
+                    1920,
+                    1080,
+                    "#19161A",
+                    listOf(ManifestZone("main", ZoneKind.VIDEO, 0, 0, 1920, 1080, FitMode.CONTAIN, "missing.mp4")),
+                ),
+            ),
+        )
+        val plan = planZones(manifest, root, 1920, 1080)
+        assertTrue(plan.zones[0].source is ZoneSource.Empty)
+        assertFalse(hasPlayableLayoutContent(plan))
     }
 
     @Test

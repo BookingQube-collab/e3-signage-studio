@@ -47,7 +47,7 @@ export const UI_LABELS = {
   locationStatus: UI_LOCATION_STATUS,
   role: UI_ROLE,
   orientation: { LANDSCAPE: "Landscape", PORTRAIT: "Portrait" },
-  mediaType: { VIDEO: "Video", IMAGE: "Image", QR: "QR", LOGO: "Logo" },
+  mediaType: { VIDEO: "Video", IMAGE: "Image", QR: "QR", LOGO: "Logo", AUDIO: "Audio" },
   layoutPreset: UI_LAYOUT_PRESET,
   playlistStatus: {
     DRAFT: "Draft",

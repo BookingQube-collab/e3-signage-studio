@@ -30,6 +30,7 @@ export const livePlaylistService: PlaylistService = {
         mediaId: item.mediaId,
         durationSec: item.durationSec,
         transition,
+        audioMediaId: item.type === "Image" && item.audioMediaId ? item.audioMediaId : null,
       };
     });
     const row = await savePlaylistFn({

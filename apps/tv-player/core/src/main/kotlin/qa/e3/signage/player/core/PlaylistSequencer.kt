@@ -13,6 +13,7 @@ data class ResolvedPlaylistItem(
     val localFilename: String,
     val kind: PlaylistItemKind,
     val fileUri: String,
+    val audioFileUri: String? = null,
 )
 
 class PlaylistSequencer(
@@ -67,6 +68,14 @@ fun resolvePlaylistItems(
         val mediaKind = if (kind == PlaylistItemKind.VIDEO) MediaKind.VIDEO else MediaKind.IMAGE
         val file = resolveLocalMedia(root, mediaKind, item.localFilename) ?: return@mapNotNull null
         val uri = runCatching { localFileUri(file) }.getOrNull() ?: return@mapNotNull null
+        val audioName = item.audioLocalFilename?.takeIf { it.isNotBlank() }
+        val audioFile = if (kind == PlaylistItemKind.IMAGE && audioName != null) {
+            resolveLocalMedia(root, MediaKind.AUDIO, audioName)
+                ?: resolveLocalMedia(root, MediaKind.IMAGE, audioName)
+        } else {
+            null
+        }
+        val audioUri = audioFile?.let { runCatching { localFileUri(it) }.getOrNull() }
         ResolvedPlaylistItem(
             mediaId = item.mediaId,
             mediaVersionId = item.mediaVersionId,
@@ -75,6 +84,7 @@ fun resolvePlaylistItems(
             localFilename = item.localFilename,
             kind = kind,
             fileUri = uri,
+            audioFileUri = audioUri,
         )
     }
 }
