@@ -1,17 +1,13 @@
 package qa.e3.signage.player.ui
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.requiredHeight
-import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.unit.Constraints
 import qa.e3.signage.player.core.DisplayOrientation
-import qa.e3.signage.player.data.ScreenDisplayStore
 
 /**
  * Android TV panels almost always report landscape display metrics even when the
@@ -20,14 +16,20 @@ import qa.e3.signage.player.data.ScreenDisplayStore
  *
  * Keep the activity in landscape and rotate a full-bleed child instead (Windows-style
  * 4-corner rotate):
- * - [ScreenDisplayStore.LANDSCAPE] → 0°
- * - [ScreenDisplayStore.PORTRAIT_UPSIDE_DOWN] → 90°
- * - [ScreenDisplayStore.LANDSCAPE_UPSIDE_DOWN] → 180°
- * - [ScreenDisplayStore.PORTRAIT] → 270°
+ * - LANDSCAPE → 0°
+ * - PORTRAIT_UPSIDE_DOWN → 90°
+ * - LANDSCAPE_UPSIDE_DOWN → 180°
+ * - PORTRAIT → 270°
  *
- * At 90° / 270° the child **must** lay out at swapped size with [requiredWidth] /
- * [requiredHeight] so parent landscape max constraints cannot clamp it to a centered
- * `min(w,h)²` postage stamp (the 0.23.0 failure mode on device).
+ * Important (0.27): do **not** use oversized [androidx.compose.foundation.layout.requiredWidth] /
+ * requiredHeight inside the landscape parent. That reports a taller layout node than the
+ * parent (e.g. 1080×1920 in a 1920×1080 slot). TCL / some Compose runtimes clip the
+ * overflowing node **before** `graphicsLayer` rotation, so only the top band of the
+ * portrait canvas survives — matching the half-black portrait failure on device.
+ *
+ * Instead: measure the child at the swapped size, but **report the parent’s landscape
+ * size** upward, place the child centered with [androidx.compose.ui.layout.Placeable.PlacementScope.placeWithLayer],
+ * and rotate in the placement layer so ancestors never see an overflowing layout node.
  */
 @Composable
 fun DisplayOrientedFrame(
@@ -41,26 +43,28 @@ fun DisplayOrientedFrame(
         return
     }
     val swapAxes = DisplayOrientation.swapsAxes(orientation)
-    BoxWithConstraints(modifier.fillMaxSize()) {
-        // maxWidth/maxHeight are the physical landscape panel in Dp.
-        val childModifier =
+    Layout(
+        content = { Box(Modifier.fillMaxSize()) { content() } },
+        modifier = modifier.fillMaxSize(),
+    ) { measurables, constraints ->
+        val parentW = constraints.maxWidth.coerceAtLeast(1)
+        val parentH = constraints.maxHeight.coerceAtLeast(1)
+        val childConstraints =
             if (swapAxes) {
-                // required* ignores incoming max constraints — plain width/height does not.
-                Modifier
-                    .align(Alignment.Center)
-                    .requiredWidth(maxHeight)
-                    .requiredHeight(maxWidth)
+                Constraints.fixed(width = parentH, height = parentW)
             } else {
-                Modifier.fillMaxSize()
+                Constraints.fixed(width = parentW, height = parentH)
             }
-        Box(
-            childModifier.graphicsLayer {
+        val placeable = measurables.first().measure(childConstraints)
+        // Report landscape parent size so nothing upstream clips an oversized portrait node.
+        layout(parentW, parentH) {
+            val x = (parentW - placeable.width) / 2
+            val y = (parentH - placeable.height) / 2
+            placeable.placeWithLayer(x = x, y = y) {
                 rotationZ = degrees
                 transformOrigin = TransformOrigin.Center
                 clip = false
-            },
-        ) {
-            content()
+            }
         }
     }
 }

@@ -18,7 +18,7 @@ gradlew.bat :app:bundleRelease
 | Debug APK (sideload) | `:app:assembleDebug` | `dist/e3-signage-player-<versionName>-debug.apk` |
 | Release AAB (Play / internal app sharing) | `:app:bundleRelease` | `app/build/outputs/bundle/release/app-release.aab` |
 
-`assembleDebug` (and `assembleRelease`) also copy the APK into the repo `dist/` folder as `e3-signage-player-<versionName>-<buildType>.apk` (currently **0.24.0**). `dist/` is gitignored.
+`assembleDebug` (and `assembleRelease`) also copy the APK into the repo `dist/` folder as `e3-signage-player-<versionName>-<buildType>.apk` (currently **0.27.0**). `dist/` is gitignored.
 
 `local.properties` (gitignored; see `local.properties.example`):
 
@@ -29,7 +29,7 @@ api.base.url=https://e3-cms.vercel.app
 
 `api.base.url` must be reachable from the TV. Do not use `localhost` or the emulator alias on a physical box. Release signing is not stored in this repo; `bundleRelease` is unsigned unless you configure a keystore locally.
 
-Current player version: **0.24.0** (`versionCode` 24).
+Current player version: **0.27.0** (`versionCode` 27).
 
 Unpaired pairing screen branding is loaded from `GET /api/devices/player-branding` (no device token): org waiting-screen mode/image plus CMS logo. Install this APK (or newer) for admin branding to appear before pair.
 
@@ -44,7 +44,7 @@ Screen orientation is driven by CMS **Edit screen → Orientation** (four Window
 
    ```
    adb connect <tv-ip>
-   adb install -r dist/e3-signage-player-0.24.0-debug.apk
+   adb install -r dist/e3-signage-player-0.27.0-debug.apk
    ```
 
 3. Open **E3 Signage** from Apps. Enter the 6-digit pairing code in the CMS **Pair a screen** dialog.

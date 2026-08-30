@@ -129,6 +129,34 @@ object DisplayOrientation {
         val h = (layoutHeight.coerceAtLeast(1) * fit.scaleY).toInt().coerceAtLeast(1)
         return OrientedCanvasSize(widthPx = w, heightPx = h)
     }
+
+    /**
+     * Max-contain placement of a layout canvas inside the oriented frame: uniform scale
+     * and centered pixel origin. Prefer this over graphicsLayer scale — map zone
+     * geometry with [PlacedLayoutRect.scale] so TCL cannot clamp a shrink transform.
+     *
+     * Matching aspects (portrait 1080×1920 into a 1080×1920 frame) yield scale 1 and
+     * zero offsets — full-bleed coverage of the oriented viewport.
+     */
+    fun placedLayoutRect(
+        layoutWidth: Int,
+        layoutHeight: Int,
+        frameWidthPx: Int,
+        frameHeightPx: Int,
+    ): PlacedLayoutRect {
+        val size = containedLayoutSize(layoutWidth, layoutHeight, frameWidthPx, frameHeightPx)
+        val fw = frameWidthPx.coerceAtLeast(1)
+        val fh = frameHeightPx.coerceAtLeast(1)
+        val lw = layoutWidth.coerceAtLeast(1)
+        val scale = size.widthPx.toFloat() / lw.toFloat()
+        return PlacedLayoutRect(
+            widthPx = size.widthPx,
+            heightPx = size.heightPx,
+            offsetXPx = (fw - size.widthPx) / 2,
+            offsetYPx = (fh - size.heightPx) / 2,
+            scale = scale,
+        )
+    }
 }
 
 data class OrientedChildSize(
@@ -145,4 +173,12 @@ data class OrientedCanvasSize(
 data class LayoutFillScale(
     val scaleX: Float,
     val scaleY: Float,
+)
+
+data class PlacedLayoutRect(
+    val widthPx: Int,
+    val heightPx: Int,
+    val offsetXPx: Int,
+    val offsetYPx: Int,
+    val scale: Float,
 )

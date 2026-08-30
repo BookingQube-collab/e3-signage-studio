@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,7 +28,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -89,74 +87,58 @@ fun PlaybackScreen(state: PlaybackUiState, onVideoFinished: (Int, Boolean) -> Un
         ScaledLayoutCanvas(
             layoutWidth = state.layoutWidth,
             layoutHeight = state.layoutHeight,
-        ) {
-            state.zones.forEach { zone ->
-                key(zone.id) {
-                    val density = LocalDensity.current
-                    val widthDp = with(density) { zone.width.toDp() }
-                    val heightDp = with(density) { zone.height.toDp() }
-                    Box(
-                        modifier = Modifier
-                            .offset { IntOffset(zone.x, zone.y) }
-                            .size(widthDp, heightDp),
-                    ) {
-                        TransitioningZone(zone, state.timezone, onVideoFinished)
-                    }
-                }
-            }
-        }
+            zones = state.zones,
+            timezone = state.timezone,
+            onVideoFinished = onVideoFinished,
+        )
     }
 }
 
 /**
  * Maps the published layout pixel canvas onto the oriented display frame with
  * **uniform contain/fit** (min scale) so authored aspect is preserved. Letterbox /
- * pillarbox bars are OK. Lays out at the *final* contained pixel size so the canvas
- * fills the oriented viewport as large as possible (0.25.0 underscaled when an
- * oversized requiredSize + graphicsLayer shrink was clamped on some TCL panels).
- * Zone media still respects per-zone FitMode (Cover/Fill only when the zone asks).
+ * pillarbox bars are OK.
+ *
+ * Zone geometry is scaled in layout space (offset/size) — no oversized
+ * `requiredSize` + `graphicsLayer` shrink (TCL clamped that path in 0.25–0.26).
+ * When the canvas aspect matches the oriented frame (portrait 1080×1920), scale is
+ * 1 and zones fill the entire viewport. Zone media still respects per-zone FitMode.
  */
 @Composable
 private fun ScaledLayoutCanvas(
     layoutWidth: Int,
     layoutHeight: Int,
-    content: @Composable () -> Unit,
+    zones: List<ZoneUiState>,
+    timezone: String,
+    onVideoFinished: (Int, Boolean) -> Unit,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val lw = layoutWidth.coerceAtLeast(1)
         val lh = layoutHeight.coerceAtLeast(1)
-        val contained = DisplayOrientation.containedLayoutSize(
+        val placed = DisplayOrientation.placedLayoutRect(
             layoutWidth = lw,
             layoutHeight = lh,
             frameWidthPx = constraints.maxWidth,
             frameHeightPx = constraints.maxHeight,
         )
         val density = LocalDensity.current
-        val scaleX = contained.widthPx.toFloat() / lw.toFloat()
-        val scaleY = contained.heightPx.toFloat() / lh.toFloat()
-        Box(
-            Modifier
-                .align(Alignment.Center)
-                .requiredSize(
-                    with(density) { contained.widthPx.toDp() },
-                    with(density) { contained.heightPx.toDp() },
-                )
-                .clipToBounds(),
-        ) {
-            Box(
-                Modifier
-                    .requiredSize(
-                        with(density) { lw.toDp() },
-                        with(density) { lh.toDp() },
-                    )
-                    .graphicsLayer {
-                        this.scaleX = scaleX
-                        this.scaleY = scaleY
-                        transformOrigin = TransformOrigin(0f, 0f)
-                        clip = false
-                    },
-            ) {
-                content()
+        val scale = placed.scale
+        zones.forEach { zone ->
+            key(zone.id) {
+                val zX = placed.offsetXPx + (zone.x * scale).toInt()
+                val zY = placed.offsetYPx + (zone.y * scale).toInt()
+                val zW = (zone.width * scale).toInt().coerceAtLeast(1)
+                val zH = (zone.height * scale).toInt().coerceAtLeast(1)
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset(zX, zY) }
+                        .size(
+                            with(density) { zW.toDp() },
+                            with(density) { zH.toDp() },
+                        ),
+                ) {
+                    TransitioningZone(zone, timezone, onVideoFinished)
+                }
             }
         }
     }

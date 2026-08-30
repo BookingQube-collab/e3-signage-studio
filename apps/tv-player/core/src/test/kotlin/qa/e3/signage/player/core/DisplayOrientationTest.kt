@@ -105,4 +105,42 @@ class DisplayOrientationTest {
         assertEquals(1080, size.widthPx)
         assertEquals(607, size.heightPx) // 1080 * (1080/1920)
     }
+
+    @Test
+    fun placedPortraitCanvasFillsOrientedFrame() {
+        // Physical landscape panel → oriented child 1080×1920; matching canvas must be full-bleed.
+        val frame = DisplayOrientation.orientedChildSize(1920, 1080, DisplayOrientation.PORTRAIT)
+        val placed = DisplayOrientation.placedLayoutRect(1080, 1920, frame.widthPx, frame.heightPx)
+        assertEquals(1080, placed.widthPx)
+        assertEquals(1920, placed.heightPx)
+        assertEquals(0, placed.offsetXPx)
+        assertEquals(0, placed.offsetYPx)
+        assertEquals(1f, placed.scale, 0.0001f)
+    }
+
+    @Test
+    fun placedMismatchedAspectIsCenteredMaxContain() {
+        val frame = DisplayOrientation.orientedChildSize(1920, 1080, DisplayOrientation.PORTRAIT)
+        val placed = DisplayOrientation.placedLayoutRect(1920, 1080, frame.widthPx, frame.heightPx)
+        assertEquals(1080, placed.widthPx)
+        assertEquals(607, placed.heightPx)
+        assertEquals(0, placed.offsetXPx)
+        assertEquals((1920 - 607) / 2, placed.offsetYPx)
+        assertEquals(1080 / 1920f, placed.scale, 0.0001f)
+    }
+
+    @Test
+    fun orientedChildReportsParentSizeMapping() {
+        // After placeWithLayer 270° rotation, child AABB must equal the landscape parent.
+        val parentW = 1920
+        val parentH = 1080
+        val child = DisplayOrientation.orientedChildSize(parentW, parentH, DisplayOrientation.PORTRAIT)
+        assertEquals(parentH, child.widthPx)
+        assertEquals(parentW, child.heightPx)
+        // Centering offsets used by DisplayOrientedFrame before rotation.
+        val offsetX = (parentW - child.widthPx) / 2
+        val offsetY = (parentH - child.heightPx) / 2
+        assertEquals(420, offsetX)
+        assertEquals(-420, offsetY)
+    }
 }
