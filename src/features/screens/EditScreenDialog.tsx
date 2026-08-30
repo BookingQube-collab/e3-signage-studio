@@ -164,10 +164,11 @@ export function EditScreenDialog({
               <SelectTrigger id="edit-scr-orient">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Landscape">Landscape</SelectItem>
-                <SelectItem value="Portrait">Portrait</SelectItem>
-              </SelectContent>
+                <SelectContent>
+                  <SelectItem value="Landscape">Landscape</SelectItem>
+                  <SelectItem value="Portrait">Portrait</SelectItem>
+                  <SelectItem value="Portrait (upside down)">Portrait (upside down)</SelectItem>
+                </SelectContent>
             </Select>
           </div>
         </div>

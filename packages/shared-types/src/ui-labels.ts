@@ -46,7 +46,11 @@ export const UI_LABELS = {
   locationType: UI_LOCATION_TYPE,
   locationStatus: UI_LOCATION_STATUS,
   role: UI_ROLE,
-  orientation: { LANDSCAPE: "Landscape", PORTRAIT: "Portrait" },
+  orientation: {
+    LANDSCAPE: "Landscape",
+    PORTRAIT: "Portrait",
+    PORTRAIT_UPSIDE_DOWN: "Portrait (upside down)",
+  },
   mediaType: { VIDEO: "Video", IMAGE: "Image", QR: "QR", LOGO: "Logo", AUDIO: "Audio" },
   layoutPreset: UI_LAYOUT_PRESET,
   playlistStatus: {

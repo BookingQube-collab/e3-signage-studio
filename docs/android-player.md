@@ -18,7 +18,7 @@ gradlew.bat :app:bundleRelease
 | Debug APK (sideload) | `:app:assembleDebug` | `dist/e3-signage-player-<versionName>-debug.apk` |
 | Release AAB (Play / internal app sharing) | `:app:bundleRelease` | `app/build/outputs/bundle/release/app-release.aab` |
 
-`assembleDebug` (and `assembleRelease`) also copy the APK into the repo `dist/` folder as `e3-signage-player-<versionName>-<buildType>.apk` (currently **0.21.0**). `dist/` is gitignored.
+`assembleDebug` (and `assembleRelease`) also copy the APK into the repo `dist/` folder as `e3-signage-player-<versionName>-<buildType>.apk` (currently **0.22.0**). `dist/` is gitignored.
 
 `local.properties` (gitignored; see `local.properties.example`):
 
@@ -29,11 +29,11 @@ api.base.url=https://e3-cms.vercel.app
 
 `api.base.url` must be reachable from the TV. Do not use `localhost` or the emulator alias on a physical box. Release signing is not stored in this repo; `bundleRelease` is unsigned unless you configure a keystore locally.
 
-Current player version: **0.21.0** (`versionCode` 21).
+Current player version: **0.22.0** (`versionCode` 22).
 
 Unpaired pairing screen branding is loaded from `GET /api/devices/player-branding` (no device token): org waiting-screen mode/image plus CMS logo. Install this APK (or newer) for admin branding to appear before pair.
 
-Screen orientation is driven by CMS **Edit screen → Orientation**. Sync-status returns `orientation` (`LANDSCAPE` | `PORTRAIT`); the player locks `requestedOrientation` on each sync. Portrait + a landscape-labeled resolution (e.g. 1920×1080) is stored/served as a **1080×1920** logical canvas.
+Screen orientation is driven by CMS **Edit screen → Orientation**. Sync-status returns `orientation` (`LANDSCAPE` | `PORTRAIT` | `PORTRAIT_UPSIDE_DOWN`). The activity stays locked to **landscape** (Android TV panels report landscape metrics even when the glass is mounted vertically). Portrait modes are applied as a full-bleed Compose rotation (270° / 90°) so waiting UI and playback fill the panel. Portrait + a landscape-labeled resolution (e.g. 1920×1080) is stored/served as a **1080×1920** logical canvas.
 
 ## Install
 
@@ -44,7 +44,7 @@ Screen orientation is driven by CMS **Edit screen → Orientation**. Sync-status
 
    ```
    adb connect <tv-ip>
-   adb install -r dist/e3-signage-player-0.21.0-debug.apk
+   adb install -r dist/e3-signage-player-0.22.0-debug.apk
    ```
 
 3. Open **E3 Signage** from Apps. Enter the 6-digit pairing code in the CMS **Pair a screen** dialog.
@@ -68,7 +68,7 @@ Same APK. Use the vendor’s file installer or `adb`. Confirm the box can instal
 | Storage | Enough free space for the active package plus the previous READY package. **Recommended:** 8 GB free before large video libraries |
 | Codecs | Video: H.264 (AVC) in `video/mp4`. Audio: AAC. Images: JPEG, PNG, WebP. Other containers are rejected at upload |
 | 4K | The player will attempt 4K MP4 if the SoC decoder supports it. It is **not** guaranteed on every box |
-| Portrait | The CMS can author portrait layouts. The activity is `sensorLandscape`; portrait-only kiosk panels are not a supported orientation lock in this build |
+| Portrait | CMS **Portrait** / **Portrait (upside down)** rotate the UI full-bleed via Compose. Use upside-down if the mount is inverted. Publish a portrait layout (1080×1920) to the screen. |
 | Auto-launch | The app is a Leanback + standard launcher. Best-effort `BOOT_COMPLETED` start exists; many vendors ignore it or block activity starts from a receiver |
 
 ## Kiosk / vendor limitations

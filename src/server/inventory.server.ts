@@ -1,5 +1,6 @@
 import {
   DEVICE_SYNC_STATES,
+  isPortraitOrientation,
   LOCATION_STATUSES,
   LOCATION_TYPES,
   ORIENTATIONS,
@@ -97,7 +98,7 @@ function normalizeSizeForOrientation(
   height: number,
   orientation: Orientation,
 ): { width: number; height: number } {
-  if (orientation === "PORTRAIT" && width > height) {
+  if (isPortraitOrientation(orientation) && width > height) {
     return { width: height, height: width };
   }
   if (orientation === "LANDSCAPE" && height > width) {
@@ -120,7 +121,9 @@ function parseResolution(
       return normalizeSizeForOrientation(width, height, orientation);
     }
   }
-  return orientation === "PORTRAIT" ? { width: 1080, height: 1920 } : { width: 1920, height: 1080 };
+  return isPortraitOrientation(orientation)
+    ? { width: 1080, height: 1920 }
+    : { width: 1920, height: 1080 };
 }
 
 function connectivityOf(

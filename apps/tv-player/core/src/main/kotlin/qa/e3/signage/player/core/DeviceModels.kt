@@ -80,7 +80,7 @@ data class SyncStatusResponse(
     val manifestVersion: Int,
     val configVersion: Int,
     val syncRequested: Boolean,
-    /** CMS screen orientation: LANDSCAPE or PORTRAIT. */
+    /** CMS screen orientation: LANDSCAPE, PORTRAIT, or PORTRAIT_UPSIDE_DOWN. */
     val orientation: String = "LANDSCAPE",
     val width: Int? = null,
     val height: Int? = null,

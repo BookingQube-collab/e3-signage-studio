@@ -25,8 +25,14 @@ export type UserRole = (typeof USER_ROLES)[number];
 export const USER_STATUSES = ["ACTIVE", "INVITED", "DISABLED"] as const;
 export type UserStatus = (typeof USER_STATUSES)[number];
 
-export const ORIENTATIONS = ["LANDSCAPE", "PORTRAIT"] as const;
+export const ORIENTATIONS = ["LANDSCAPE", "PORTRAIT", "PORTRAIT_UPSIDE_DOWN"] as const;
 export type Orientation = (typeof ORIENTATIONS)[number];
+
+/** Portrait and portrait-upside-down share a tall logical canvas (e.g. 1080×1920). */
+export function isPortraitOrientation(orientation: string | null | undefined): boolean {
+  const value = (orientation ?? "").toUpperCase();
+  return value === "PORTRAIT" || value === "PORTRAIT_UPSIDE_DOWN";
+}
 
 /** Operational status reported/derived for a screen. Connectivity is separate. */
 export const SCREEN_OPERATIONAL_STATUSES = [

@@ -6,7 +6,6 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -16,6 +15,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import qa.e3.signage.player.data.ScreenDisplayStore
+import qa.e3.signage.player.ui.DisplayOrientedFrame
 import qa.e3.signage.player.ui.PairingRoute
 import qa.e3.signage.player.ui.PlaybackRoute
 
@@ -25,37 +25,26 @@ class PlayerActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         hideSystemBars()
+        // Always landscape at the activity level. TCL / many Android TVs letterbox or ignore
+        // SCREEN_ORIENTATION_PORTRAIT; CMS portrait is applied via DisplayOrientedFrame.
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         val app = application as E3PlayerApplication
-        applyOrientation(app.container.display.orientation.value)
         setContent {
             var paired by remember { mutableStateOf(app.container.store.read() != null) }
             val orientation by app.container.display.orientation.collectAsStateWithLifecycle()
-            LaunchedEffect(orientation, paired) {
-                // Unpaired pairing UI stays landscape; after pair, follow CMS orientation.
-                // Use fixed PORTRAIT/LANDSCAPE (not SENSOR_*) — mounted TVs still report landscape.
-                applyOrientation(if (paired) orientation else ScreenDisplayStore.LANDSCAPE)
-            }
             DisposableEffect(Unit) {
                 hideSystemBars()
                 onDispose { }
             }
-            if (paired) {
-                PlaybackRoute()
-            } else {
-                PairingRoute(onPaired = { paired = true })
+            val displayOrientation =
+                if (paired) orientation else ScreenDisplayStore.LANDSCAPE
+            DisplayOrientedFrame(orientation = displayOrientation) {
+                if (paired) {
+                    PlaybackRoute()
+                } else {
+                    PairingRoute(onPaired = { paired = true })
+                }
             }
-        }
-    }
-
-    private fun applyOrientation(orientation: String) {
-        val target =
-            if (orientation == ScreenDisplayStore.PORTRAIT) {
-                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-            } else {
-                ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-            }
-        if (requestedOrientation != target) {
-            requestedOrientation = target
         }
     }
 

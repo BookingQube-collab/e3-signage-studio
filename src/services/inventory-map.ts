@@ -139,7 +139,7 @@ export function toUiScreen(row: ScreenRecord): Screen {
     groupIds: row.groupIds,
     status: toUiScreenStatus(row.operationalStatus, row.connectivity, row.syncState),
     screenType: row.screenType,
-    orientation: UI_LABELS.orientation[row.orientation],
+    orientation: UI_LABELS.orientation[row.orientation] ?? "Landscape",
     resolution: `${row.width} × ${row.height}`,
     playlistId: row.playlistId,
     playlistName: row.playlistName,

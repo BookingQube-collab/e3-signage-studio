@@ -64,7 +64,7 @@ Open **`apps/tv-player`** (not the repo root) in Android Studio, or point Cursor
 gradlew.bat :app:assembleDebug
 ```
 
-Install the versioned APK copied to the repo `dist/` folder (gitignored), e.g. `dist/e3-signage-player-0.20.0-debug.apk`. Open **E3 Signage**, enter the 6-digit code in the CMS **Pair a screen** dialog. Uninstall a previous sideload first if the TV keeps the old generic icon.
+Install the versioned APK copied to the repo `dist/` folder (gitignored), e.g. `dist/e3-signage-player-0.22.0-debug.apk`. Open **E3 Signage**, enter the 6-digit code in the CMS **Pair a screen** dialog. Uninstall a previous sideload first if the TV keeps the old generic icon.
 
 ## Tests
 

@@ -48,7 +48,9 @@ function presetLabel(preset: LayoutPreset | undefined): UiLayoutPreset {
 
 function orientationLabel(orientation: Orientation | undefined): UiOrientation {
   const label = orientation ? UI_LABELS.orientation[orientation] : undefined;
-  return label === "Portrait" ? "Portrait" : "Landscape";
+  // Layouts only author landscape vs portrait canvas; upside-down is a screen mount option.
+  if (label === "Portrait" || label === "Portrait (upside down)") return "Portrait";
+  return "Landscape";
 }
 
 function zoneTypeLabel(type: ZoneContentType | undefined): LayoutZone["contentType"] {

@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -83,10 +84,13 @@ fun PlaybackScreen(state: PlaybackUiState, onVideoFinished: (Int, Boolean) -> Un
         if (!state.playing && state.waitingKind != null) {
             WaitingScreen(state.waitingKind, state.waitingOverrides)
         }
-        BoxWithConstraints(Modifier.fillMaxSize()) {
-            val density = LocalDensity.current
+        ScaledLayoutCanvas(
+            layoutWidth = state.layoutWidth,
+            layoutHeight = state.layoutHeight,
+        ) {
             state.zones.forEach { zone ->
                 key(zone.id) {
+                    val density = LocalDensity.current
                     val widthDp = with(density) { zone.width.toDp() }
                     val heightDp = with(density) { zone.height.toDp() }
                     Box(
@@ -98,6 +102,42 @@ fun PlaybackScreen(state: PlaybackUiState, onVideoFinished: (Int, Boolean) -> Un
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Maps the published layout pixel canvas onto the oriented display frame so zones
+ * fill portrait/landscape mounts instead of sitting as a tiny centered letterbox.
+ */
+@Composable
+private fun ScaledLayoutCanvas(
+    layoutWidth: Int,
+    layoutHeight: Int,
+    content: @Composable () -> Unit,
+) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val lw = layoutWidth.coerceAtLeast(1)
+        val lh = layoutHeight.coerceAtLeast(1)
+        val scale = minOf(
+            constraints.maxWidth / lw.toFloat(),
+            constraints.maxHeight / lh.toFloat(),
+        )
+        val density = LocalDensity.current
+        Box(
+            Modifier
+                .align(Alignment.Center)
+                .size(
+                    with(density) { lw.toDp() },
+                    with(density) { lh.toDp() },
+                )
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    transformOrigin = TransformOrigin.Center
+                },
+        ) {
+            content()
         }
     }
 }

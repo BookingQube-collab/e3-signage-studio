@@ -4,6 +4,7 @@ import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -229,90 +230,106 @@ private fun WaitingCopyColumn(
     showTextBrand: Boolean,
     brandSlot: (@Composable () -> Unit)? = null,
 ) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .padding(horizontal = 72.dp)
-            .widthIn(max = 980.dp)
-            .semantics {
-                contentDescription = "${copy.headline}. ${copy.body}"
-            },
-    ) {
-        if (brandSlot != null) {
-            brandSlot()
-        } else if (showTextBrand) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val narrow = maxWidth < 720.dp
+        val horizontalPad = if (narrow) 36.dp else 72.dp
+        val headlineSize = if (narrow) 32.sp else 42.sp
+        val bodySize = if (narrow) 18.sp else 22.sp
+        val bodyLine = if (narrow) 26.sp else 32.sp
+        val quipSize = if (narrow) 16.sp else 20.sp
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = horizontalPad)
+                .widthIn(max = 980.dp)
+                .semantics {
+                    contentDescription = "${copy.headline}. ${copy.body}"
+                },
+        ) {
+            if (brandSlot != null) {
+                brandSlot()
+            } else if (showTextBrand) {
+                Text(
+                    text = "E3",
+                    style = TextStyle(
+                        brush = E3Gradient,
+                        fontFamily = Rajdhani,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = if (narrow) 56.sp else 72.sp,
+                        letterSpacing = 8.sp,
+                    ),
+                )
+                Text(
+                    text = "DIGITAL SIGNAGE",
+                    color = Color.White,
+                    fontFamily = Rajdhani,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = if (narrow) 18.sp else 22.sp,
+                    letterSpacing = 10.sp,
+                )
+            }
+            Spacer(Modifier.height(28.dp))
             Text(
-                text = "E3",
+                text = copy.kicker,
+                color = E3Muted,
+                fontFamily = Rajdhani,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = if (narrow) 15.sp else 18.sp,
+                letterSpacing = 5.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = copy.headline,
                 style = TextStyle(
                     brush = E3Gradient,
                     fontFamily = Rajdhani,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 72.sp,
-                    letterSpacing = 8.sp,
+                    fontSize = headlineSize,
+                    letterSpacing = 0.5.sp,
                 ),
+                textAlign = TextAlign.Center,
+                softWrap = true,
+                modifier = Modifier.fillMaxWidth(),
             )
+            Spacer(Modifier.height(16.dp))
             Text(
-                text = "DIGITAL SIGNAGE",
-                color = Color.White,
-                fontFamily = Rajdhani,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 22.sp,
-                letterSpacing = 10.sp,
-            )
-        }
-        Spacer(Modifier.height(28.dp))
-        Text(
-            text = copy.kicker,
-            color = E3Muted,
-            fontFamily = Rajdhani,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 18.sp,
-            letterSpacing = 5.sp,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(16.dp))
-        Text(
-            text = copy.headline,
-            style = TextStyle(
-                brush = E3Gradient,
-                fontFamily = Rajdhani,
-                fontWeight = FontWeight.Bold,
-                fontSize = 42.sp,
-                letterSpacing = 1.sp,
-            ),
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(16.dp))
-        Text(
-            text = copy.body,
-            color = Color.White,
-            fontFamily = SpaceGrotesk,
-            fontSize = 22.sp,
-            textAlign = TextAlign.Center,
-            lineHeight = 32.sp,
-        )
-        Spacer(Modifier.height(22.dp))
-        Text(
-            text = quip,
-            color = Color.White.copy(alpha = 0.82f),
-            fontFamily = SpaceGrotesk,
-            fontSize = 20.sp,
-            textAlign = TextAlign.Center,
-            lineHeight = 28.sp,
-        )
-        Spacer(Modifier.height(36.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(10.dp)
-                    .background(Color(0xFF3DDC97), CircleShape),
-            )
-            Text(
-                text = "  Paired · waiting for content",
+                text = copy.body,
                 color = Color.White,
                 fontFamily = SpaceGrotesk,
-                fontSize = 16.sp,
+                fontSize = bodySize,
+                textAlign = TextAlign.Center,
+                lineHeight = bodyLine,
+                softWrap = true,
+                modifier = Modifier.fillMaxWidth(),
             )
+            Spacer(Modifier.height(22.dp))
+            Text(
+                text = quip,
+                color = Color.White.copy(alpha = 0.82f),
+                fontFamily = SpaceGrotesk,
+                fontSize = quipSize,
+                textAlign = TextAlign.Center,
+                lineHeight = 28.sp,
+                softWrap = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(36.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(10.dp)
+                        .background(Color(0xFF3DDC97), CircleShape),
+                )
+                Text(
+                    text = "  Paired · waiting for content",
+                    color = Color.White,
+                    fontFamily = SpaceGrotesk,
+                    fontSize = if (narrow) 14.sp else 16.sp,
+                )
+            }
         }
     }
 }
