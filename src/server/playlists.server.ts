@@ -71,9 +71,15 @@ type MediaPreviewUrls = {
   previewUrl: string | null;
 };
 
+/** How many leading items get signed thumbs on the playlists index (card/row preview strip). */
+const LIST_PREVIEW_ITEM_LIMIT = 4;
+
+type SignPreviewMode = false | "thumbs" | "full";
+
 async function loadSignedMediaUrls(
   client: ReturnType<typeof getUserClient>,
   mediaRows: Array<Record<string, unknown>>,
+  signAllPreviews: boolean,
 ): Promise<Map<string, MediaPreviewUrls>> {
   const out = new Map<string, MediaPreviewUrls>();
   const versionIds = mediaRows
@@ -104,16 +110,45 @@ async function loadSignedMediaUrls(
     const isImage = mime.startsWith("image/");
     const thumbnailKey =
       asNullableString(current?.["thumbnail_key"]) ?? (isImage ? previewKey : null);
-    keys.push(...mediaKeysToSign({ previewKey, thumbnailKey, isImage, signAllPreviews: true }));
-    return { id, previewKey, thumbnailKey };
+    keys.push(...mediaKeysToSign({ previewKey, thumbnailKey, isImage, signAllPreviews }));
+    return { id, previewKey, thumbnailKey, isImage };
   });
 
   const urls = await createObjectDownloadUrls(keys);
   for (const item of picked) {
-    out.set(item.id, {
-      thumbnailUrl: item.thumbnailKey ? (urls.get(item.thumbnailKey) ?? null) : null,
-      previewUrl: item.previewKey ? (urls.get(item.previewKey) ?? null) : null,
-    });
+    const thumbnailUrl = item.thumbnailKey ? (urls.get(item.thumbnailKey) ?? null) : null;
+    // List/thumbs mode: posters only (avoid signing every full video for the index).
+    const previewUrl = signAllPreviews
+      ? item.previewKey
+        ? (urls.get(item.previewKey) ?? null)
+        : null
+      : item.isImage
+        ? (thumbnailUrl ?? (item.previewKey ? (urls.get(item.previewKey) ?? null) : null))
+        : null;
+    out.set(item.id, { thumbnailUrl, previewUrl });
+  }
+  return out;
+}
+
+function mediaIdsForPreviewSign(
+  itemRows: Array<Record<string, unknown>>,
+  mode: Exclude<SignPreviewMode, false>,
+): Set<string> {
+  if (mode === "full") {
+    return new Set(
+      itemRows.map((row) => asString(row["media_id"])).filter(Boolean),
+    );
+  }
+  const out = new Set<string>();
+  const seenPerPlaylist = new Map<string, number>();
+  for (const row of itemRows) {
+    const playlistId = asString(row["playlist_id"]);
+    const mediaId = asString(row["media_id"]);
+    if (!playlistId || !mediaId) continue;
+    const count = seenPerPlaylist.get(playlistId) ?? 0;
+    if (count >= LIST_PREVIEW_ITEM_LIMIT) continue;
+    out.add(mediaId);
+    seenPerPlaylist.set(playlistId, count + 1);
   }
   return out;
 }
@@ -121,7 +156,7 @@ async function loadSignedMediaUrls(
 async function toRecords(
   client: ReturnType<typeof getUserClient>,
   rows: Array<Record<string, unknown>>,
-  signItemPreviews = false,
+  signItemPreviews: SignPreviewMode = false,
 ): Promise<PlaylistRecord[]> {
   if (rows.length === 0) return [];
   const ids = rows.map((row) => asString(row["id"]));
@@ -147,9 +182,17 @@ async function toRecords(
     });
   }
 
-  const signedUrls = signItemPreviews
-    ? await loadSignedMediaUrls(client, (mediaRows ?? []) as Array<Record<string, unknown>>)
-    : new Map<string, MediaPreviewUrls>();
+  let signedUrls = new Map<string, MediaPreviewUrls>();
+  if (signItemPreviews) {
+    const signIds = mediaIdsForPreviewSign(
+      (itemRows ?? []) as Array<Record<string, unknown>>,
+      signItemPreviews,
+    );
+    const mediaForSign = ((mediaRows ?? []) as Array<Record<string, unknown>>).filter((row) =>
+      signIds.has(asString(row["id"])),
+    );
+    signedUrls = await loadSignedMediaUrls(client, mediaForSign, signItemPreviews === "full");
+  }
 
   const itemsByPlaylist = new Map<string, PlaylistItemRecord[]>();
   for (const raw of itemRows ?? []) {
@@ -215,7 +258,8 @@ export async function listPlaylists(accessToken: string): Promise<PlaylistRecord
       usage.playlistIds.has(asString(row["id"])),
     ),
   );
-  return toRecords(client, rows);
+  // Thumbs only for the list strip — full video signing stays on getPlaylist / builder.
+  return toRecords(client, rows, "thumbs");
 }
 
 export async function getPlaylist(accessToken: string, id: string): Promise<PlaylistRecord | null> {
@@ -242,7 +286,7 @@ export async function getPlaylist(accessToken: string, id: string): Promise<Play
   ) {
     return null;
   }
-  const records = await toRecords(client, [row], true);
+  const records = await toRecords(client, [row], "full");
   return records[0] ?? null;
 }
 
