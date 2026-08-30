@@ -10,6 +10,7 @@ import {
 } from "@e3/shared-types";
 
 import { campaignLifecycleStatus, campaignTieBreakStart, isDatedSchedule } from "@/lib/campaign-window";
+import { connectivityFromHeartbeat } from "@/lib/connectivity";
 import { daysToNumbers, numbersToDays, uiTime } from "@/lib/schedule-days";
 import { toManifestAssets } from "@/lib/manifest-assets";
 import {
@@ -19,6 +20,7 @@ import {
 } from "@/lib/playlist-snapshot";
 import {
   campaignIdsTargetingScreen,
+  isScreenEligible,
   resolveTargetScreenIds,
   type GroupLite,
   type ScreenLite,
@@ -209,7 +211,9 @@ async function loadGroups(client: UserClient, organizationId: string): Promise<G
 async function loadOrgScreens(client: UserClient, organizationId: string): Promise<ScreenLite[]> {
   const { data, error } = await client
     .from("screens")
-    .select("id, location_id, organization_id, operational_status, archived_at")
+    .select(
+      "id, location_id, organization_id, operational_status, archived_at, last_heartbeat_at, currently_playing_media_id",
+    )
     .eq("organization_id", organizationId);
   throwIfError(error, "Could not load screens.");
   return (data ?? []).map((raw) => {
@@ -220,6 +224,8 @@ async function loadOrgScreens(client: UserClient, organizationId: string): Promi
       organizationId: asString(row["organization_id"]),
       operationalStatus: asString(row["operational_status"], "READY"),
       archivedAt: asNullableString(row["archived_at"]),
+      lastHeartbeatAt: asNullableString(row["last_heartbeat_at"]),
+      currentlyPlayingMediaId: asNullableString(row["currently_playing_media_id"]),
     };
   });
 }
@@ -565,10 +571,97 @@ async function toRecords(
   }
 
   const readyStates = new Set(["READY", "ACTIVE"]);
-  const syncByScreen = new Map<string, { ready: boolean }>();
+  const syncByScreen = new Map<string, { ready: boolean; activeManifestId: string | null }>();
   for (const raw of syncRows ?? []) {
-    const row = raw as { screen_id: string; sync_state: string };
-    syncByScreen.set(row.screen_id, { ready: readyStates.has(row.sync_state) });
+    const row = raw as {
+      screen_id: string;
+      sync_state: string;
+      active_manifest_id?: string | null;
+    };
+    syncByScreen.set(row.screen_id, {
+      ready: readyStates.has(row.sync_state),
+      activeManifestId: asNullableString(row.active_manifest_id),
+    });
+  }
+
+  const activeManifestIds = [
+    ...new Set(
+      [...syncByScreen.values()]
+        .map((entry) => entry.activeManifestId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const { data: manifestRows, error: manifestError } = activeManifestIds.length
+    ? await client.from("content_manifests").select("id, campaign_id").in("id", activeManifestIds)
+    : { data: [] as Array<{ id: string; campaign_id: string | null }>, error: null };
+  throwIfError(manifestError, "Could not load active manifests.");
+
+  const campaignByManifest = new Map<string, string>();
+  for (const raw of manifestRows ?? []) {
+    const row = raw as { id: string; campaign_id: string | null };
+    const campaignId = asNullableString(row.campaign_id);
+    if (campaignId) campaignByManifest.set(asString(row.id), campaignId);
+  }
+
+  const screenById = new Map(screens.map((screen) => [screen.id, screen]));
+  /** Online screens whose active published package belongs to a campaign. */
+  const liveScreensByCampaign = new Map<string, string[]>();
+  for (const [screenId, sync] of syncByScreen) {
+    if (!sync.activeManifestId) continue;
+    const campaignId = campaignByManifest.get(sync.activeManifestId);
+    if (!campaignId) continue;
+    const screen = screenById.get(screenId);
+    if (!screen || !isScreenEligible(screen)) continue;
+    if (
+      connectivityFromHeartbeat(
+        screen.operationalStatus,
+        screen.lastHeartbeatAt ?? null,
+      ) !== "ONLINE"
+    ) {
+      continue;
+    }
+    const list = liveScreensByCampaign.get(campaignId) ?? [];
+    list.push(screenId);
+    liveScreensByCampaign.set(campaignId, list);
+  }
+
+  const playingMediaIds = [
+    ...new Set(
+      [...liveScreensByCampaign.values()]
+        .flat()
+        .map((screenId) => screenById.get(screenId)?.currentlyPlayingMediaId ?? null)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const { data: mediaRows, error: mediaError } = playingMediaIds.length
+    ? await client.from("media").select("id, name").in("id", playingMediaIds)
+    : { data: [] as Array<{ id: string; name: string }>, error: null };
+  throwIfError(mediaError, "Could not load now-playing media.");
+  const mediaNames = new Map(
+    (mediaRows ?? []).map((row) => [
+      asString((row as { id: string }).id),
+      asString((row as { name: string }).name),
+    ]),
+  );
+
+  function currentlyPlayingFor(liveScreenIds: string[]): string | null {
+    const counts = new Map<string, number>();
+    for (const screenId of liveScreenIds) {
+      const mediaId = screenById.get(screenId)?.currentlyPlayingMediaId;
+      if (!mediaId) continue;
+      const name = mediaNames.get(mediaId);
+      if (!name) continue;
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    let best: string | null = null;
+    let bestCount = 0;
+    for (const [name, count] of counts) {
+      if (count > bestCount) {
+        best = name;
+        bestCount = count;
+      }
+    }
+    return best;
   }
 
   const out: CampaignRecord[] = [];
@@ -587,6 +680,7 @@ async function toRecords(
         ? (playlistNames.get(row.playlist_id) ?? "—")
         : "—";
     const syncReady = screenIds.filter((id) => syncByScreen.get(id)?.ready).length;
+    const liveScreenIds = liveScreensByCampaign.get(row.id) ?? [];
     out.push({
       id: row.id,
       name: row.name,
@@ -600,6 +694,8 @@ async function toRecords(
       schedule: scheduleByCampaign.get(row.id) ?? defaultSchedule(),
       syncReady,
       syncTotal: screenIds.length,
+      liveScreenCount: liveScreenIds.length,
+      currentlyPlayingName: currentlyPlayingFor(liveScreenIds),
       modifiedAt: dateLabel(row.updated_at),
     });
   }

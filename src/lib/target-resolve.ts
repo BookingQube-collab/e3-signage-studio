@@ -6,6 +6,8 @@ export type ScreenLite = {
   organizationId: string;
   operationalStatus: string;
   archivedAt: string | null;
+  lastHeartbeatAt?: string | null;
+  currentlyPlayingMediaId?: string | null;
 };
 
 export type GroupLite = {

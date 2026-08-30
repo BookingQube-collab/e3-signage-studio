@@ -26,6 +26,10 @@ export type CampaignRecord = {
   };
   syncReady: number;
   syncTotal: number;
+  /** Online screens whose active content manifest belongs to this campaign. */
+  liveScreenCount: number;
+  /** Most common media title among live screens, when known. */
+  currentlyPlayingName: string | null;
   modifiedAt: string;
 };
 
@@ -65,6 +69,8 @@ export function toUiCampaign(row: CampaignRecord): Campaign {
     schedule: toUiSchedule(row.schedule),
     syncReady: row.syncReady ?? 0,
     syncTotal: row.syncTotal ?? 0,
+    liveScreenCount: row.liveScreenCount ?? 0,
+    currentlyPlayingName: row.currentlyPlayingName ?? null,
     modifiedAt: row.modifiedAt,
   };
 }

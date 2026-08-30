@@ -228,6 +228,10 @@ export interface Campaign {
   schedule: Schedule;
   syncReady: number;
   syncTotal: number;
+  /** Online screens currently running this campaign's published package. */
+  liveScreenCount: number;
+  /** Media title most commonly reported by those live screens. */
+  currentlyPlayingName: string | null;
   modifiedAt: string;
 }
 

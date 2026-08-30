@@ -36,6 +36,7 @@ const statusToneMap: Record<string, StatusTone> = {
   expired: "neutral",
   ended: "neutral",
   ongoing: "brand",
+  "live now": "success",
 };
 
 export function statusTone(status: string): StatusTone {

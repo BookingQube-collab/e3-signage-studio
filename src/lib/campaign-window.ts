@@ -107,3 +107,29 @@ export function formatCampaignWindowLabel(window: CampaignWindow | null | undefi
   if (isEvergreenSchedule(window)) return "Ongoing";
   return `${formatCampaignDateTime(window.startDate, window.startTime, window.timezone)} → ${formatCampaignDateTime(window.endDate, window.endTime, window.timezone)}`;
 }
+
+/** Runtime line for campaign cards/rows — distinct from lifecycle Active/Ended badges. */
+export function campaignRunningLabel(input: {
+  status: CampaignStatus;
+  schedule: CampaignWindow | null | undefined;
+  screenIds: string[] | null | undefined;
+  liveScreenCount: number;
+  currentlyPlayingName?: string | null;
+}): string {
+  const live = Math.max(0, input.liveScreenCount || 0);
+  if (live > 0) {
+    const base = `Live on ${live} screen${live === 1 ? "" : "s"}`;
+    const media = input.currentlyPlayingName?.trim();
+    return media ? `${base} · ${media}` : base;
+  }
+  const screens = input.screenIds ?? [];
+  if (screens.length === 0) return "No screens assigned";
+  const effective = effectiveCampaignStatus(input.status, input.schedule);
+  if (effective === "Scheduled") return "Scheduled — not playing yet";
+  if (effective === "Ended" || effective === "Expired") return "Ended";
+  if (effective === "Paused") return "Paused — nothing playing";
+  if (effective === "Draft") return "Draft — not published";
+  if (effective === "Archived") return "Archived";
+  if (effective === "Publishing") return "Publishing…";
+  return "Nothing playing";
+}

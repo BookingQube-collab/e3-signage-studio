@@ -30,13 +30,15 @@ import { CampaignRowMenu } from "@/features/campaigns/CampaignRowMenu";
 import {
   effectiveCampaignStatus,
   formatCampaignDateTime,
+  campaignRunningLabel,
   isDatedSchedule,
   isEvergreenSchedule,
 } from "@/lib/campaign-window";
-import { toCsv } from "@/lib/monitoring";
+import { adminMonitoringRefetchInterval, toCsv } from "@/lib/monitoring";
 import { prefetchNavRoute } from "@/lib/nav-prefetch";
 import { hasQueryClientContext } from "@/lib/router-preload";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
+import { useLiveMonitoring } from "@/lib/use-live-monitoring";
 import { useViewPreference } from "@/lib/view-preference";
 import { cn } from "@/lib/utils";
 import { campaignService, locationService } from "@/services";
@@ -125,6 +127,18 @@ function syncCell(c: Campaign) {
   );
 }
 
+function runningCell(c: Campaign) {
+  const live = c.liveScreenCount ?? 0;
+  return (
+    <div className="min-w-0 space-y-1">
+      {live > 0 ? <E3StatusBadge status="Live now" tone="success" /> : null}
+      <p className={cn("truncate text-xs", live > 0 ? "text-foreground" : "text-muted-foreground")}>
+        {campaignRunningLabel(c)}
+      </p>
+    </div>
+  );
+}
+
 function locationNamesFor(c: Campaign, locations: Location[]): string {
   const names = locations
     .filter((l) => (c.locationIds ?? []).includes(l.id))
@@ -137,7 +151,9 @@ function CampaignsPage() {
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["campaigns"],
     queryFn: campaignService.list,
+    refetchInterval: adminMonitoringRefetchInterval,
   });
+  useLiveMonitoring([["campaigns"]]);
   const locationsQuery = useQuery({ queryKey: ["locations"], queryFn: locationService.list });
 
   const [search, setSearch] = useState("");
@@ -229,11 +245,14 @@ function CampaignsPage() {
         "Name",
         "Content",
         "Status",
+        "Running",
         "Type",
         "Locations",
         "Start",
         "End",
         "Screens",
+        "Live screens",
+        "Now playing",
         "Sync ready",
         "Sync total",
       ],
@@ -243,6 +262,7 @@ function CampaignsPage() {
           c.name,
           c.contentName ?? "",
           effectiveCampaignStatus(c.status, c.schedule),
+          campaignRunningLabel(c),
           kind === "scheduled" ? "Scheduled" : kind === "ongoing" ? "Ongoing" : "Other",
           locationNamesFor(c, locations),
           kind === "scheduled"
@@ -252,6 +272,8 @@ function CampaignsPage() {
             ? formatCampaignDateTime(c.schedule?.endDate, c.schedule?.endTime, c.schedule?.timezone)
             : "—",
           String((c.screenIds ?? []).length),
+          String(c.liveScreenCount ?? 0),
+          c.currentlyPlayingName ?? "",
           String(c.syncReady),
           String(c.syncTotal),
         ];
@@ -284,6 +306,7 @@ function CampaignsPage() {
       cell: (c) => formatCampaignDateTime(c.schedule?.endDate, c.schedule?.endTime, c.schedule?.timezone),
     },
     { key: "screens", header: "Screens", cell: (c) => (c.screenIds ?? []).length },
+    { key: "running", header: "Running", cell: runningCell },
     { key: "sync", header: "Sync", cell: syncCell },
     {
       key: "actions",
@@ -306,6 +329,7 @@ function CampaignsPage() {
       ),
     },
     { key: "screens", header: "Screens", cell: (c) => (c.screenIds ?? []).length },
+    { key: "running", header: "Running", cell: runningCell },
     { key: "sync", header: "Sync", cell: syncCell },
     {
       key: "actions",
@@ -644,6 +668,8 @@ function CampaignCard({
   const effective = effectiveCampaignStatus(campaign.status, campaign.schedule);
   const locationLabel = locationNamesFor(campaign, locations);
   const screenCount = (campaign.screenIds ?? []).length;
+  const liveCount = campaign.liveScreenCount ?? 0;
+  const runningLabel = campaignRunningLabel(campaign);
   const syncPct =
     campaign.syncTotal === 0 ? 0 : (campaign.syncReady / campaign.syncTotal) * 100;
 
@@ -667,11 +693,13 @@ function CampaignCard({
             </p>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1">
+            {liveCount > 0 ? <E3StatusBadge status="Live now" tone="success" /> : null}
             {variant === "ongoing" ? <E3StatusBadge status="Ongoing" /> : null}
             <E3StatusBadge status={effective} />
           </div>
         </div>
         <div className="mt-3 space-y-2 text-xs tabular-nums text-muted-foreground">
+          <p className={cn(liveCount > 0 && "font-medium text-foreground")}>{runningLabel}</p>
           <p>
             {screenCount} screen{screenCount === 1 ? "" : "s"}
             {locationLabel ? ` · ${locationLabel}` : ""}

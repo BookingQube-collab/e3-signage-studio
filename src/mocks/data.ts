@@ -502,6 +502,8 @@ export const campaigns: Campaign[] = [
     },
     syncReady: 8,
     syncTotal: 10,
+    liveScreenCount: 0,
+    currentlyPlayingName: null,
     modifiedAt: "2026-08-24",
   },
   {
@@ -527,6 +529,8 @@ export const campaigns: Campaign[] = [
     },
     syncReady: 8,
     syncTotal: 8,
+    liveScreenCount: 0,
+    currentlyPlayingName: null,
     modifiedAt: "2026-08-02",
   },
   {
@@ -550,6 +554,8 @@ export const campaigns: Campaign[] = [
     },
     syncReady: 5,
     syncTotal: 6,
+    liveScreenCount: 0,
+    currentlyPlayingName: null,
     modifiedAt: "2026-08-23",
   },
   {
@@ -573,6 +579,8 @@ export const campaigns: Campaign[] = [
     },
     syncReady: 0,
     syncTotal: 1,
+    liveScreenCount: 0,
+    currentlyPlayingName: null,
     modifiedAt: "2026-08-25",
   },
   {
@@ -596,6 +604,8 @@ export const campaigns: Campaign[] = [
     },
     syncReady: 2,
     syncTotal: 2,
+    liveScreenCount: 0,
+    currentlyPlayingName: null,
     modifiedAt: "2026-08-16",
   },
   {
@@ -619,6 +629,8 @@ export const campaigns: Campaign[] = [
     },
     syncReady: 0,
     syncTotal: 0,
+    liveScreenCount: 0,
+    currentlyPlayingName: null,
     modifiedAt: "2026-03-21",
   },
   {
@@ -642,6 +654,8 @@ export const campaigns: Campaign[] = [
     },
     syncReady: 0,
     syncTotal: 0,
+    liveScreenCount: 0,
+    currentlyPlayingName: null,
     modifiedAt: "2026-08-20",
   },
 ];

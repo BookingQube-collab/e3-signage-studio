@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   campaignLifecycleStatus,
+  campaignRunningLabel,
   effectiveCampaignStatus,
   formatCampaignDateTime,
   formatCampaignWindowLabel,
@@ -116,4 +117,53 @@ test("listing helpers do not throw on missing schedule or bad timezone", () => {
   assert.equal(Number.isFinite(wallTimeToUtcMs("not-a-date", "12:00", "Asia/Qatar")), false);
   assert.equal(effectiveCampaignStatus("Active", { ...window, timezone: "Qatar" }, at("15:00")), "Scheduled");
   assert.equal(formatCampaignDateTime("2026-08-26", "12:00", "Qatar"), "2026-08-26 12:00");
+});
+
+test("campaignRunningLabel prefers live screen count over lifecycle status", () => {
+  assert.equal(
+    campaignRunningLabel({
+      status: "Active",
+      schedule: window,
+      screenIds: ["a"],
+      liveScreenCount: 2,
+      currentlyPlayingName: "Hero Reel",
+    }),
+    "Live on 2 screens · Hero Reel",
+  );
+  assert.equal(
+    campaignRunningLabel({
+      status: "Active",
+      schedule: window,
+      screenIds: [],
+      liveScreenCount: 0,
+    }),
+    "No screens assigned",
+  );
+  assert.equal(
+    campaignRunningLabel({
+      status: "Scheduled",
+      schedule: { ...window, startDate: "2026-09-01", endDate: "2026-09-10" },
+      screenIds: ["a"],
+      liveScreenCount: 0,
+    }),
+    "Scheduled — not playing yet",
+  );
+  assert.equal(
+    campaignRunningLabel({
+      status: "Ended",
+      schedule: { ...window, startDate: "2026-01-01", endDate: "2026-01-02" },
+      screenIds: ["a"],
+      liveScreenCount: 0,
+    }),
+    "Ended",
+  );
+  assert.equal(
+    campaignRunningLabel({
+      status: "Active",
+      schedule: { ...window, startDate: "", endDate: "" },
+      screenIds: ["a"],
+      liveScreenCount: 0,
+    }),
+    "Nothing playing",
+  );
 });

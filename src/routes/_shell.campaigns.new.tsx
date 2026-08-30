@@ -86,6 +86,8 @@ function blankCampaign(): Campaign {
     },
     syncReady: 0,
     syncTotal: 0,
+    liveScreenCount: 0,
+    currentlyPlayingName: null,
     modifiedAt: new Date().toISOString().slice(0, 10),
   };
 }
@@ -122,6 +124,8 @@ function NewCampaignPage() {
         name: source.data.name.startsWith("Copy of ") ? source.data.name : `Copy of ${source.data.name}`,
         status: "Draft",
         syncReady: 0,
+        liveScreenCount: 0,
+        currentlyPlayingName: null,
       });
     }
   }, [source.data, mode]);

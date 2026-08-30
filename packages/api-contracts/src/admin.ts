@@ -292,6 +292,8 @@ export const campaignDtoSchema = z.object({
   schedule: scheduleDtoSchema.nullable(),
   syncReady: z.number().int().min(0),
   syncTotal: z.number().int().min(0),
+  liveScreenCount: z.number().int().min(0).default(0),
+  currentlyPlayingName: z.string().nullable().default(null),
   createdBy: uuidSchema.nullable(),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
