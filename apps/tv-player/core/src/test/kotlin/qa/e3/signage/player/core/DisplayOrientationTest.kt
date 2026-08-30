@@ -84,4 +84,25 @@ class DisplayOrientationTest {
         assertTrue(DisplayOrientation.isPortrait("PORTRAIT"))
         assertFalse(DisplayOrientation.isPortrait("LANDSCAPE"))
     }
+
+    @Test
+    fun orientedCanvasSwapsPortraitPair() {
+        val canvas = DisplayOrientation.orientedCanvasSize(1920, 1080, DisplayOrientation.PORTRAIT)
+        assertEquals(1080, canvas.widthPx)
+        assertEquals(1920, canvas.heightPx)
+    }
+
+    @Test
+    fun containedLayoutFillsMatchingFrame() {
+        val size = DisplayOrientation.containedLayoutSize(1080, 1920, 1080, 1920)
+        assertEquals(1080, size.widthPx)
+        assertEquals(1920, size.heightPx)
+    }
+
+    @Test
+    fun containedLayoutMaxContainsMismatchedAspect() {
+        val size = DisplayOrientation.containedLayoutSize(1920, 1080, 1080, 1920)
+        assertEquals(1080, size.widthPx)
+        assertEquals(607, size.heightPx) // 1080 * (1080/1920)
+    }
 }

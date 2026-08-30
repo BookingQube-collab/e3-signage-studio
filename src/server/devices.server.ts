@@ -848,11 +848,33 @@ async function buildManifest(
     }
   }
 
+  const orientation = (() => {
+    const raw = asString(screen.orientation, "LANDSCAPE").toUpperCase();
+    if (raw === "PORTRAIT_UPSIDE_DOWN") return "PORTRAIT_UPSIDE_DOWN" as const;
+    if (raw === "PORTRAIT") return "PORTRAIT" as const;
+    if (raw === "LANDSCAPE_UPSIDE_DOWN") return "LANDSCAPE_UPSIDE_DOWN" as const;
+    return "LANDSCAPE" as const;
+  })();
+  let width = asNumber(screen.width, 0);
+  let height = asNumber(screen.height, 0);
+  if (isPortraitOrientation(orientation) && width > height) {
+    const swapped = width;
+    width = height;
+    height = swapped;
+  } else if (isLandscapeOrientation(orientation) && height > width) {
+    const swapped = width;
+    width = height;
+    height = swapped;
+  }
+
   return {
     screenId: screen.id,
     manifestVersion,
     configVersion: configVersion > 0 ? configVersion : 1,
     generatedAt: generatedAt.includes("T") ? new Date(generatedAt).toISOString() : generatedAt,
+    orientation,
+    ...(width > 0 ? { width } : {}),
+    ...(height > 0 ? { height } : {}),
     playlist,
     layouts,
     schedules,

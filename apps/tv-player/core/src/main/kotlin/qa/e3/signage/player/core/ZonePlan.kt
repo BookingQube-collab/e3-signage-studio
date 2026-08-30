@@ -29,14 +29,63 @@ data class ZonePlan(
     val zones: List<PlannedZone>,
 )
 
-fun effectiveLayout(manifest: ContentManifest): ManifestLayout {
+/**
+ * Resolve the layout to play. When the package has no zones (playlist-only), or a single
+ * full-bleed zone with an explicit screen canvas, use the CMS oriented canvas so media
+ * max-contains into the mount (portrait 1080×1920 / landscape 1920×1080) instead of a
+ * mismatched stamp. Authored multi-zone layouts keep their geometry.
+ */
+fun effectiveLayout(
+    manifest: ContentManifest,
+    canvasWidth: Int? = manifest.width,
+    canvasHeight: Int? = manifest.height,
+): ManifestLayout {
+    val orientation = DisplayOrientation.normalize(
+        manifest.orientation.takeIf { it.isNotBlank() }
+            ?: if ((manifest.height ?: 0) > (manifest.width ?: 0)) {
+                DisplayOrientation.PORTRAIT
+            } else {
+                DisplayOrientation.LANDSCAPE
+            },
+    )
     val layout = manifest.layouts.firstOrNull()
     val zones = layout?.zones.orEmpty()
-    if (layout != null && zones.isNotEmpty()) return layout
+    val explicitCanvas = canvasWidth != null && canvasHeight != null && canvasWidth > 0 && canvasHeight > 0
+    val canvas = when {
+        explicitCanvas -> DisplayOrientation.orientedCanvasSize(canvasWidth!!, canvasHeight!!, orientation)
+        layout != null && layout.width > 0 && layout.height > 0 ->
+            OrientedCanvasSize(layout.width, layout.height)
+        else -> DisplayOrientation.orientedCanvasSize(
+            width = if (DisplayOrientation.isPortrait(orientation)) 1080 else 1920,
+            height = if (DisplayOrientation.isPortrait(orientation)) 1920 else 1080,
+            orientation = orientation,
+        )
+    }
+    val cw = canvas.widthPx
+    val ch = canvas.heightPx
+
+    if (layout != null && zones.isNotEmpty()) {
+        val shouldRemapFullBleed =
+            explicitCanvas &&
+                zones.size == 1 &&
+                isFullBleedZone(zones[0], layout.width, layout.height) &&
+                (layout.width != cw || layout.height != ch)
+        if (shouldRemapFullBleed) {
+            val zone = zones[0]
+            return ManifestLayout(
+                id = layout.id,
+                width = cw,
+                height = ch,
+                background = layout.background,
+                zones = listOf(zone.copy(x = 0, y = 0, width = cw, height = ch)),
+            )
+        }
+        return layout
+    }
     return ManifestLayout(
         id = layout?.id ?: "full",
-        width = layout?.width?.takeIf { it > 0 } ?: 1920,
-        height = layout?.height?.takeIf { it > 0 } ?: 1080,
+        width = cw,
+        height = ch,
         background = layout?.background ?: "#000000",
         zones = listOf(
             ManifestZone(
@@ -44,13 +93,23 @@ fun effectiveLayout(manifest: ContentManifest): ManifestLayout {
                 type = ZoneKind.VIDEO,
                 x = 0,
                 y = 0,
-                width = layout?.width?.takeIf { it > 0 } ?: 1920,
-                height = layout?.height?.takeIf { it > 0 } ?: 1080,
+                width = cw,
+                height = ch,
                 fit = FitMode.CONTAIN,
                 contentRef = null,
             ),
         ),
     )
+}
+
+/** True when the zone covers the authored canvas (playlist / full-screen media). */
+fun isFullBleedZone(zone: ManifestZone, layoutWidth: Int, layoutHeight: Int): Boolean {
+    val lw = layoutWidth.coerceAtLeast(1)
+    val lh = layoutHeight.coerceAtLeast(1)
+    if (zone.x > 0 || zone.y > 0) return false
+    val coversWidth = zone.width >= (lw * 95) / 100
+    val coversHeight = zone.height >= (lh * 95) / 100
+    return coversWidth && coversHeight
 }
 
 fun scaleZone(zone: ManifestZone, layoutWidth: Int, layoutHeight: Int, screenWidth: Int, screenHeight: Int): IntRect {
@@ -67,8 +126,10 @@ fun scaleZone(zone: ManifestZone, layoutWidth: Int, layoutHeight: Int, screenWid
 fun planZones(
     manifest: ContentManifest,
     root: java.io.File,
+    canvasWidth: Int? = manifest.width,
+    canvasHeight: Int? = manifest.height,
 ): ZonePlan {
-    val layout = effectiveLayout(manifest)
+    val layout = effectiveLayout(manifest, canvasWidth, canvasHeight)
     val byFile = manifest.assets.associateBy { it.localFilename }
     val byId = manifest.assets.associateBy { it.id }
     val hasPlaylist = manifest.playlist?.items?.isNotEmpty() == true

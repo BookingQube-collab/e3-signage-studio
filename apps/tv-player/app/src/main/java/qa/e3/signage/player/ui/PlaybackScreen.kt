@@ -111,8 +111,9 @@ fun PlaybackScreen(state: PlaybackUiState, onVideoFinished: (Int, Boolean) -> Un
 /**
  * Maps the published layout pixel canvas onto the oriented display frame with
  * **uniform contain/fit** (min scale) so authored aspect is preserved. Letterbox /
- * pillarbox bars are OK. `requiredSize` prevents parent max-constraint clamping from
- * shrinking the canvas before scale (same failure mode as DisplayOrientedFrame).
+ * pillarbox bars are OK. Lays out at the *final* contained pixel size so the canvas
+ * fills the oriented viewport as large as possible (0.25.0 underscaled when an
+ * oversized requiredSize + graphicsLayer shrink was clamped on some TCL panels).
  * Zone media still respects per-zone FitMode (Cover/Fill only when the zone asks).
  */
 @Composable
@@ -124,28 +125,39 @@ private fun ScaledLayoutCanvas(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val lw = layoutWidth.coerceAtLeast(1)
         val lh = layoutHeight.coerceAtLeast(1)
-        val fit = DisplayOrientation.layoutFitScale(
+        val contained = DisplayOrientation.containedLayoutSize(
             layoutWidth = lw,
             layoutHeight = lh,
             frameWidthPx = constraints.maxWidth,
             frameHeightPx = constraints.maxHeight,
         )
         val density = LocalDensity.current
+        val scaleX = contained.widthPx.toFloat() / lw.toFloat()
+        val scaleY = contained.heightPx.toFloat() / lh.toFloat()
         Box(
             Modifier
                 .align(Alignment.Center)
                 .requiredSize(
-                    with(density) { lw.toDp() },
-                    with(density) { lh.toDp() },
+                    with(density) { contained.widthPx.toDp() },
+                    with(density) { contained.heightPx.toDp() },
                 )
-                .graphicsLayer {
-                    scaleX = fit.scaleX
-                    scaleY = fit.scaleY
-                    transformOrigin = TransformOrigin.Center
-                    clip = false
-                },
+                .clipToBounds(),
         ) {
-            content()
+            Box(
+                Modifier
+                    .requiredSize(
+                        with(density) { lw.toDp() },
+                        with(density) { lh.toDp() },
+                    )
+                    .graphicsLayer {
+                        this.scaleX = scaleX
+                        this.scaleY = scaleY
+                        transformOrigin = TransformOrigin(0f, 0f)
+                        clip = false
+                    },
+            ) {
+                content()
+            }
         }
     }
 }

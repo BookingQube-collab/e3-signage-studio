@@ -62,7 +62,9 @@ class PackageSyncCoordinator(
         val live = store.read() ?: credentials
         packages.noteCloudVersion(status.manifestVersion)
         waitingScreen.applyFromSync(status.waitingScreen)
-        display.applyFromSync(status.orientation)
+        // Always refresh mount orientation from sync-status — even when the manifest
+        // version is unchanged (playlist-only Sync Now must still rotate Landscape↔Portrait).
+        display.applyFromSync(status.orientation, status.width, status.height)
 
         val activeVersion = packages.activeVersion() ?: 0
         val inflight = inflightFor(status.manifestVersion)
@@ -259,6 +261,8 @@ class PackageSyncCoordinator(
             Log.w(TAG, "pre-activate check: ${error.message}")
         }
         val outcome = packages.switchActive(manifest.manifestVersion, path)
+        // Package may carry a fresher orientation than the last sync-status poll.
+        display.applyFromSync(manifest.orientation, manifest.width, manifest.height)
         confirm(credentials, manifest.manifestVersion, ContentPackageState.ACTIVE)
         val pruned = pruneUnusedStorage(filesDir, packages.keepAssets(), filesDir.usableSpace)
         if (pruned.deleted.isNotEmpty()) {

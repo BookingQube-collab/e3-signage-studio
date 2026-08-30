@@ -140,7 +140,15 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 continue
             }
             val (manifest, root) = loaded
-            val plan = planZones(manifest, root)
+            // Re-apply package orientation each loop so a mid-session CMS change sticks
+            // even if sync-status was missed (activate path also writes the store).
+            app.container.display.applyFromSync(manifest.orientation, manifest.width, manifest.height)
+            val plan = planZones(
+                manifest,
+                root,
+                canvasWidth = app.container.display.canvasWidth.value,
+                canvasHeight = app.container.display.canvasHeight.value,
+            )
             val activeSchedule = ScheduleEngine.selectActive(manifest.schedules)
             val tz = activeSchedule?.timezone
                 ?: manifest.schedules.firstOrNull()?.timezone

@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -39,10 +40,12 @@ class PlayerActivity : ComponentActivity() {
             val displayOrientation =
                 if (paired) orientation else ScreenDisplayStore.LANDSCAPE
             DisplayOrientedFrame(orientation = displayOrientation) {
-                if (paired) {
-                    PlaybackRoute()
-                } else {
-                    PairingRoute(onPaired = { paired = true })
+                key(displayOrientation) {
+                    if (paired) {
+                        PlaybackRoute()
+                    } else {
+                        PairingRoute(onPaired = { paired = true })
+                    }
                 }
             }
         }

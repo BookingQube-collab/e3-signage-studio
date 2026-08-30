@@ -164,6 +164,11 @@ export const contentManifestSchema = z.object({
   manifestVersion: z.number().int().positive(),
   configVersion: z.number().int().min(0),
   generatedAt: isoDateTimeSchema,
+  /** CMS screen mount orientation — player applies on package activate. */
+  orientation: orientationSchema.default("LANDSCAPE"),
+  /** Oriented logical canvas (portrait tall / landscape wide). */
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
   playlist: manifestPlaylistSchema.nullable(),
   layouts: z.array(manifestLayoutSchema),
   schedules: z.array(manifestScheduleSchema),

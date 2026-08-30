@@ -104,6 +104,12 @@ data class ContentManifest(
     val manifestVersion: Int,
     val configVersion: Int,
     val generatedAt: String,
+    /** CMS screen mount orientation — applied when this package becomes ACTIVE. */
+    val orientation: String = "LANDSCAPE",
+    /** Oriented logical canvas width (portrait tall / landscape wide). */
+    val width: Int? = null,
+    /** Oriented logical canvas height. */
+    val height: Int? = null,
     val playlist: ManifestPlaylist? = null,
     val layouts: List<ManifestLayout> = emptyList(),
     val schedules: List<ManifestSchedule> = emptyList(),

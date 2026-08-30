@@ -74,9 +74,30 @@ object DisplayOrientation {
     }
 
     /**
+     * Logical CMS canvas size for [orientation]: portrait mounts are tall (e.g. 1080×1920),
+     * landscape mounts are wide (e.g. 1920×1080). Swaps axes when the stored pair disagrees.
+     */
+    fun orientedCanvasSize(
+        width: Int,
+        height: Int,
+        orientation: String,
+    ): OrientedCanvasSize {
+        val w = width.coerceAtLeast(1)
+        val h = height.coerceAtLeast(1)
+        return if (isPortrait(orientation)) {
+            if (w > h) OrientedCanvasSize(heightPx = w, widthPx = h) else OrientedCanvasSize(widthPx = w, heightPx = h)
+        } else {
+            if (h > w) OrientedCanvasSize(widthPx = h, heightPx = w) else OrientedCanvasSize(widthPx = w, heightPx = h)
+        }
+    }
+
+    /**
      * Uniform contain/fit scale mapping a published layout canvas onto the oriented
      * frame while preserving aspect ratio (letterbox / pillarbox when needed).
      * Independent scaleX/scaleY exact-fill was the 0.24.0 zoom/crop failure mode.
+     *
+     * Returns the largest uniform scale that keeps the full canvas visible — never
+     * shrinks below the max-contain size into a postage stamp when aspects match.
      */
     fun layoutFitScale(
         layoutWidth: Int,
@@ -91,12 +112,34 @@ object DisplayOrientation {
         val scale = minOf(fw / lw, fh / lh)
         return LayoutFillScale(scaleX = scale, scaleY = scale)
     }
+
+    /**
+     * Target pixel size of a layout canvas after max-contain into the oriented frame.
+     * Used so Compose lays out at the final size instead of an oversized requiredSize
+     * + graphicsLayer shrink (which underscaled on some TCL panels in 0.25.0).
+     */
+    fun containedLayoutSize(
+        layoutWidth: Int,
+        layoutHeight: Int,
+        frameWidthPx: Int,
+        frameHeightPx: Int,
+    ): OrientedCanvasSize {
+        val fit = layoutFitScale(layoutWidth, layoutHeight, frameWidthPx, frameHeightPx)
+        val w = (layoutWidth.coerceAtLeast(1) * fit.scaleX).toInt().coerceAtLeast(1)
+        val h = (layoutHeight.coerceAtLeast(1) * fit.scaleY).toInt().coerceAtLeast(1)
+        return OrientedCanvasSize(widthPx = w, heightPx = h)
+    }
 }
 
 data class OrientedChildSize(
     val widthPx: Int,
     val heightPx: Int,
     val rotationZ: Float,
+)
+
+data class OrientedCanvasSize(
+    val widthPx: Int,
+    val heightPx: Int,
 )
 
 data class LayoutFillScale(

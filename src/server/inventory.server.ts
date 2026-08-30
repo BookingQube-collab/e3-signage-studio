@@ -903,9 +903,64 @@ export async function updateScreen(
     }
   }
 
+  // Orientation / canvas size must reach the APK even when the content package version
+  // is unchanged — bump config + request sync so the next poll applies Landscape/Portrait.
+  if (sizeTouched) {
+    await bumpScreenConfigAndRequestSync(admin, id);
+  }
+
   const next = await getScreen(accessToken, id);
   if (!next) throw new Error("Screen not found.");
   return next;
+}
+
+async function bumpScreenConfigAndRequestSync(
+  admin: ReturnType<typeof getServiceRoleClient>,
+  screenId: string,
+): Promise<void> {
+  const { data: screenRow, error: screenError } = await admin
+    .from("screens")
+    .select("cloud_config_version")
+    .eq("id", screenId)
+    .maybeSingle();
+  throwIfError(screenError, "Could not load screen config version.");
+  const nextConfig =
+    Math.max(0, asNumber((screenRow as { cloud_config_version?: number | null } | null)?.cloud_config_version, 0)) +
+    1;
+  const now = new Date().toISOString();
+  const { error: bumpError } = await admin
+    .from("screens")
+    .update({ cloud_config_version: nextConfig })
+    .eq("id", screenId);
+  throwIfError(bumpError, "Could not bump screen config version.");
+
+  const { data: existing, error: existingError } = await admin
+    .from("device_sync_states")
+    .select("screen_id")
+    .eq("screen_id", screenId)
+    .maybeSingle();
+  throwIfError(existingError, "Could not load sync state.");
+  if (existing) {
+    const { error } = await admin
+      .from("device_sync_states")
+      .update({
+        cloud_config_version: nextConfig,
+        sync_requested_at: now,
+        updated_at: now,
+      })
+      .eq("screen_id", screenId);
+    throwIfError(error, "Could not request orientation sync.");
+  } else {
+    const { error } = await admin.from("device_sync_states").insert({
+      screen_id: screenId,
+      cloud_config_version: nextConfig,
+      sync_requested_at: now,
+      sync_state: "WAITING",
+      sync_progress: 0,
+      package_state: "PENDING",
+    });
+    throwIfError(error, "Could not request orientation sync.");
+  }
 }
 
 export async function requestScreenSync(accessToken: string, id: string): Promise<ScreenRecord> {

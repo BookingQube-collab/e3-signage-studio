@@ -25,6 +25,11 @@ const contentManifestSchema = z.object({
   manifestVersion: z.number().int().positive(),
   configVersion: z.number().int().min(0),
   generatedAt: isoDateTimeSchema,
+  orientation: z
+    .enum(["LANDSCAPE", "PORTRAIT", "LANDSCAPE_UPSIDE_DOWN", "PORTRAIT_UPSIDE_DOWN"])
+    .default("LANDSCAPE"),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
   playlist: z
     .object({
       id: uuidSchema,
@@ -219,4 +224,23 @@ test("sync-status accepts landscape upside-down orientation", () => {
     height: 1080,
   });
   assert.equal(status.orientation, "LANDSCAPE_UPSIDE_DOWN");
+});
+
+test("manifest carries screen orientation for package activate", () => {
+  const parsed = contentManifestSchema.parse({
+    screenId: uuid,
+    manifestVersion: 25,
+    configVersion: 2,
+    generatedAt: "2026-08-30T12:00:00.000Z",
+    orientation: "PORTRAIT",
+    width: 1080,
+    height: 1920,
+    playlist: null,
+    layouts: [],
+    schedules: [],
+    assets: [],
+  });
+  assert.equal(parsed.orientation, "PORTRAIT");
+  assert.equal(parsed.width, 1080);
+  assert.equal(parsed.height, 1920);
 });

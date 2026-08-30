@@ -163,11 +163,63 @@ class ZonePlanTest {
             manifestVersion = 1,
             configVersion = 1,
             generatedAt = "2026-08-25T00:00:00Z",
+            orientation = "LANDSCAPE",
+            width = 1920,
+            height = 1080,
             playlist = ManifestPlaylist("p", 1, true, emptyList()),
         )
-        val layout = effectiveLayout(manifest)
+        val layout = effectiveLayout(manifest, 1920, 1080)
         assertEquals(1, layout.zones.size)
         assertEquals(1920, layout.zones[0].width)
+        assertEquals(1080, layout.zones[0].height)
         assertEquals(FitMode.CONTAIN, layout.zones[0].fit)
+    }
+
+    @Test
+    fun missingLayoutUsesPortraitCanvas() {
+        val manifest = ContentManifest(
+            screenId = "s",
+            manifestVersion = 1,
+            configVersion = 1,
+            generatedAt = "2026-08-25T00:00:00Z",
+            orientation = "PORTRAIT",
+            width = 1080,
+            height = 1920,
+            playlist = ManifestPlaylist("p", 1, true, emptyList()),
+        )
+        val layout = effectiveLayout(manifest, 1080, 1920)
+        assertEquals(1080, layout.width)
+        assertEquals(1920, layout.height)
+        assertEquals(1080, layout.zones[0].width)
+        assertEquals(1920, layout.zones[0].height)
+    }
+
+    @Test
+    fun fullBleedLandscapeLayoutRemapsToPortraitCanvas() {
+        val manifest = ContentManifest(
+            screenId = "s",
+            manifestVersion = 1,
+            configVersion = 1,
+            generatedAt = "2026-08-25T00:00:00Z",
+            orientation = "PORTRAIT",
+            width = 1080,
+            height = 1920,
+            playlist = ManifestPlaylist("p", 1, true, emptyList()),
+            layouts = listOf(
+                ManifestLayout(
+                    "lay",
+                    1920,
+                    1080,
+                    "#000000",
+                    listOf(ManifestZone("main", ZoneKind.VIDEO, 0, 0, 1920, 1080, FitMode.CONTAIN, null)),
+                ),
+            ),
+        )
+        val layout = effectiveLayout(manifest, 1080, 1920)
+        assertEquals(1080, layout.width)
+        assertEquals(1920, layout.height)
+        assertEquals(IntRect(0, 0, 1080, 1920).width, layout.zones[0].width)
+        assertEquals(1920, layout.zones[0].height)
+        assertTrue(isFullBleedZone(layout.zones[0], layout.width, layout.height))
     }
 }
