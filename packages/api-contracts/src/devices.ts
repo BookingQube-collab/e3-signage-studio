@@ -84,6 +84,17 @@ export const deviceSyncStatusResponseSchema = z.object({
   waitingScreen: deviceWaitingScreenSchema.optional(),
 });
 
+/**
+ * Unauthenticated branding for unpaired TV players (pairing screen).
+ * Served from the default organization settings.
+ */
+export const publicPlayerBrandingResponseSchema = z.object({
+  waitingScreen: deviceWaitingScreenSchema,
+  logo: deviceBrandAssetSchema.nullable(),
+  brandingConfigVersion: z.number().int().min(0),
+  waitingConfigVersion: z.number().int().min(0),
+});
+
 export const manifestAssetSchema = z.object({
   id: uuidSchema,
   version: z.number().int().positive(),
@@ -219,6 +230,7 @@ export type DeviceActivateResponse = z.infer<typeof deviceActivateResponseSchema
 export type DeviceSyncStatusResponse = z.infer<typeof deviceSyncStatusResponseSchema>;
 export type DeviceWaitingScreen = z.infer<typeof deviceWaitingScreenSchema>;
 export type DeviceBrandAsset = z.infer<typeof deviceBrandAssetSchema>;
+export type PublicPlayerBrandingResponse = z.infer<typeof publicPlayerBrandingResponseSchema>;
 export type DeviceOkResponse = z.infer<typeof deviceOkResponseSchema>;
 export type ContentManifest = z.infer<typeof contentManifestSchema>;
 export type DeviceHeartbeatRequest = z.infer<typeof deviceHeartbeatRequestSchema>;

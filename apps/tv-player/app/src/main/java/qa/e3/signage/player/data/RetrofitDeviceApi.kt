@@ -18,6 +18,7 @@ import qa.e3.signage.player.core.OkResponse
 import qa.e3.signage.player.core.PairRequest
 import qa.e3.signage.player.core.PairResponse
 import qa.e3.signage.player.core.PlaybackLogBatch
+import qa.e3.signage.player.core.PublicPlayerBrandingResponse
 import qa.e3.signage.player.core.SyncConfirmationRequest
 import qa.e3.signage.player.core.SyncStatusResponse
 import qa.e3.signage.player.core.redactHttp
@@ -37,6 +38,9 @@ interface DeviceRetrofitService {
 
     @POST("api/devices/activate")
     suspend fun activate(@Body body: ActivateRequest): ActivateResponse
+
+    @GET("api/devices/player-branding")
+    suspend fun playerBranding(): PublicPlayerBrandingResponse
 
     @GET("api/devices/{id}/sync-status")
     suspend fun syncStatus(
@@ -99,6 +103,9 @@ class RetrofitDeviceApi(
     override suspend fun pair(request: PairRequest): PairResponse = unwrap { service.pair(request) }
 
     override suspend fun activate(request: ActivateRequest): ActivateResponse = unwrap { service.activate(request) }
+
+    override suspend fun playerBranding(): PublicPlayerBrandingResponse =
+        unwrap { service.playerBranding() }
 
     override suspend fun syncStatus(deviceId: String, bearerToken: String): SyncStatusResponse =
         unwrap { service.syncStatus(deviceId, "Bearer $bearerToken") }

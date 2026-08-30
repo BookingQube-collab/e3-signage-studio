@@ -56,7 +56,7 @@ Open **`apps/tv-player`** (not the repo root) in Android Studio, or point Cursor
 - Layout zones scale to the physical display (FIT / FILL / COVER / CONTAIN / STRETCH)
 - Local schedule windows use the campaign timezone (default Asia/Qatar)
 - No admin chrome, titles, or player controls
-- Until an ACTIVE package exists, the player shows a branded E3 waiting screen (not a blank black frame). Admins choose **Full logo** (default), **E3 icon**, or a **custom image** under CMS **Settings → Playback → Default waiting screen**; optional headline/message still apply.
+- Until an ACTIVE package exists, the player shows a branded waiting screen (not a blank black frame). Admins choose **Full logo** (default), **Brand icon**, or a **custom image** under CMS **Settings → Playback → Default waiting screen**; optional headline/message still apply. The unpaired pairing screen uses the same org branding via `GET /api/devices/player-branding` (CMS logo + waiting-screen assets, no device token).
 
 ## Build / sideload
 

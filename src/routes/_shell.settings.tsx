@@ -449,7 +449,7 @@ function SettingsEditor({ canManage }: { canManage: boolean }) {
 
               <BrandAssetRow
                 title="CMS logo"
-                description="Sidebar, login, and headers in the admin panel."
+                description="Sidebar, login, and headers in the admin panel. Also shown on the unpaired TV pairing screen when Waiting screen brand is Full logo."
                 thumb={cmsLogoThumb}
                 name={cmsLogoName}
                 fallbackSrc={e3Icon}
@@ -479,7 +479,7 @@ function SettingsEditor({ canManage }: { canManage: boolean }) {
 
               <BrandAssetRow
                 title="Player brand icon (in-app)"
-                description="Synced to paired TVs for waiting / idle screens when on-screen brand is Brand icon. Does not change the Android home-screen launcher icon at runtime."
+                description="Synced to TVs (paired idle and unpaired pairing) when on-screen brand is Brand icon. Does not change the Android home-screen launcher icon at runtime."
                 thumb={playerIconThumb}
                 name={playerIconName}
                 fallbackSrc={e3Icon}
@@ -581,9 +581,10 @@ function SettingsEditor({ canManage }: { canManage: boolean }) {
                 <div>
                   <p className="text-sm font-medium">Default waiting screen</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Organization default shown on paired TVs until an active campaign is playing.
-                    Individual locations can override this under Locations → location detail.
-                    Manage on-screen brand, optional headline/message, and a custom full-bleed image.
+                    Organization default shown on unpaired pairing screens and on paired TVs until an
+                    active campaign is playing. Individual locations can override the custom image
+                    under Locations → location detail (paired idle only). Manage on-screen brand,
+                    optional headline/message, and a custom full-bleed image.
                   </p>
                 </div>
 

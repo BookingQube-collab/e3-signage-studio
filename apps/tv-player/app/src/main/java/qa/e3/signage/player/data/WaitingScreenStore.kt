@@ -19,12 +19,16 @@ data class WaitingScreenState(
     val localImagePath: String? = null,
     /** Synced in-app brand icon path (ICON mode). Not the APK launcher icon. */
     val localBrandIconPath: String? = null,
+    /** CMS logo cached for unpaired pairing / FULL_LOGO mark. */
+    val localLogoPath: String? = null,
     val title: String? = null,
     val message: String? = null,
     val mediaId: String? = null,
     val checksum: String? = null,
     val brandIconMediaId: String? = null,
     val brandIconChecksum: String? = null,
+    val logoMediaId: String? = null,
+    val logoChecksum: String? = null,
     val configVersion: Int = 0,
 )
 
@@ -35,8 +39,11 @@ private data class WaitingMeta(
     val checksum: String? = null,
     val localImagePath: String? = null,
     val localBrandIconPath: String? = null,
+    val localLogoPath: String? = null,
     val brandIconMediaId: String? = null,
     val brandIconChecksum: String? = null,
+    val logoMediaId: String? = null,
+    val logoChecksum: String? = null,
     val title: String? = null,
     val message: String? = null,
     val configVersion: Int = 0,
@@ -59,7 +66,7 @@ class WaitingScreenStore(
 
     fun applyFromSync(config: WaitingScreenConfig?) {
         if (config == null) {
-            clearImageKeepCopy(WaitingScreenBrand.FULL_LOGO, null, null, null, 0)
+            clearImageKeepCopy(WaitingScreenBrand.FULL_LOGO, null, null, null, currentLogo(), 0)
             return
         }
         val title = config.title?.trim()?.takeIf { it.isNotEmpty() }
@@ -72,6 +79,7 @@ class WaitingScreenStore(
         val fileSize = config.fileSize ?: 0L
         val mimeType = config.mimeType ?: "image/jpeg"
         val brandIconPath = downloadBrandIcon(config.brandIcon)
+        val logo = currentLogo()
 
         if (
             brand != WaitingScreenBrand.CUSTOM ||
@@ -81,7 +89,7 @@ class WaitingScreenStore(
         ) {
             val resolved =
                 if (brand == WaitingScreenBrand.CUSTOM) WaitingScreenBrand.FULL_LOGO else brand
-            clearImageKeepCopy(resolved, title, message, brandIconPath, config.configVersion)
+            clearImageKeepCopy(resolved, title, message, brandIconPath, logo, config.configVersion)
             return
         }
 
@@ -100,6 +108,9 @@ class WaitingScreenStore(
                 localBrandIconPath = brandIconPath?.path,
                 brandIconMediaId = brandIconPath?.mediaId,
                 brandIconChecksum = brandIconPath?.checksum,
+                localLogoPath = logo?.path,
+                logoMediaId = logo?.mediaId,
+                logoChecksum = logo?.checksum,
                 configVersion = config.configVersion,
             )
             _state.value = next
@@ -124,12 +135,15 @@ class WaitingScreenStore(
                 brand = WaitingScreenBrand.CUSTOM,
                 localImagePath = file.absolutePath,
                 localBrandIconPath = brandIconPath?.path,
+                localLogoPath = logo?.path,
                 title = title,
                 message = message,
                 mediaId = mediaId,
                 checksum = checksum,
                 brandIconMediaId = brandIconPath?.mediaId,
                 brandIconChecksum = brandIconPath?.checksum,
+                logoMediaId = logo?.mediaId,
+                logoChecksum = logo?.checksum,
                 configVersion = config.configVersion,
             )
             _state.value = next
@@ -139,13 +153,79 @@ class WaitingScreenStore(
             _state.value = WaitingScreenState(
                 brand = WaitingScreenBrand.FULL_LOGO,
                 localBrandIconPath = brandIconPath?.path,
+                localLogoPath = logo?.path,
                 title = title,
                 message = message,
                 brandIconMediaId = brandIconPath?.mediaId,
                 brandIconChecksum = brandIconPath?.checksum,
+                logoMediaId = logo?.mediaId,
+                logoChecksum = logo?.checksum,
                 configVersion = config.configVersion,
             )
             persist(_state.value)
+        }
+    }
+
+    /**
+     * Unpaired pairing screen: apply org waiting-screen + CMS logo without a device token.
+     * Safe to call on every cold start; reuses cached files when checksums match.
+     */
+    fun applyPublicBranding(waiting: WaitingScreenConfig, logo: DeviceBrandAsset?) {
+        applyFromSync(waiting)
+        val cachedLogo = downloadLogo(logo)
+        val current = _state.value
+        val next = current.copy(
+            localLogoPath = cachedLogo?.path,
+            logoMediaId = cachedLogo?.mediaId,
+            logoChecksum = cachedLogo?.checksum,
+        )
+        if (next != current) {
+            _state.value = next
+            persist(next)
+        }
+    }
+
+    private fun currentLogo(): CachedBrandIcon? {
+        val current = _state.value
+        val path = current.localLogoPath
+        val mediaId = current.logoMediaId
+        val checksum = current.logoChecksum
+        if (path.isNullOrBlank() || mediaId.isNullOrBlank() || checksum.isNullOrBlank()) return null
+        if (!File(path).isFile) return null
+        return CachedBrandIcon(path, mediaId, checksum)
+    }
+
+    private fun downloadLogo(asset: DeviceBrandAsset?): CachedBrandIcon? {
+        if (asset == null) return null
+        val mediaId = asset.mediaId.trim().takeIf { it.isNotEmpty() } ?: return null
+        val checksum = asset.checksum.lowercase().takeIf { it.isNotEmpty() } ?: return null
+        val downloadUrl = asset.downloadUrl.trim().takeIf { it.isNotEmpty() } ?: return null
+        val current = _state.value
+        if (
+            current.logoMediaId == mediaId &&
+            current.logoChecksum == checksum &&
+            !current.localLogoPath.isNullOrBlank() &&
+            File(current.localLogoPath).isFile
+        ) {
+            return CachedBrandIcon(current.localLogoPath, mediaId, checksum)
+        }
+        return try {
+            val filename = localFilenameFor(asset.mimeType, mediaId, prefix = "cms-logo")
+            val manifestAsset = ManifestAsset(
+                id = mediaId,
+                version = asset.version.coerceAtLeast(1),
+                type = MediaKind.IMAGE,
+                checksum = checksum,
+                fileSize = asset.fileSize.coerceAtLeast(0L),
+                localFilename = filename,
+                mimeType = asset.mimeType.ifBlank { "image/png" },
+                downloadUrl = downloadUrl,
+            )
+            val file = downloader.downloadVerified(manifestAsset, filesDir) { }
+            CachedBrandIcon(file.absolutePath, mediaId, checksum)
+        } catch (error: Exception) {
+            Log.w(TAG, "cms logo: ${error.message}")
+            currentLogo()
         }
     }
 
@@ -194,6 +274,7 @@ class WaitingScreenStore(
         title: String?,
         message: String?,
         brandIcon: CachedBrandIcon?,
+        logo: CachedBrandIcon?,
         configVersion: Int,
     ) {
         val next = WaitingScreenState(
@@ -203,6 +284,9 @@ class WaitingScreenStore(
             localBrandIconPath = brandIcon?.path,
             brandIconMediaId = brandIcon?.mediaId,
             brandIconChecksum = brandIcon?.checksum,
+            localLogoPath = logo?.path,
+            logoMediaId = logo?.mediaId,
+            logoChecksum = logo?.checksum,
             configVersion = configVersion,
         )
         _state.value = next
@@ -216,8 +300,11 @@ class WaitingScreenStore(
             checksum = state.checksum,
             localImagePath = state.localImagePath,
             localBrandIconPath = state.localBrandIconPath,
+            localLogoPath = state.localLogoPath,
             brandIconMediaId = state.brandIconMediaId,
             brandIconChecksum = state.brandIconChecksum,
+            logoMediaId = state.logoMediaId,
+            logoChecksum = state.logoChecksum,
             title = state.title,
             message = state.message,
             configVersion = state.configVersion,
@@ -231,16 +318,20 @@ class WaitingScreenStore(
             val meta = json.decodeFromString(WaitingMeta.serializer(), metaFile.readText())
             val path = meta.localImagePath?.takeIf { File(it).isFile }
             val iconPath = meta.localBrandIconPath?.takeIf { File(it).isFile }
+            val logoPath = meta.localLogoPath?.takeIf { File(it).isFile }
             WaitingScreenState(
                 brand = meta.brand,
                 localImagePath = path,
                 localBrandIconPath = iconPath,
+                localLogoPath = logoPath,
                 title = meta.title,
                 message = meta.message,
                 mediaId = meta.mediaId,
                 checksum = meta.checksum,
                 brandIconMediaId = meta.brandIconMediaId,
                 brandIconChecksum = meta.brandIconChecksum,
+                logoMediaId = meta.logoMediaId,
+                logoChecksum = meta.logoChecksum,
                 configVersion = meta.configVersion,
             )
         } catch (_: Exception) {

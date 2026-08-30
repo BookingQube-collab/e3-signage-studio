@@ -36,6 +36,7 @@ import { Route as ShellScreensIndexRouteImport } from './routes/_shell.screens.i
 import { Route as ShellScreensIdRouteImport } from './routes/_shell.screens.$id'
 import { Route as ApiDevicesActivateRouteImport } from './routes/api.devices.activate'
 import { Route as ApiDevicesPairRouteImport } from './routes/api.devices.pair'
+import { Route as ApiDevicesPlayerBrandingRouteImport } from './routes/api.devices.player-branding'
 import { Route as ApiDevicesDeviceIdErrorLogsRouteImport } from './routes/api.devices.$deviceId.error-logs'
 import { Route as ApiDevicesDeviceIdHeartbeatRouteImport } from './routes/api.devices.$deviceId.heartbeat'
 import { Route as ApiDevicesDeviceIdManifestRouteImport } from './routes/api.devices.$deviceId.manifest'
@@ -177,6 +178,11 @@ const ApiDevicesPairRoute = ApiDevicesPairRouteImport.update({
   path: '/api/devices/pair',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiDevicesPlayerBrandingRoute = ApiDevicesPlayerBrandingRouteImport.update({
+  id: '/api/devices/player-branding',
+  path: '/api/devices/player-branding',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiDevicesDeviceIdErrorLogsRoute =
   ApiDevicesDeviceIdErrorLogsRouteImport.update({
     id: '/api/devices/$deviceId/error-logs',
@@ -236,6 +242,7 @@ export interface FileRoutesByFullPath {
   '/screens/$id': typeof ShellScreensIdRoute
   '/api/devices/activate': typeof ApiDevicesActivateRoute
   '/api/devices/pair': typeof ApiDevicesPairRoute
+  '/api/devices/player-branding': typeof ApiDevicesPlayerBrandingRoute
   '/campaigns/': typeof ShellCampaignsIndexRoute
   '/layouts/': typeof ShellLayoutsIndexRoute
   '/locations/': typeof ShellLocationsIndexRoute
@@ -270,6 +277,7 @@ export interface FileRoutesByTo {
   '/screens/$id': typeof ShellScreensIdRoute
   '/api/devices/activate': typeof ApiDevicesActivateRoute
   '/api/devices/pair': typeof ApiDevicesPairRoute
+  '/api/devices/player-branding': typeof ApiDevicesPlayerBrandingRoute
   '/campaigns': typeof ShellCampaignsIndexRoute
   '/layouts': typeof ShellLayoutsIndexRoute
   '/locations': typeof ShellLocationsIndexRoute
@@ -306,6 +314,7 @@ export interface FileRoutesById {
   '/_shell/screens/$id': typeof ShellScreensIdRoute
   '/api/devices/activate': typeof ApiDevicesActivateRoute
   '/api/devices/pair': typeof ApiDevicesPairRoute
+  '/api/devices/player-branding': typeof ApiDevicesPlayerBrandingRoute
   '/_shell/campaigns/': typeof ShellCampaignsIndexRoute
   '/_shell/layouts/': typeof ShellLayoutsIndexRoute
   '/_shell/locations/': typeof ShellLocationsIndexRoute
@@ -342,6 +351,7 @@ export interface FileRouteTypes {
     | '/screens/$id'
     | '/api/devices/activate'
     | '/api/devices/pair'
+    | '/api/devices/player-branding'
     | '/campaigns/'
     | '/layouts/'
     | '/locations/'
@@ -376,6 +386,7 @@ export interface FileRouteTypes {
     | '/screens/$id'
     | '/api/devices/activate'
     | '/api/devices/pair'
+    | '/api/devices/player-branding'
     | '/campaigns'
     | '/layouts'
     | '/locations'
@@ -411,6 +422,7 @@ export interface FileRouteTypes {
     | '/_shell/screens/$id'
     | '/api/devices/activate'
     | '/api/devices/pair'
+    | '/api/devices/player-branding'
     | '/_shell/campaigns/'
     | '/_shell/layouts/'
     | '/_shell/locations/'
@@ -433,6 +445,7 @@ export interface RootRouteChildren {
   ApiAuthLoginAttemptRoute: typeof ApiAuthLoginAttemptRoute
   ApiDevicesActivateRoute: typeof ApiDevicesActivateRoute
   ApiDevicesPairRoute: typeof ApiDevicesPairRoute
+  ApiDevicesPlayerBrandingRoute: typeof ApiDevicesPlayerBrandingRoute
   ApiDevicesDeviceIdErrorLogsRoute: typeof ApiDevicesDeviceIdErrorLogsRoute
   ApiDevicesDeviceIdHeartbeatRoute: typeof ApiDevicesDeviceIdHeartbeatRoute
   ApiDevicesDeviceIdManifestRoute: typeof ApiDevicesDeviceIdManifestRoute
@@ -632,6 +645,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiDevicesPairRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/devices/player-branding': {
+      id: '/api/devices/player-branding'
+      path: '/api/devices/player-branding'
+      fullPath: '/api/devices/player-branding'
+      preLoaderRoute: typeof ApiDevicesPlayerBrandingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/devices/$deviceId/error-logs': {
       id: '/api/devices/$deviceId/error-logs'
       path: '/api/devices/$deviceId/error-logs'
@@ -732,6 +752,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAuthLoginAttemptRoute: ApiAuthLoginAttemptRoute,
   ApiDevicesActivateRoute: ApiDevicesActivateRoute,
   ApiDevicesPairRoute: ApiDevicesPairRoute,
+  ApiDevicesPlayerBrandingRoute: ApiDevicesPlayerBrandingRoute,
   ApiDevicesDeviceIdErrorLogsRoute: ApiDevicesDeviceIdErrorLogsRoute,
   ApiDevicesDeviceIdHeartbeatRoute: ApiDevicesDeviceIdHeartbeatRoute,
   ApiDevicesDeviceIdManifestRoute: ApiDevicesDeviceIdManifestRoute,

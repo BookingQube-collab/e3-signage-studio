@@ -12,6 +12,8 @@ export const RATE_LIMITS = {
   heartbeat: { limit: 30, windowSeconds: 5 * 60 },
   playback: { limit: 40, windowSeconds: 5 * 60 },
   errorLogs: { limit: 40, windowSeconds: 5 * 60 },
+  /** Unpaired TVs polling org logo / waiting-screen assets. */
+  playerBranding: { limit: 60, windowSeconds: 5 * 60 },
 } as const satisfies Record<string, RateLimitRule>;
 
 export type RateLimitName = keyof typeof RATE_LIMITS;

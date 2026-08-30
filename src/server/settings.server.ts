@@ -452,6 +452,77 @@ export async function getPublicBranding(): Promise<PublicBrandingDto> {
   };
 }
 
+export type PublicPlayerBrandingDto = {
+  /** Org waiting-screen config (logo mode + optional full-bleed image + brand icon). */
+  waitingScreen: DeviceWaitingScreenPayload;
+  /**
+   * CMS logo as a downloadable asset for the unpaired pairing screen.
+   * Used when waiting brand is FULL_LOGO (or as a fallback mark).
+   */
+  logo: DeviceBrandAssetPayload | null;
+  brandingConfigVersion: number;
+  waitingConfigVersion: number;
+};
+
+/**
+ * Unauthenticated branding for TV players before pairing.
+ * Uses the default (first) organization — same resolution as getPublicBranding.
+ */
+export async function getPublicPlayerBranding(): Promise<PublicPlayerBrandingDto> {
+  const admin = getServiceRoleClient();
+  const organizationId = await resolveDefaultOrganizationId(admin);
+  const emptyWaiting = (configVersion = 1): DeviceWaitingScreenPayload => ({
+    brand: "FULL_LOGO",
+    mediaId: null,
+    version: null,
+    checksum: null,
+    fileSize: null,
+    mimeType: null,
+    downloadUrl: null,
+    title: null,
+    message: null,
+    configVersion,
+    brandIcon: null,
+  });
+
+  if (!organizationId) {
+    return {
+      waitingScreen: emptyWaiting(),
+      logo: null,
+      brandingConfigVersion: 1,
+      waitingConfigVersion: 1,
+    };
+  }
+
+  const [{ data: brandingRow }, waitingScreen] = await Promise.all([
+    admin
+      .from("organization_settings")
+      .select("cms_logo_media_id, branding_config_version, waiting_config_version")
+      .eq("organization_id", organizationId)
+      .maybeSingle(),
+    loadDeviceWaitingScreen(admin, organizationId, null),
+  ]);
+
+  const row = brandingRow as {
+    cms_logo_media_id?: string | null;
+    branding_config_version?: number | null;
+    waiting_config_version?: number | null;
+  } | null;
+
+  const logo = await resolveDownloadableImageAsset(
+    admin,
+    organizationId,
+    asNullableString(row?.cms_logo_media_id),
+  );
+
+  return {
+    waitingScreen,
+    logo,
+    brandingConfigVersion: Math.max(1, asNumber(row?.branding_config_version, 1)),
+    waitingConfigVersion: Math.max(1, asNumber(row?.waiting_config_version, 1)),
+  };
+}
+
 async function resolveDownloadableImageAsset(
   admin: ReturnType<typeof getServiceRoleClient>,
   organizationId: string,

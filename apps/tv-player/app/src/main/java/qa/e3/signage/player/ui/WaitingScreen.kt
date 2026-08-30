@@ -61,6 +61,8 @@ data class WaitingOverrides(
     val localImagePath: String? = null,
     /** Synced in-app brand icon; used when brand is ICON. Not the APK launcher icon. */
     val localBrandIconPath: String? = null,
+    /** CMS logo for FULL_LOGO mark when present. */
+    val localLogoPath: String? = null,
     val title: String? = null,
     val message: String? = null,
 )
@@ -165,7 +167,7 @@ fun WaitingScreen(kind: WaitingKind, overrides: WaitingOverrides = WaitingOverri
         } else {
             E3BrandStage {
                 WaitingCopyColumn(copy, quip, showTextBrand = false) {
-                    WaitingBrandMark(brand, overrides.localBrandIconPath)
+                    WaitingBrandMark(brand, overrides.localBrandIconPath, overrides.localLogoPath)
                 }
             }
         }
@@ -173,23 +175,28 @@ fun WaitingScreen(kind: WaitingKind, overrides: WaitingOverrides = WaitingOverri
 }
 
 @Composable
-private fun WaitingBrandMark(brand: WaitingScreenBrand, localBrandIconPath: String?) {
-    val useCustomIcon =
-        brand == WaitingScreenBrand.ICON && !localBrandIconPath.isNullOrBlank()
-    var iconBitmap by remember(localBrandIconPath, useCustomIcon) {
+private fun WaitingBrandMark(brand: WaitingScreenBrand, localBrandIconPath: String?, localLogoPath: String? = null) {
+    val preferIcon = brand == WaitingScreenBrand.ICON
+    val imagePath =
+        when {
+            preferIcon && !localBrandIconPath.isNullOrBlank() -> localBrandIconPath
+            !localLogoPath.isNullOrBlank() -> localLogoPath
+            !localBrandIconPath.isNullOrBlank() -> localBrandIconPath
+            else -> null
+        }
+    var iconBitmap by remember(imagePath) {
         mutableStateOf<android.graphics.Bitmap?>(null)
     }
-    LaunchedEffect(localBrandIconPath, useCustomIcon) {
+    LaunchedEffect(imagePath) {
         iconBitmap = withContext(Dispatchers.IO) {
-            if (!useCustomIcon) return@withContext null
-            val path = localBrandIconPath ?: return@withContext null
+            val path = imagePath ?: return@withContext null
             val file = File(path)
             if (file.isFile) BitmapFactory.decodeFile(file.path) else null
         }
     }
 
-    val maxHeight = if (brand == WaitingScreenBrand.ICON) 140.dp else 120.dp
-    if (useCustomIcon && iconBitmap != null) {
+    val maxHeight = if (preferIcon) 140.dp else 120.dp
+    if (iconBitmap != null) {
         Image(
             bitmap = iconBitmap!!.asImageBitmap(),
             contentDescription = "Brand",
@@ -203,7 +210,7 @@ private fun WaitingBrandMark(brand: WaitingScreenBrand, localBrandIconPath: Stri
     }
 
     val resId =
-        if (brand == WaitingScreenBrand.ICON) R.drawable.e3_icon else R.drawable.e3_full_logo
+        if (preferIcon) R.drawable.e3_icon else R.drawable.e3_full_logo
     Image(
         painter = painterResource(resId),
         contentDescription = "E3",

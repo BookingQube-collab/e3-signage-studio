@@ -5,6 +5,9 @@ interface DeviceApi {
 
     suspend fun activate(request: ActivateRequest): ActivateResponse
 
+    /** Org waiting-screen + CMS logo for unpaired pairing UI (no device token). */
+    suspend fun playerBranding(): PublicPlayerBrandingResponse
+
     suspend fun syncStatus(deviceId: String, bearerToken: String): SyncStatusResponse
 
     suspend fun manifest(deviceId: String, bearerToken: String): ContentManifest

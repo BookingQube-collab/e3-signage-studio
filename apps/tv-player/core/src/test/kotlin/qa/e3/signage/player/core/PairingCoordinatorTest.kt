@@ -43,6 +43,10 @@ class FakeDeviceApi : DeviceApi {
         return activateQueue.removeFirst()
     }
 
+    override suspend fun playerBranding(): PublicPlayerBrandingResponse {
+        error("not used in pairing tests")
+    }
+
     override suspend fun syncStatus(deviceId: String, bearerToken: String): SyncStatusResponse {
         error("not used in pairing tests")
     }

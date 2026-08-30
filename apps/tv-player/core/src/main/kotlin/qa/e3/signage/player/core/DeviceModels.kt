@@ -84,6 +84,18 @@ data class SyncStatusResponse(
     val waitingScreen: WaitingScreenConfig? = null,
 )
 
+/**
+ * Unauthenticated org branding for the unpaired pairing screen.
+ * Fetched from GET /api/devices/player-branding before the device has a token.
+ */
+@Serializable
+data class PublicPlayerBrandingResponse(
+    val waitingScreen: WaitingScreenConfig,
+    val logo: DeviceBrandAsset? = null,
+    val brandingConfigVersion: Int = 0,
+    val waitingConfigVersion: Int = 0,
+)
+
 @Serializable
 data class SyncConfirmationRequest(
     val manifestVersion: Int,
