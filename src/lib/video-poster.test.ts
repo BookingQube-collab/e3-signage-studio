@@ -3,7 +3,9 @@ import test from "node:test";
 
 import {
   isImageStillUrl,
+  seekVideoToClipLoopStart,
   seekVideoToStillFrame,
+  videoClipLoopWindow,
   videoPreviewNeedsHydration,
   videoStillNeedsHydration,
 } from "./video-poster.ts";
@@ -98,4 +100,22 @@ test("seekVideoToStillFrame is a no-op before metadata is available", () => {
   };
   seekVideoToStillFrame(video);
   assert.equal(video.currentTime, 0);
+});
+
+test("videoClipLoopWindow uses a ~3s window from the still seek point", () => {
+  assert.deepEqual(videoClipLoopWindow(60), { start: 2.5, end: 5.5 });
+});
+
+test("videoClipLoopWindow plays the full clip when shorter than the loop", () => {
+  assert.deepEqual(videoClipLoopWindow(2), { start: 0, end: 1.95 });
+});
+
+test("seekVideoToClipLoopStart jumps to the loop window start", () => {
+  const video = {
+    readyState: 1,
+    duration: 40,
+    currentTime: 0,
+  };
+  seekVideoToClipLoopStart(video);
+  assert.equal(video.currentTime, 2.5);
 });

@@ -294,7 +294,10 @@ type NowPlayingPreview = {
   previewUrl: string | null;
 };
 
-/** Sign image/poster thumbs for currently-playing media on screen cards (not full video files). */
+/**
+ * Sign posters + playable preview URLs for currently-playing media on screen cards.
+ * Video files are included so cards can mute-loop a short clip (unique now-playing set is small).
+ */
 async function loadNowPlayingPreviews(
   client: ReturnType<typeof getUserClient>,
   mediaIds: string[],
@@ -339,16 +342,18 @@ async function loadNowPlayingPreviews(
     const isImage = mime.startsWith("image/");
     const thumbnailKey =
       asNullableString(current?.["thumbnail_key"]) ?? (isImage ? previewKey : null);
-    keys.push(...mediaKeysToSign({ previewKey, thumbnailKey, isImage, signAllPreviews: false }));
+    keys.push(...mediaKeysToSign({ previewKey, thumbnailKey, isImage, signAllPreviews: true }));
     return { id, name: asString(row["name"]), type, previewKey, thumbnailKey, isImage };
   });
 
   const urls = await createObjectDownloadUrls(keys);
   for (const item of picked) {
     const thumbnailUrl = item.thumbnailKey ? (urls.get(item.thumbnailKey) ?? null) : null;
-    const previewUrl = item.isImage
-      ? (thumbnailUrl ?? (item.previewKey ? (urls.get(item.previewKey) ?? null) : null))
-      : null;
+    const previewUrl = item.previewKey
+      ? (urls.get(item.previewKey) ?? null)
+      : item.isImage
+        ? thumbnailUrl
+        : null;
     out.set(item.id, {
       name: item.name,
       type: item.type,

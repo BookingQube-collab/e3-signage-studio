@@ -88,7 +88,7 @@ export function E3ScreenCard({
           style={{ aspectRatio: SCREEN_CARD_THUMB_ASPECT }}
         >
           {playing ? (
-            <MediaThumb item={playing} className="size-full rounded-none" />
+            <MediaThumb item={playing} clipLoop className="size-full rounded-none" />
           ) : (
             <div className="flex size-full flex-col items-center justify-center gap-1.5 px-3 text-muted-foreground">
               <MonitorPlay className="size-8 opacity-40" aria-hidden />
