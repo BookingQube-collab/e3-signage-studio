@@ -46,6 +46,10 @@ Current player version: **0.15.0** (`versionCode` 15).
 3. Open **E3 Signage** from Apps. Enter the 6-digit pairing code in the CMS **Pair a screen** dialog.
 4. After a version bump, uninstall the previous player if Android refuses the upgrade, then sideload. Pairing tokens stay valid until the 7-day rotation window. To pick up a new launcher icon, uninstall the old APK first — Android TV often keeps a cached generic icon across `-r` reinstalls.
 
+### CMS direct download
+
+Super Admins can open **Settings → Player** for **Download APK** / **Copy direct URL**. The same controls appear in **Pair a screen**. Set `PLAYER_APK_URL` (or `VITE_PLAYER_APK_URL`) to a public HTTPS URL (R2/CDN) or a site path such as `/downloads/e3-signage-player.apk` if the file is under `public/downloads/`.
+
 ### Android signage box
 
 Same APK. Use the vendor’s file installer or `adb`. Confirm the box can install unknown sources and that the CMS HTTPS host is reachable on that LAN.

@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { PlayerApkDownloadCard } from "@/features/screens/PlayerApkDownloadCard";
 import { DEFAULT_PUBLIC_CMS_URL, getPublicCmsUrl } from "@/lib/cms-settings";
 import { invalidateKeysInBackground, upsertById, writeEntityCache } from "@/lib/query-cache";
 import { locationService, screenGroupService, screenService } from "@/services";
@@ -167,6 +168,7 @@ export function PairScreenDialog({
               the TV.
             </p>
           </div>
+          <PlayerApkDownloadCard compact />
         </div>
       ) : (
         <div className="max-h-[55vh] space-y-4 overflow-y-auto pr-1">

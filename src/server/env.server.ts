@@ -10,6 +10,8 @@
  * Public config returns url + anon/publishable only — never service/secret keys.
  */
 
+import { normalizePlayerApkUrl } from "../lib/player-apk.ts";
+
 export type ServerEnv = {
   supabaseUrl: string | undefined;
   supabaseAnonKey: string | undefined;
@@ -23,6 +25,11 @@ export type ServerEnv = {
   cloudStorageQuotaBytes: string | undefined;
   mediaMaxImageBytes: string | undefined;
   mediaMaxVideoBytes: string | undefined;
+  /**
+   * Public HTTPS URL (or site-relative path) for the Android TV player APK.
+   * Prefer hosting on R2/CDN; optional fallback: file under `public/downloads/`.
+   */
+  playerApkUrl: string | undefined;
 };
 
 export type PublicSupabaseConfig = {
@@ -222,6 +229,11 @@ function readFirst(aliases: KeyParts[]): string | undefined {
   return undefined;
 }
 
+const PLAYER_APK_URL_KEYS: KeyParts[] = [
+  ["PLAYER", "APK", "URL"],
+  ["VITE", "PLAYER", "APK", "URL"],
+];
+
 export function getServerEnv(): ServerEnv {
   return {
     supabaseUrl: readFirst(SUPABASE_URL_KEYS),
@@ -235,7 +247,13 @@ export function getServerEnv(): ServerEnv {
     cloudStorageQuotaBytes: readEnvValue(envName(["CLOUD", "STORAGE", "QUOTA", "BYTES"])),
     mediaMaxImageBytes: readEnvValue(envName(["MEDIA", "MAX", "IMAGE", "BYTES"])),
     mediaMaxVideoBytes: readEnvValue(envName(["MEDIA", "MAX", "VIDEO", "BYTES"])),
+    playerApkUrl: readFirst(PLAYER_APK_URL_KEYS),
   };
+}
+
+/** Configured Android TV player APK URL (absolute or site-relative path). */
+export function getPlayerApkUrl(): string | null {
+  return normalizePlayerApkUrl(getServerEnv().playerApkUrl);
 }
 
 /** Public browser config only — never includes the service role / secret key. */

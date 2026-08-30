@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
+import type { PlayerApkInfo } from "@/lib/player-apk";
 import type { OrganizationSettingsDto } from "@/server/settings.server";
 import { WAITING_SCREEN_BRANDS } from "@e3/shared-types";
 
@@ -12,6 +13,13 @@ export const getOrganizationSettingsFn = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<OrganizationSettingsDto> => {
     const { getOrganizationSettings } = await import("@/server/settings.server");
     return getOrganizationSettings(data.accessToken);
+  });
+
+export const getPlayerApkDownloadFn = createServerFn({ method: "POST" })
+  .validator(accessTokenSchema)
+  .handler(async ({ data }): Promise<PlayerApkInfo> => {
+    const { getPlayerApkDownload } = await import("@/server/settings.server");
+    return getPlayerApkDownload(data.accessToken);
   });
 
 export const updateWaitingScreenSettingsFn = createServerFn({ method: "POST" })

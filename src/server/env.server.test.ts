@@ -14,6 +14,8 @@ const KEYS = [
   ["NEXT", "PUBLIC", "SUPABASE", "PUBLISHABLE", "KEY"],
   ["SUPABASE", "SERVICE", "ROLE", "KEY"],
   ["SUPABASE", "SECRET", "KEY"],
+  ["PLAYER", "APK", "URL"],
+  ["VITE", "PLAYER", "APK", "URL"],
 ] as const;
 
 function name(parts: readonly string[]): string {
@@ -69,6 +71,25 @@ test("service role accepts SUPABASE_SECRET_KEY and stays off public config", () 
       const pub = getPublicSupabaseConfig();
       assert.deepEqual(pub, { url: "https://example.supabase.co", anonKey: "anon" });
       assert.equal(JSON.stringify(pub).includes("super-secret-service-role"), false);
+    },
+  );
+});
+
+test("player APK URL reads PLAYER_APK_URL and VITE_PLAYER_APK_URL", () => {
+  withEnv(
+    {
+      [name(["PLAYER", "APK", "URL"])]: "https://cdn.example/e3-signage-player.apk",
+    },
+    () => {
+      assert.equal(getServerEnv().playerApkUrl, "https://cdn.example/e3-signage-player.apk");
+    },
+  );
+  withEnv(
+    {
+      [name(["VITE", "PLAYER", "APK", "URL"])]: "/downloads/e3-signage-player.apk",
+    },
+    () => {
+      assert.equal(getServerEnv().playerApkUrl, "/downloads/e3-signage-player.apk");
     },
   );
 });

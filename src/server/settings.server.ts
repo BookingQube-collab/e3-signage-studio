@@ -1,7 +1,9 @@
 import type { WaitingScreenBrand } from "@e3/shared-types";
 import { WAITING_SCREEN_BRANDS } from "@e3/shared-types";
 
+import type { PlayerApkInfo } from "@/lib/player-apk";
 import { requireCmsPermission } from "@/server/auth.server";
+import { getPlayerApkUrl, primeNitroRuntimeConfig } from "@/server/env.server";
 import { DOWNLOAD_URL_TTL_SECONDS, createObjectDownloadUrls } from "@/server/storage.server";
 import { getServiceRoleClient, getUserClient } from "@/server/supabase.server";
 
@@ -282,6 +284,14 @@ export async function getOrganizationSettings(accessToken: string): Promise<Orga
   if (error) throw new Error(error.message || "Could not load organization settings.");
 
   return buildOrganizationSettingsDto(data as OrgSettingsRow | null);
+}
+
+/** APK download URL for CMS staff (settings or screens). Not a secret. */
+export async function getPlayerApkDownload(accessToken: string): Promise<PlayerApkInfo> {
+  await requireCmsPermission(accessToken, "screens.view");
+  await primeNitroRuntimeConfig();
+  const url = getPlayerApkUrl();
+  return { url, configured: url != null };
 }
 
 export async function updateWaitingScreenSettings(

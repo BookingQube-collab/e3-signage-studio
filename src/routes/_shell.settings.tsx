@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { MediaPicker } from "@/features/media/MediaPicker";
+import { PlayerApkDownloadCard } from "@/features/screens/PlayerApkDownloadCard";
 import {
   DEFAULT_CMS_SETTINGS,
   DEFAULT_PUBLIC_CMS_URL,
@@ -87,7 +88,7 @@ export const Route = createFileRoute("/_shell/settings")({
   component: SettingsPage,
 });
 
-const TABS = ["Organization", "Branding", "Playback", "Sync", "Notifications"] as const;
+const TABS = ["Organization", "Branding", "Playback", "Player", "Sync", "Notifications"] as const;
 
 function SettingsPage() {
   const { auth } = Route.useRouteContext();
@@ -339,15 +340,17 @@ function SettingsEditor({ canManage }: { canManage: boolean }) {
         title="Settings"
         description="Network-wide defaults for the E3 signage admin panel and TV players."
         actions={
-          <E3Button
-            variant="primary"
-            onClick={save}
-            disabled={
-              ((tab === "Playback" || tab === "Branding") && !canManage) || saving
-            }
-          >
-            {saving ? "Saving…" : "Save changes"}
-          </E3Button>
+          tab === "Player" ? null : (
+            <E3Button
+              variant="primary"
+              onClick={save}
+              disabled={
+                ((tab === "Playback" || tab === "Branding") && !canManage) || saving
+              }
+            >
+              {saving ? "Saving…" : "Save changes"}
+            </E3Button>
+          )
         }
       />
 
@@ -503,6 +506,18 @@ function SettingsEditor({ canManage }: { canManage: boolean }) {
                   setApkIconName(null);
                 }}
               />
+            </div>
+          ) : null}
+
+          {tab === "Player" ? (
+            <div className="space-y-5">
+              <p className="text-sm text-muted-foreground">
+                Sideload the Android TV player without USB or Play Store. Host the APK on R2/CDN (or
+                under <code className="rounded bg-muted px-1 py-0.5 text-xs">public/downloads/</code>
+                ) and set <code className="rounded bg-muted px-1 py-0.5 text-xs">PLAYER_APK_URL</code>{" "}
+                on the server.
+              </p>
+              <PlayerApkDownloadCard />
             </div>
           ) : null}
 
