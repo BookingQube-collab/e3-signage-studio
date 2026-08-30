@@ -30,6 +30,28 @@ fun playlistSequenceKey(playlist: ManifestPlaylist?): String {
     }
 }
 
+/** Stable key for layout zones so geometry/content edits refresh without relying on playlists. */
+fun layoutsSequenceKey(layouts: List<ManifestLayout>): String =
+    layouts.joinToString(";") { layout ->
+        val zones = layout.zones.joinToString("|") { zone ->
+            listOf(
+                zone.id,
+                zone.type.name,
+                zone.x.toString(),
+                zone.y.toString(),
+                zone.width.toString(),
+                zone.height.toString(),
+                zone.fit.name,
+                zone.contentRef.orEmpty(),
+            ).joinToString(":")
+        }
+        "${layout.id}:${layout.width}x${layout.height}:${layout.background}:$zones"
+    }
+
+/** Stable key for downloaded asset ids/versions (layout media swaps). */
+fun assetsSequenceKey(assets: List<ManifestAsset>): String =
+    assets.sortedBy { it.id }.joinToString("|") { "${it.id}:${it.version}:${it.checksum}" }
+
 /** Stable key for schedule windows so Ongoing/date edits refresh without a version bump. */
 fun scheduleWindowsKey(schedules: List<ManifestSchedule>): String =
     schedules.joinToString(";") { schedule ->

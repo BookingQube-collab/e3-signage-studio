@@ -22,6 +22,8 @@ import qa.e3.signage.player.core.planDownloads
 import qa.e3.signage.player.core.progressPercent
 import qa.e3.signage.player.core.pruneUnusedStorage
 import qa.e3.signage.player.core.playlistSequenceKey
+import qa.e3.signage.player.core.assetsSequenceKey
+import qa.e3.signage.player.core.layoutsSequenceKey
 import qa.e3.signage.player.core.scheduleWindowsKey
 import qa.e3.signage.player.core.shouldFetchManifest
 import qa.e3.signage.player.core.versionedManifestFile
@@ -88,11 +90,20 @@ class PackageSyncCoordinator(
             val incomingPlaylistKey = playlistSequenceKey(manifest.playlist)
             val activeScheduleKey = active?.let { scheduleWindowsKey(it.schedules) }
             val incomingScheduleKey = scheduleWindowsKey(manifest.schedules)
+            val activeLayoutsKey = active?.let { layoutsSequenceKey(it.layouts) }
+            val incomingLayoutsKey = layoutsSequenceKey(manifest.layouts)
+            val activeAssetsKey = active?.let { assetsSequenceKey(it.assets) }
+            val incomingAssetsKey = assetsSequenceKey(manifest.assets)
             val refreshSameVersion =
                 status.syncRequested &&
-                    (activePlaylistKey != incomingPlaylistKey || activeScheduleKey != incomingScheduleKey)
+                    (
+                        activePlaylistKey != incomingPlaylistKey ||
+                            activeScheduleKey != incomingScheduleKey ||
+                            activeLayoutsKey != incomingLayoutsKey ||
+                            activeAssetsKey != incomingAssetsKey
+                        )
             if (refreshSameVersion) {
-                Log.i(TAG, "same version but playlist/schedule changed; refreshing ACTIVE package")
+                Log.i(TAG, "same version but content changed; refreshing ACTIVE package")
                 val path = packages.writeManifestFile(manifest).canonicalPath
                 packages.persistPackage(manifest.manifestVersion, ContentPackageState.READY, path)
                 activate(live, manifest, path)

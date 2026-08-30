@@ -176,7 +176,7 @@ export function LayoutBuilder({ initial }: { initial: Layout }) {
         listKey: ["layouts"],
         entity: l,
       });
-      toast.success(`${l.name || "Layout"} saved`);
+      toast.success(`${l.name || "Layout"} saved — live screens will sync within ~15s`);
       void navigate({ to: "/layouts" });
     },
     onError: (error) => {

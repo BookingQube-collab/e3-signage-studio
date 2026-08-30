@@ -14,8 +14,10 @@ import { connectivityFromHeartbeat } from "@/lib/connectivity";
 import { daysToNumbers, numbersToDays, uiTime } from "@/lib/schedule-days";
 import { toManifestAssets } from "@/lib/manifest-assets";
 import {
+  isLayoutZonesStale,
   isPlaylistSequenceStale,
   isPlaylistSnapshotStale,
+  type LayoutZoneSnapshot,
   type PlaylistSnapshotItem,
 } from "@/lib/playlist-snapshot";
 import {
@@ -437,6 +439,35 @@ async function collectPlaylistItems(
       })(),
       ...(audioMediaId ? { audioMediaId } : {}),
       ...(audioMediaVersionId ? { audioMediaVersionId } : {}),
+    };
+  });
+}
+
+async function collectLayoutZones(
+  client: UserClient,
+  layoutId: string | null,
+): Promise<LayoutZoneSnapshot[]> {
+  if (!layoutId || !isUuid(layoutId)) return [];
+  const { data, error } = await client
+    .from("layout_zones")
+    .select(
+      "id, type, content_ref, x_percent, y_percent, width_percent, height_percent, fit, sort_order",
+    )
+    .eq("layout_id", layoutId)
+    .order("sort_order");
+  throwIfError(error, "Could not load layout zones.");
+  return (data ?? []).map((raw, index) => {
+    const row = raw as Record<string, unknown>;
+    return {
+      id: asString(row["id"]),
+      type: asString(row["type"], "IMAGE"),
+      contentRef: asNullableString(row["content_ref"]),
+      xPercent: asNumber(row["x_percent"]),
+      yPercent: asNumber(row["y_percent"]),
+      widthPercent: asNumber(row["width_percent"]),
+      heightPercent: asNumber(row["height_percent"]),
+      fit: asString(row["fit"], "CONTAIN"),
+      sortOrder: asNumber(row["sort_order"], index),
     };
   });
 }
@@ -983,9 +1014,10 @@ async function writeManifestForScreen(
   screen: ScreenLite,
   winner: ContestRow,
 ): Promise<void> {
-  const [assets, playlistItems] = await Promise.all([
+  const [assets, playlistItems, layoutZones] = await Promise.all([
     collectAssets(client, organizationId, winner.playlistId, winner.layoutId),
     collectPlaylistItems(client, winner.playlistId),
+    collectLayoutZones(client, winner.layoutId),
   ]);
   const { data: latest, error: latestError } = await admin
     .from("content_manifests")
@@ -1011,6 +1043,8 @@ async function writeManifestForScreen(
     },
     /** Frozen CMS order + transitions so devices do not depend on a later live DB read. */
     playlistItems,
+    /** Frozen layout zones so geometry/content edits bump a new package version. */
+    layoutZones,
     assets: assets.map((asset) => ({
       mediaId: asset.mediaId,
       mediaVersionId: asset.mediaVersionId,
@@ -1262,6 +1296,10 @@ async function frozenManifestSnapshot(
 ): Promise<{
   versionIds: string[];
   playlistItems: PlaylistSnapshotItem[];
+  layoutZones: LayoutZoneSnapshot[];
+  layoutId: string | null;
+  playlistId: string | null;
+  campaignId: string | null;
   schedule: ContestRow["schedule"] | null;
 }> {
   const { data: sync } = await admin
@@ -1286,19 +1324,51 @@ async function frozenManifestSnapshot(
       .maybeSingle();
     manifestId = asNullableString((latest as { id?: string } | null)?.id);
   }
-  if (!manifestId) return { versionIds: [], playlistItems: [], schedule: null };
+  if (!manifestId) {
+    return {
+      versionIds: [],
+      playlistItems: [],
+      layoutZones: [],
+      layoutId: null,
+      playlistId: null,
+      campaignId: null,
+      schedule: null,
+    };
+  }
 
   const [{ data: rows }, { data: manifestRow }] = await Promise.all([
     admin.from("manifest_assets").select("media_version_id").eq("manifest_id", manifestId),
-    admin.from("content_manifests").select("payload").eq("id", manifestId).maybeSingle(),
+    admin.from("content_manifests").select("payload, campaign_id").eq("id", manifestId).maybeSingle(),
   ]);
   const versionIds = (rows ?? []).map((row) =>
     asString((row as { media_version_id: string }).media_version_id),
   );
   const payload = (manifestRow as { payload?: unknown } | null)?.payload;
   const playlistItems = parseFrozenPlaylistItems(payload);
+  const layoutZones = parseFrozenLayoutZones(payload);
   const schedule = parseFrozenSchedule(payload);
-  return { versionIds, playlistItems, schedule };
+  const payloadLayoutId = parseFrozenContentId(payload, "layoutId");
+  const payloadPlaylistId = parseFrozenContentId(payload, "playlistId");
+  const payloadCampaignId = parseFrozenContentId(payload, "campaignId");
+  return {
+    versionIds,
+    playlistItems,
+    layoutZones,
+    layoutId: payloadLayoutId,
+    playlistId: payloadPlaylistId,
+    campaignId:
+      payloadCampaignId ??
+      asNullableString((manifestRow as { campaign_id?: string | null } | null)?.campaign_id),
+    schedule,
+  };
+}
+
+function parseFrozenContentId(
+  payload: unknown,
+  key: "layoutId" | "playlistId" | "campaignId",
+): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  return asNullableString((payload as Record<string, unknown>)[key]);
 }
 
 function parseFrozenSchedule(payload: unknown): ContestRow["schedule"] | null {
@@ -1343,6 +1413,26 @@ function parseFrozenPlaylistItems(payload: unknown): PlaylistSnapshotItem[] {
   });
 }
 
+function parseFrozenLayoutZones(payload: unknown): LayoutZoneSnapshot[] {
+  if (!payload || typeof payload !== "object") return [];
+  const raw = (payload as { layoutZones?: unknown }).layoutZones;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((entry, index) => {
+    const row = (entry ?? {}) as Record<string, unknown>;
+    return {
+      id: asString(row["id"]),
+      type: asString(row["type"], "IMAGE"),
+      contentRef: asNullableString(row["contentRef"]),
+      xPercent: asNumber(row["xPercent"]),
+      yPercent: asNumber(row["yPercent"]),
+      widthPercent: asNumber(row["widthPercent"]),
+      heightPercent: asNumber(row["heightPercent"]),
+      fit: asString(row["fit"], "CONTAIN"),
+      sortOrder: asNumber(row["sortOrder"], index),
+    };
+  });
+}
+
 /** Rebuild packages for live campaigns that use this playlist so screens get new items. */
 export async function republishScreensUsingPlaylist(
   accessToken: string,
@@ -1366,8 +1456,31 @@ export async function republishScreensUsingPlaylist(
   return screenIds.size;
 }
 
+/** Rebuild packages for live campaigns that use this layout so screens get zone edits. */
+export async function republishScreensUsingLayout(
+  accessToken: string,
+  layoutId: string,
+): Promise<number> {
+  if (!isUuid(layoutId)) return 0;
+  const auth = await requireCmsPermission(accessToken, "campaigns.view");
+  const client = getUserClient(accessToken);
+  const contest = await loadContest(client, auth.profile.organizationId);
+  const using = contest.filter((campaign) => campaign.layoutId === layoutId);
+  if (using.length === 0) return 0;
+  const screens = await loadOrgScreens(client, auth.profile.organizationId);
+  const groups = await loadGroups(client, auth.profile.organizationId);
+  const screenIds = new Set<string>();
+  for (const campaign of using) {
+    for (const id of resolveTargetScreenIds(campaign.targets, screens, groups)) {
+      screenIds.add(id);
+    }
+  }
+  await notifyScreens(accessToken, [...screenIds], {});
+  return screenIds.size;
+}
+
 /**
- * If the live playlist has new assets OR a different order/transition/duration than the
+ * If the live playlist/layout has new assets OR different order/zones than the
  * frozen package, bump a new manifest version so TVs pick up CMS edits.
  */
 export async function republishScreenIfPlaylistStale(
@@ -1383,9 +1496,10 @@ export async function republishScreenIfPlaylistStale(
   const contest = await loadContest(admin, organizationId);
   const winner = winnerForScreen(screen, contest, groups);
   if (!winner) return false;
-  const [liveAssets, livePlaylistItems, frozen] = await Promise.all([
+  const [liveAssets, livePlaylistItems, liveLayoutZones, frozen] = await Promise.all([
     collectAssets(admin, organizationId, winner.playlistId, winner.layoutId),
     collectPlaylistItems(admin, winner.playlistId),
+    collectLayoutZones(admin, winner.layoutId),
     frozenManifestSnapshot(admin, screenId),
   ]);
   const assetsStale = isPlaylistSnapshotStale(
@@ -1398,6 +1512,14 @@ export async function republishScreenIfPlaylistStale(
       ? // Older packages had no frozen sequence — republish once so order/transitions ship.
         livePlaylistItems.length > 0
       : isPlaylistSequenceStale(livePlaylistItems, frozen.playlistItems));
+  const layoutStale = isLayoutZonesStale(liveLayoutZones, frozen.layoutZones, {
+    layoutId: winner.layoutId,
+    frozenLayoutId: frozen.layoutId,
+  });
+  const identityStale =
+    (frozen.campaignId != null && frozen.campaignId !== winner.id) ||
+    (frozen.playlistId != null && frozen.playlistId !== (winner.playlistId ?? null)) ||
+    (frozen.layoutId != null && frozen.layoutId !== (winner.layoutId ?? null));
 
   const evergreen = !winner.schedule.startDate?.trim() && !winner.schedule.endDate?.trim();
   let evergreenHoursStale = false;
@@ -1439,7 +1561,7 @@ export async function republishScreenIfPlaylistStale(
     }
   }
 
-  if (!assetsStale && !sequenceStale && !evergreenHoursStale) {
+  if (!assetsStale && !sequenceStale && !layoutStale && !identityStale && !evergreenHoursStale) {
     return false;
   }
   await writeManifestForScreen(

@@ -33,6 +33,32 @@ class SyncPolicyTest {
     }
 
     @Test
+    fun layoutsSequenceKeyTracksZoneContent() {
+        val layout = ManifestLayout(
+            id = "lay",
+            width = 1920,
+            height = 1080,
+            background = "#000",
+            zones = listOf(
+                ManifestZone(
+                    id = "z1",
+                    type = ZoneKind.VIDEO,
+                    x = 0,
+                    y = 0,
+                    width = 1000,
+                    height = 1080,
+                    fit = FitMode.COVER,
+                    contentRef = "a.mp4",
+                ),
+            ),
+        )
+        val swapped = layout.copy(
+            zones = layout.zones.map { it.copy(contentRef = "b.mp4") },
+        )
+        assertNotEquals(layoutsSequenceKey(listOf(layout)), layoutsSequenceKey(listOf(swapped)))
+    }
+
+    @Test
     fun preparingNewerPackageShowsLoadingPath() {
         assertTrue(
             isPreparingNewerPackage(

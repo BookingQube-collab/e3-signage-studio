@@ -384,6 +384,19 @@ export async function saveLayout(
     throwIfError(jsonError, "Could not save layout pixel JSON.");
   }
 
+  if (isUuid(layoutId)) {
+    try {
+      const { republishScreensUsingLayout } = await import("./campaigns.server");
+      await republishScreensUsingLayout(accessToken, layoutId);
+    } catch (error) {
+      console.error(
+        "[layouts] republish after save failed",
+        layoutId,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
   const saved = await getLayout(accessToken, layoutId);
   if (!saved) throw new Error("Layout not found.");
   return saved;

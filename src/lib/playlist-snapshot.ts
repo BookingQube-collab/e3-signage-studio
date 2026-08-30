@@ -84,3 +84,48 @@ export function isPlaylistSnapshotStale(
   const frozen = new Set([...frozenVersionIds].filter(Boolean));
   return liveVersionIds.some((id) => Boolean(id) && !frozen.has(id));
 }
+
+/** Zone placement + content binding frozen into the published package. */
+export type LayoutZoneSnapshot = {
+  id: string;
+  type: string;
+  contentRef: string | null;
+  xPercent: number;
+  yPercent: number;
+  widthPercent: number;
+  heightPercent: number;
+  fit: string;
+  sortOrder: number;
+};
+
+/** Stable key for layout zone geometry + content refs. */
+export function layoutZonesFingerprint(zones: LayoutZoneSnapshot[]): string {
+  return [...zones]
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id))
+    .map((zone) =>
+      [
+        zone.id,
+        zone.type.trim().toUpperCase(),
+        zone.contentRef ?? "",
+        Number(zone.xPercent).toFixed(3),
+        Number(zone.yPercent).toFixed(3),
+        Number(zone.widthPercent).toFixed(3),
+        Number(zone.heightPercent).toFixed(3),
+        zone.fit.trim().toUpperCase(),
+        String(zone.sortOrder),
+      ].join(":"),
+    )
+    .join("|");
+}
+
+/** True when live layout zones differ from the frozen package (or older packages omitted zones). */
+export function isLayoutZonesStale(
+  liveZones: LayoutZoneSnapshot[],
+  frozenZones: LayoutZoneSnapshot[],
+  opts: { layoutId: string | null; frozenLayoutId: string | null },
+): boolean {
+  if ((opts.layoutId ?? null) !== (opts.frozenLayoutId ?? null)) return true;
+  if (!opts.layoutId) return false;
+  if (frozenZones.length === 0) return liveZones.length > 0;
+  return layoutZonesFingerprint(liveZones) !== layoutZonesFingerprint(frozenZones);
+}

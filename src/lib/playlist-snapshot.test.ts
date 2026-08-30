@@ -4,8 +4,10 @@ import test from "node:test";
 import { toManifestAssets } from "./manifest-assets.ts";
 import {
   bindPlaylistItemsToAssets,
+  isLayoutZonesStale,
   isPlaylistSequenceStale,
   isPlaylistSnapshotStale,
+  layoutZonesFingerprint,
   playlistSequenceFingerprint,
 } from "./playlist-snapshot.ts";
 
@@ -142,6 +144,41 @@ test("image soundtrack binds as a separate local file without dropping the image
       [{ mediaVersionId: "ver-rajan", durationSeconds: 10, transition: "FADE", audioMediaVersionId: "ver-bed" }],
       [{ mediaVersionId: "ver-rajan", durationSeconds: 10, transition: "FADE" }],
     ),
+    true,
+  );
+});
+
+test("layout zone fingerprint detects content and geometry edits", () => {
+  const a = {
+    id: "z1",
+    type: "VIDEO",
+    contentRef: "media-a",
+    xPercent: 0,
+    yPercent: 0,
+    widthPercent: 70,
+    heightPercent: 100,
+    fit: "COVER",
+    sortOrder: 0,
+  };
+  const b = { ...a, contentRef: "media-b" };
+  const c = { ...a, widthPercent: 50 };
+  assert.equal(layoutZonesFingerprint([a]), layoutZonesFingerprint([{ ...a }]));
+  assert.notEqual(layoutZonesFingerprint([a]), layoutZonesFingerprint([b]));
+  assert.notEqual(layoutZonesFingerprint([a]), layoutZonesFingerprint([c]));
+  assert.equal(
+    isLayoutZonesStale([a], [a], { layoutId: "lay-1", frozenLayoutId: "lay-1" }),
+    false,
+  );
+  assert.equal(
+    isLayoutZonesStale([b], [a], { layoutId: "lay-1", frozenLayoutId: "lay-1" }),
+    true,
+  );
+  assert.equal(
+    isLayoutZonesStale([a], [], { layoutId: "lay-1", frozenLayoutId: "lay-1" }),
+    true,
+  );
+  assert.equal(
+    isLayoutZonesStale([a], [a], { layoutId: "lay-2", frozenLayoutId: "lay-1" }),
     true,
   );
 });
