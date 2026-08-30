@@ -114,7 +114,7 @@ function EmptyStage({ className, label }: { className?: string | undefined; labe
         }}
       >
         <div className="grid size-full place-items-center bg-black/40 px-4 text-center">
-          <p className="text-sm text-muted-foreground">{label}</p>
+          <p className="text-sm font-medium text-white/75">{label}</p>
         </div>
       </div>
     </div>

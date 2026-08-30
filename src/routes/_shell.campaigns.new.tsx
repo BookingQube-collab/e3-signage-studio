@@ -15,13 +15,21 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { TargetSelector } from "@/features/campaigns/TargetSelector";
+import { CampaignContentPicker } from "@/features/campaigns/CampaignContentPicker";
 import { CampaignContentPreview } from "@/features/campaigns/CampaignContentPreview";
+import { TargetSelector } from "@/features/campaigns/TargetSelector";
 import { cn } from "@/lib/utils";
 import { isEvergreenSchedule } from "@/lib/campaign-window";
 import { invalidateKeysInBackground, writeEntityCache } from "@/lib/query-cache";
 import { addDaysIso, localIsoDate } from "@/lib/schedule-days";
-import { campaignService, layoutService, locationService, playlistService, screenService } from "@/services";
+import {
+  campaignService,
+  layoutService,
+  locationService,
+  mediaService,
+  playlistService,
+  screenService,
+} from "@/services";
 import type { Campaign } from "@/types";
 
 export const Route = createFileRoute("/_shell/campaigns/new")({
@@ -134,13 +142,14 @@ function NewCampaignPage() {
   const title = mode === "edit" ? "Edit campaign" : mode === "duplicate" ? "Duplicate campaign" : "New campaign";
   const description =
     mode === "edit"
-      ? "Change name, schedule, screens or playlist, then save to republish the package."
+      ? "Change name, schedule, screens or content, then Save changes to republish. Layout/playlist edits also push a new package when you save those screens."
       : mode === "duplicate"
         ? "A new draft copied from an existing campaign."
         : "Six steps from content to published screens.";
 
   const playlists = useQuery({ queryKey: ["playlists"], queryFn: playlistService.list });
   const layouts = useQuery({ queryKey: ["layouts"], queryFn: layoutService.list });
+  const media = useQuery({ queryKey: ["media"], queryFn: mediaService.list });
   const locations = useQuery({ queryKey: ["locations"], queryFn: locationService.list });
   const screens = useQuery({ queryKey: ["screens"], queryFn: screenService.list });
 
@@ -211,10 +220,10 @@ function NewCampaignPage() {
     ),
   );
 
-  const contentOptions =
-    draft.contentType === "Playlist"
-      ? (playlists.data ?? []).map((p) => ({ id: p.id, name: p.name }))
-      : (layouts.data ?? []).map((l) => ({ id: l.id, name: l.name }));
+  const contentListLoading =
+    draft.contentType === "Playlist" ? playlists.isLoading : layouts.isLoading || media.isLoading;
+  const contentListError =
+    draft.contentType === "Playlist" ? playlists.isError : layouts.isError;
 
   const ongoing = isEvergreenSchedule(draft.schedule);
   const datedReady =
@@ -360,34 +369,34 @@ function NewCampaignPage() {
                       setDraft({ ...draft, contentType: t, contentId: "", contentName: "—" })
                     }
                     className={cn(
-                      "rounded-full border px-4 py-1.5 text-sm",
+                      "rounded-full border px-4 py-1.5 text-sm font-medium",
                       draft.contentType === t
                         ? "e3-gradient border-transparent text-white"
-                        : "border-border text-muted-foreground hover:bg-accent",
+                        : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
                     )}
                   >
                     {t}
                   </button>
                 ))}
               </div>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {contentOptions.map((o) => (
-                  <button
-                    key={o.id}
-                    type="button"
-                    onClick={() => setDraft({ ...draft, contentId: o.id, contentName: o.name })}
-                    className={cn(
-                      "rounded-xl border p-4 text-left text-sm transition-colors",
-                      draft.contentId === o.id
-                        ? "e3-gradient-border border-0 bg-card"
-                        : "border-border hover:bg-accent/50",
-                    )}
-                  >
-                    <span className="block truncate font-medium">{o.name}</span>
-                    <span className="text-xs text-muted-foreground">{draft.contentType}</span>
-                  </button>
-                ))}
-              </div>
+              <CampaignContentPicker
+                contentType={draft.contentType}
+                contentId={draft.contentId}
+                contentName={draft.contentName}
+                playlists={playlists.data ?? []}
+                layouts={layouts.data ?? []}
+                mediaLibrary={media.data ?? []}
+                isLoading={contentListLoading}
+                isError={contentListError}
+                onSelect={(id, name) => setDraft({ ...draft, contentId: id, contentName: name })}
+                onRetry={() => {
+                  if (draft.contentType === "Playlist") void playlists.refetch();
+                  else {
+                    void layouts.refetch();
+                    void media.refetch();
+                  }
+                }}
+              />
             </div>
           ) : null}
 
