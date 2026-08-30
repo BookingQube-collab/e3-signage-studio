@@ -56,11 +56,13 @@ class ZonePlanTest {
                 ManifestAsset("side-id", 1, MediaKind.IMAGE, "d".repeat(64), 1, "side.png", "image/png"),
             ),
         )
-        val plan = planZones(manifest, root, 1920, 1080)
+        val plan = planZones(manifest, root)
         assertTrue(plan.zones[0].source is ZoneSource.Playlist)
         val static = plan.zones[1].source as ZoneSource.StaticFile
         assertTrue(static.fileUri.startsWith("file:"))
         assertEquals(PlaylistItemKind.IMAGE, static.kind)
+        assertEquals(1280, plan.zones[0].rect.width)
+        assertEquals(640, plan.zones[1].rect.width)
     }
 
     @Test
@@ -96,13 +98,38 @@ class ZonePlanTest {
                 ManifestAsset("img2", 1, MediaKind.IMAGE, "c".repeat(64), 1, "rupert.jpeg", "image/jpeg"),
             ),
         )
-        val plan = planZones(manifest, root, 1920, 1080)
+        val plan = planZones(manifest, root)
         assertTrue(hasPlayableLayoutContent(plan))
         val main = plan.zones[0].source as ZoneSource.StaticFile
         assertEquals(PlaylistItemKind.VIDEO, main.kind)
         assertTrue(main.fileUri.startsWith("file:"))
         assertEquals(PlaylistItemKind.IMAGE, (plan.zones[1].source as ZoneSource.StaticFile).kind)
         assertEquals(PlaylistItemKind.IMAGE, (plan.zones[2].source as ZoneSource.StaticFile).kind)
+    }
+
+    @Test
+    fun portraitLayoutKeepsLayoutSpaceRects() {
+        val root = createTempDirectory("e3-portrait-zones").toFile()
+        val manifest = ContentManifest(
+            screenId = "s",
+            manifestVersion = 1,
+            configVersion = 1,
+            generatedAt = "2026-08-30T00:00:00Z",
+            playlist = ManifestPlaylist("p", 1, true, listOf(ManifestPlaylistItem("m", "v", 10.0, "CUT", "clip.mp4"))),
+            layouts = listOf(
+                ManifestLayout(
+                    "lay",
+                    1080,
+                    1920,
+                    "#000000",
+                    listOf(ManifestZone("main", ZoneKind.VIDEO, 0, 0, 1080, 1920, FitMode.COVER, null)),
+                ),
+            ),
+        )
+        val plan = planZones(manifest, root)
+        assertEquals(1080, plan.layoutWidth)
+        assertEquals(1920, plan.layoutHeight)
+        assertEquals(IntRect(0, 0, 1080, 1920), plan.zones[0].rect)
     }
 
     @Test
@@ -124,7 +151,7 @@ class ZonePlanTest {
                 ),
             ),
         )
-        val plan = planZones(manifest, root, 1920, 1080)
+        val plan = planZones(manifest, root)
         assertTrue(plan.zones[0].source is ZoneSource.Empty)
         assertFalse(hasPlayableLayoutContent(plan))
     }

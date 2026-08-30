@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -51,6 +52,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import qa.e3.signage.player.R
+import qa.e3.signage.player.core.DisplayOrientation
 import qa.e3.signage.player.core.FitMode
 import qa.e3.signage.player.core.ITEM_TRANSITION_MS
 import qa.e3.signage.player.core.ItemTransition
@@ -107,8 +109,10 @@ fun PlaybackScreen(state: PlaybackUiState, onVideoFinished: (Int, Boolean) -> Un
 }
 
 /**
- * Maps the published layout pixel canvas onto the oriented display frame so zones
- * fill portrait/landscape mounts instead of sitting as a tiny centered letterbox.
+ * Maps the published layout pixel canvas onto the oriented display frame at **100%**
+ * coverage (independent scaleX/scaleY). Uniform `min` scale letterboxed portrait mounts
+ * when the layout aspect differed; `requiredSize` prevents parent max-constraint clamping
+ * from shrinking the canvas before scale (same failure mode as DisplayOrientedFrame).
  */
 @Composable
 private fun ScaledLayoutCanvas(
@@ -119,22 +123,25 @@ private fun ScaledLayoutCanvas(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val lw = layoutWidth.coerceAtLeast(1)
         val lh = layoutHeight.coerceAtLeast(1)
-        val scale = minOf(
-            constraints.maxWidth / lw.toFloat(),
-            constraints.maxHeight / lh.toFloat(),
+        val fill = DisplayOrientation.layoutFillScale(
+            layoutWidth = lw,
+            layoutHeight = lh,
+            frameWidthPx = constraints.maxWidth,
+            frameHeightPx = constraints.maxHeight,
         )
         val density = LocalDensity.current
         Box(
             Modifier
                 .align(Alignment.Center)
-                .size(
+                .requiredSize(
                     with(density) { lw.toDp() },
                     with(density) { lh.toDp() },
                 )
                 .graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
+                    scaleX = fill.scaleX
+                    scaleY = fill.scaleY
                     transformOrigin = TransformOrigin.Center
+                    clip = false
                 },
         ) {
             content()

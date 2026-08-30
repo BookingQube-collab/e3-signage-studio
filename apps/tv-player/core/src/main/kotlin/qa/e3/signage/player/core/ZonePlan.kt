@@ -46,7 +46,7 @@ fun effectiveLayout(manifest: ContentManifest): ManifestLayout {
                 y = 0,
                 width = layout?.width?.takeIf { it > 0 } ?: 1920,
                 height = layout?.height?.takeIf { it > 0 } ?: 1080,
-                fit = FitMode.CONTAIN,
+                fit = FitMode.COVER,
                 contentRef = null,
             ),
         ),
@@ -67,17 +67,23 @@ fun scaleZone(zone: ManifestZone, layoutWidth: Int, layoutHeight: Int, screenWid
 fun planZones(
     manifest: ContentManifest,
     root: java.io.File,
-    screenWidth: Int,
-    screenHeight: Int,
 ): ZonePlan {
     val layout = effectiveLayout(manifest)
     val byFile = manifest.assets.associateBy { it.localFilename }
     val byId = manifest.assets.associateBy { it.id }
     val hasPlaylist = manifest.playlist?.items?.isNotEmpty() == true
+    // Keep zone rects in layout pixel space. [ScaledLayoutCanvas] maps the full canvas
+    // onto the oriented frame — scaling to physical landscape metrics here broke portrait
+    // (1080×1920 layout crushed onto 1920×1080 display metrics).
     val zones = layout.zones.map { zone ->
         PlannedZone(
             id = zone.id,
-            rect = scaleZone(zone, layout.width, layout.height, screenWidth, screenHeight),
+            rect = IntRect(
+                x = zone.x,
+                y = zone.y,
+                width = zone.width.coerceAtLeast(1),
+                height = zone.height.coerceAtLeast(1),
+            ),
             fit = zone.fit,
             source = sourceFor(zone, hasPlaylist, byFile, byId, root),
         )

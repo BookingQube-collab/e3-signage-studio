@@ -4,6 +4,7 @@ import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import qa.e3.signage.player.core.DisplayOrientation
 
 /**
  * Persists CMS screen orientation so the player can apply full-bleed software rotation
@@ -35,46 +36,17 @@ class ScreenDisplayStore(context: Context) {
     companion object {
         private const val PREFS = "e3_screen_display"
         private const val KEY_ORIENTATION = "orientation"
-        const val LANDSCAPE = "LANDSCAPE"
-        const val PORTRAIT = "PORTRAIT"
-        const val LANDSCAPE_UPSIDE_DOWN = "LANDSCAPE_UPSIDE_DOWN"
-        const val PORTRAIT_UPSIDE_DOWN = "PORTRAIT_UPSIDE_DOWN"
+        const val LANDSCAPE = DisplayOrientation.LANDSCAPE
+        const val PORTRAIT = DisplayOrientation.PORTRAIT
+        const val LANDSCAPE_UPSIDE_DOWN = DisplayOrientation.LANDSCAPE_UPSIDE_DOWN
+        const val PORTRAIT_UPSIDE_DOWN = DisplayOrientation.PORTRAIT_UPSIDE_DOWN
 
-        fun normalize(raw: String?): String {
-            val value = raw?.trim()?.uppercase().orEmpty()
-            return when (value) {
-                PORTRAIT -> PORTRAIT
-                PORTRAIT_UPSIDE_DOWN,
-                "PORTRAIT_REVERSE",
-                "REVERSE_PORTRAIT",
-                "PORTRAIT_INVERTED",
-                -> PORTRAIT_UPSIDE_DOWN
-                LANDSCAPE_UPSIDE_DOWN,
-                "LANDSCAPE_REVERSE",
-                "REVERSE_LANDSCAPE",
-                "LANDSCAPE_INVERTED",
-                -> LANDSCAPE_UPSIDE_DOWN
-                else -> LANDSCAPE
-            }
-        }
+        fun normalize(raw: String?): String = DisplayOrientation.normalize(raw)
 
-        fun isPortrait(orientation: String): Boolean =
-            orientation == PORTRAIT || orientation == PORTRAIT_UPSIDE_DOWN
+        fun isPortrait(orientation: String): Boolean = DisplayOrientation.isPortrait(orientation)
 
-        /** True when the child must lay out at swapped (height × width) before rotating. */
-        fun swapsAxes(orientation: String): Boolean =
-            when (normalize(orientation)) {
-                PORTRAIT, PORTRAIT_UPSIDE_DOWN -> true
-                else -> false
-            }
+        fun swapsAxes(orientation: String): Boolean = DisplayOrientation.swapsAxes(orientation)
 
-        /** Compose rotationZ degrees for [DisplayOrientedFrame] (clockwise). */
-        fun rotationDegrees(orientation: String): Float =
-            when (normalize(orientation)) {
-                PORTRAIT -> 270f
-                PORTRAIT_UPSIDE_DOWN -> 90f
-                LANDSCAPE_UPSIDE_DOWN -> 180f
-                else -> 0f
-            }
+        fun rotationDegrees(orientation: String): Float = DisplayOrientation.rotationDegrees(orientation)
     }
 }

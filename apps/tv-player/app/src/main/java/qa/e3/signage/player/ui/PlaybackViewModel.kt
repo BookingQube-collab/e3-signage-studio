@@ -140,8 +140,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 continue
             }
             val (manifest, root) = loaded
-            val metrics = app.resources.displayMetrics
-            val plan = planZones(manifest, root, metrics.widthPixels, metrics.heightPixels)
+            val plan = planZones(manifest, root)
             val activeSchedule = ScheduleEngine.selectActive(manifest.schedules)
             val tz = activeSchedule?.timezone
                 ?: manifest.schedules.firstOrNull()?.timezone
