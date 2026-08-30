@@ -44,11 +44,22 @@ export function toUiFolder(row: MediaFolderRecord): MediaFolder {
   };
 }
 
+function mediaTypeLabel(type: CanonicalMediaType | undefined): Media["type"] {
+  const label = type ? UI_LABELS.mediaType[type] : undefined;
+  return label === "Video" ||
+    label === "Image" ||
+    label === "QR" ||
+    label === "Logo" ||
+    label === "Audio"
+    ? label
+    : "Image";
+}
+
 export function toUiMedia(row: MediaRecord): Media {
   const media: Media = {
     id: row.id,
     filename: row.filename,
-    type: UI_LABELS.mediaType[row.type],
+    type: mediaTypeLabel(row.type),
     dimensions: row.dimensions,
     durationSec: row.durationSec,
     sizeMb: row.sizeMb,

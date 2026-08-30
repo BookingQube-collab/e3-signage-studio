@@ -1,5 +1,16 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, FileImage, FolderInput, MoreVertical, Pencil, PlayCircle, QrCode, Sparkles, Trash2 } from "lucide-react";
+import {
+  Check,
+  FileImage,
+  FolderInput,
+  MoreVertical,
+  Music,
+  Pencil,
+  PlayCircle,
+  QrCode,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type RefObject } from "react";
 
 import {
@@ -14,14 +25,20 @@ import { firstHttpUrl } from "@/lib/playlist-preview";
 import { cn } from "@/lib/utils";
 import { isImageStillUrl, seekVideoToStillFrame, videoStillNeedsHydration } from "@/lib/video-poster";
 import { mediaService } from "@/services";
-import type { Media } from "@/types";
+import type { Media, MediaType } from "@/types";
 
-const iconFor = {
+const iconFor: Record<MediaType, typeof FileImage> = {
   Video: PlayCircle,
   Image: FileImage,
   QR: QrCode,
   Logo: Sparkles,
-} as const;
+  Audio: Music,
+};
+
+/** Resolve a thumbnail icon for every media type — missing keys must never crash the library. */
+export function mediaTypeIcon(type: string) {
+  return iconFor[type as MediaType] ?? FileImage;
+}
 
 export function MediaThumb({
   item,
@@ -33,18 +50,23 @@ export function MediaThumb({
   playback?: boolean;
 }) {
   const { media: resolved, rootRef } = useHydratedVideoStill(item);
-  const Icon = iconFor[resolved.type];
+  const Icon = mediaTypeIcon(resolved.type);
+  const isAudio = resolved.type === "Audio";
   const poster = firstHttpUrl(resolved.thumbnailUrl);
   const videoSrc =
     resolved.type === "Video"
       ? firstHttpUrl(resolved.previewUrl, isImageStillUrl(poster) ? null : poster)
       : null;
+  // Audio preview URLs are MP3 — never feed them to <img>.
   const imageSrc =
     resolved.type === "Video"
       ? isImageStillUrl(poster)
         ? poster
         : null
-      : firstHttpUrl(resolved.thumbnailUrl, resolved.previewUrl);
+      : isAudio
+        ? firstHttpUrl(resolved.thumbnailUrl)
+        : firstHttpUrl(resolved.thumbnailUrl, resolved.previewUrl);
+  const audioSrc = isAudio ? firstHttpUrl(resolved.previewUrl) : null;
 
   return (
     <div
@@ -57,7 +79,18 @@ export function MediaThumb({
       }}
       aria-hidden={!playback}
     >
-      {imageSrc ? (
+      {playback && audioSrc ? (
+        <div className="flex w-full flex-col items-center gap-3 p-4">
+          <Icon className="size-10 text-foreground/70" />
+          <audio
+            src={audioSrc}
+            controls
+            preload="metadata"
+            className="w-full max-w-md"
+            onClick={(event) => event.stopPropagation()}
+          />
+        </div>
+      ) : imageSrc ? (
         <img
           src={imageSrc}
           alt=""

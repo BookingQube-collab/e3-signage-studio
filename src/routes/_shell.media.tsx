@@ -96,7 +96,7 @@ export const Route = createFileRoute("/_shell/media")({
   component: MediaPage,
 });
 
-const FILTERS = ["All", "Videos", "Images", "QR", "Recently Added"] as const;
+const FILTERS = ["All", "Videos", "Images", "Audio", "QR", "Recently Added"] as const;
 const UNFILED_VALUE = "__unfiled";
 
 function MediaPage() {
@@ -531,6 +531,7 @@ function MediaPage() {
         if (filter === "All" || filter === "Recently Added") return true;
         if (filter === "Videos") return m.type === "Video";
         if (filter === "Images") return m.type === "Image" || m.type === "Logo";
+        if (filter === "Audio") return m.type === "Audio";
         return m.type === "QR";
       })
       .slice(0, filter === "Recently Added" ? 8 : undefined);
@@ -606,8 +607,8 @@ function MediaPage() {
     }
     setSelected(item);
     setRenaming(item.filename);
-    // List skips video signing; hydrate preview URL when the detail modal opens.
-    if (item.type === "Video") {
+    // List skips signed playback URLs; hydrate when the detail modal opens.
+    if (item.type === "Video" || item.type === "Audio") {
       const hasPlayable =
         typeof item.previewUrl === "string" && /^https?:\/\//i.test(item.previewUrl.trim());
       if (!hasPlayable) {
