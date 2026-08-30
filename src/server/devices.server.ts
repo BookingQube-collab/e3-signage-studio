@@ -732,15 +732,18 @@ async function buildManifest(
       const tz = asString(row["timezone"], "Asia/Qatar");
       const startDate = asString(row["start_date"]).slice(0, 10);
       const endDate = asString(row["end_date"]).slice(0, 10);
-      const startTime = uiTime(asString(row["start_time"], "00:00"));
-      const endTime = uiTime(asString(row["end_time"], "23:59"));
+      const evergreen = !startDate && !endDate;
+      // Defense: existing Ongoing rows may still carry dated play hours from before conversion.
+      const startTime = evergreen ? "00:00" : uiTime(asString(row["start_time"], "00:00"));
+      const endTime = evergreen ? "00:00" : uiTime(asString(row["end_time"], "23:59"));
+      const daysOfWeek = evergreen ? [0, 1, 2, 3, 4, 5, 6] : asDayNums(row["days_of_week"]);
       schedules.push({
         campaignId,
         startAt: startDate ? wallTimeToIso(startDate, startTime, tz) : null,
         endAt: endDate ? wallTimeToIso(endDate, endTime, tz) : null,
         startTime,
         endTime,
-        daysOfWeek: asDayNums(row["days_of_week"]),
+        daysOfWeek,
         timezone: tz,
         priority: asNumber(row["priority"], 50),
         emergency,

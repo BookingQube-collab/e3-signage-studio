@@ -844,13 +844,18 @@ async function persistCampaign(
   const startDate = (input.schedule.startDate ?? "").trim();
   const endDate = (input.schedule.endDate ?? "").trim();
   const dated = Boolean(startDate && endDate);
+  // Ongoing = always-on: clear date bounds and force full-day hours so TVs do not
+  // keep a prior Scheduled window's daily play hours after conversion.
+  const startTime = dated ? uiTime(input.schedule.startTime || "00:00") : "00:00";
+  const endTime = dated ? uiTime(input.schedule.endTime || "23:59") : "00:00";
+  const daysOfWeek = dated ? daysToNumbers(input.schedule.days) : [0, 1, 2, 3, 4, 5, 6];
   const { error: insertSchedule } = await client.from("schedules").insert({
     campaign_id: campaignId,
     start_date: dated ? startDate : null,
     end_date: dated ? endDate : null,
-    start_time: uiTime(input.schedule.startTime || "00:00"),
-    end_time: uiTime(input.schedule.endTime || "23:59"),
-    days_of_week: daysToNumbers(input.schedule.days),
+    start_time: startTime,
+    end_time: endTime,
+    days_of_week: daysOfWeek,
     timezone: input.schedule.timezone || "Asia/Qatar",
     priority: uiPriorityToCanonical(input.schedule.priority || 1),
   });
@@ -1239,7 +1244,11 @@ function winnerForScreen(
 async function frozenManifestSnapshot(
   admin: ReturnType<typeof getServiceRoleClient>,
   screenId: string,
-): Promise<{ versionIds: string[]; playlistItems: PlaylistSnapshotItem[] }> {
+): Promise<{
+  versionIds: string[];
+  playlistItems: PlaylistSnapshotItem[];
+  schedule: ContestRow["schedule"] | null;
+}> {
   const { data: sync } = await admin
     .from("device_sync_states")
     .select("pending_manifest_id, active_manifest_id")
@@ -1262,7 +1271,7 @@ async function frozenManifestSnapshot(
       .maybeSingle();
     manifestId = asNullableString((latest as { id?: string } | null)?.id);
   }
-  if (!manifestId) return { versionIds: [], playlistItems: [] };
+  if (!manifestId) return { versionIds: [], playlistItems: [], schedule: null };
 
   const [{ data: rows }, { data: manifestRow }] = await Promise.all([
     admin.from("manifest_assets").select("media_version_id").eq("manifest_id", manifestId),
@@ -1273,7 +1282,31 @@ async function frozenManifestSnapshot(
   );
   const payload = (manifestRow as { payload?: unknown } | null)?.payload;
   const playlistItems = parseFrozenPlaylistItems(payload);
-  return { versionIds, playlistItems };
+  const schedule = parseFrozenSchedule(payload);
+  return { versionIds, playlistItems, schedule };
+}
+
+function parseFrozenSchedule(payload: unknown): ContestRow["schedule"] | null {
+  if (!payload || typeof payload !== "object") return null;
+  const raw = (payload as { schedule?: unknown }).schedule;
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  const startDate = asString(row["startDate"]);
+  const endDate = asString(row["endDate"]);
+  const startTime = uiTime(asString(row["startTime"], "00:00"));
+  const endTime = uiTime(asString(row["endTime"], "23:59"));
+  const timezone = asString(row["timezone"], "Asia/Qatar");
+  const days = asDayNums(row["daysOfWeek"] ?? row["days"]);
+  return {
+    startDate,
+    endDate,
+    startTime,
+    endTime,
+    days,
+    timezone,
+    priority: asNumber(row["priority"], 50),
+    startAt: campaignTieBreakStart({ startDate, endDate, startTime, endTime, timezone }),
+  };
 }
 
 function parseFrozenPlaylistItems(payload: unknown): PlaylistSnapshotItem[] {
@@ -1346,7 +1379,48 @@ export async function republishScreenIfPlaylistStale(
       ? // Older packages had no frozen sequence — republish once so order/transitions ship.
         livePlaylistItems.length > 0
       : isPlaylistSequenceStale(livePlaylistItems, frozen.playlistItems));
-  if (!assetsStale && !sequenceStale) {
+
+  const evergreen = !winner.schedule.startDate?.trim() && !winner.schedule.endDate?.trim();
+  let evergreenHoursStale = false;
+  if (evergreen) {
+    const startTime = uiTime(winner.schedule.startTime || "00:00");
+    const endTime = uiTime(winner.schedule.endTime || "23:59");
+    const days = winner.schedule.days ?? [];
+    evergreenHoursStale =
+      startTime !== "00:00" || endTime !== "00:00" || days.length < 7;
+    const frozenSchedule = frozen.schedule;
+    if (frozenSchedule) {
+      const frozenDated = Boolean(frozenSchedule.startDate?.trim() || frozenSchedule.endDate?.trim());
+      const frozenHours =
+        uiTime(frozenSchedule.startTime || "00:00") !== "00:00" ||
+        uiTime(frozenSchedule.endTime || "23:59") !== "00:00" ||
+        (frozenSchedule.days?.length ?? 0) < 7;
+      if (frozenDated || frozenHours) evergreenHoursStale = true;
+    }
+    if (evergreenHoursStale) {
+      const { error: fixScheduleError } = await admin
+        .from("schedules")
+        .update({
+          start_date: null,
+          end_date: null,
+          start_time: "00:00",
+          end_time: "00:00",
+          days_of_week: [0, 1, 2, 3, 4, 5, 6],
+        })
+        .eq("campaign_id", winner.id);
+      throwIfError(fixScheduleError, "Could not normalize ongoing schedule.");
+      winner.schedule = {
+        ...winner.schedule,
+        startDate: "",
+        endDate: "",
+        startTime: "00:00",
+        endTime: "00:00",
+        days: [0, 1, 2, 3, 4, 5, 6],
+      };
+    }
+  }
+
+  if (!assetsStale && !sequenceStale && !evergreenHoursStale) {
     return false;
   }
   await writeManifestForScreen(

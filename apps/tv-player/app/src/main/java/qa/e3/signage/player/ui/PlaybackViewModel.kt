@@ -23,12 +23,12 @@ import qa.e3.signage.player.core.PlaybackResult
 import qa.e3.signage.player.core.PlaylistItemKind
 import qa.e3.signage.player.core.PlaylistSequencer
 import qa.e3.signage.player.core.ResolvedPlaylistItem
-import qa.e3.signage.player.core.SYNC_STATUS_INTERVAL_MS
 import qa.e3.signage.player.core.ScheduleEngine
 import qa.e3.signage.player.core.ZonePlan
 import qa.e3.signage.player.core.ZoneSource
 import qa.e3.signage.player.core.completePlayback
 import qa.e3.signage.player.core.isPreparingNewerPackage
+import qa.e3.signage.player.core.nextSyncPollDelayMs
 import qa.e3.signage.player.core.planZones
 import qa.e3.signage.player.core.resolvePlaylistItems
 import qa.e3.signage.player.core.startPlayback
@@ -97,6 +97,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     brand = waiting.brand,
                     localImagePath = waiting.localImagePath,
                     localBrandIconPath = waiting.localBrandIconPath,
+                    localLogoPath = waiting.localLogoPath,
                     title = waiting.title,
                     message = waiting.message,
                 )
@@ -298,6 +299,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             brand = waiting.brand,
             localImagePath = waiting.localImagePath,
             localBrandIconPath = waiting.localBrandIconPath,
+            localLogoPath = waiting.localLogoPath,
             title = waiting.title,
             message = waiting.message,
         )
@@ -360,7 +362,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     private suspend fun pollLoop() {
         while (viewModelScope.isActive) {
             pollSyncStatus()
-            delay(SYNC_STATUS_INTERVAL_MS)
+            delay(nextSyncPollDelayMs(playing = _ui.value.playing))
         }
     }
 

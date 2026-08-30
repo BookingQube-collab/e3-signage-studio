@@ -22,6 +22,7 @@ import qa.e3.signage.player.core.planDownloads
 import qa.e3.signage.player.core.progressPercent
 import qa.e3.signage.player.core.pruneUnusedStorage
 import qa.e3.signage.player.core.playlistSequenceKey
+import qa.e3.signage.player.core.scheduleWindowsKey
 import qa.e3.signage.player.core.shouldFetchManifest
 import qa.e3.signage.player.core.versionedManifestFile
 import java.io.File
@@ -80,10 +81,16 @@ class PackageSyncCoordinator(
         }
 
         if (manifest.manifestVersion == activeVersion && inflight == null) {
-            val activePlaylistKey = packages.loadActive()?.first?.let { playlistSequenceKey(it.playlist) }
-            val incomingKey = playlistSequenceKey(manifest.playlist)
-            if (status.syncRequested && activePlaylistKey != incomingKey) {
-                Log.i(TAG, "same version but playlist sequence changed; refreshing ACTIVE package")
+            val active = packages.loadActive()?.first
+            val activePlaylistKey = active?.let { playlistSequenceKey(it.playlist) }
+            val incomingPlaylistKey = playlistSequenceKey(manifest.playlist)
+            val activeScheduleKey = active?.let { scheduleWindowsKey(it.schedules) }
+            val incomingScheduleKey = scheduleWindowsKey(manifest.schedules)
+            val refreshSameVersion =
+                status.syncRequested &&
+                    (activePlaylistKey != incomingPlaylistKey || activeScheduleKey != incomingScheduleKey)
+            if (refreshSameVersion) {
+                Log.i(TAG, "same version but playlist/schedule changed; refreshing ACTIVE package")
                 val path = packages.writeManifestFile(manifest).canonicalPath
                 packages.persistPackage(manifest.manifestVersion, ContentPackageState.READY, path)
                 activate(live, manifest, path)

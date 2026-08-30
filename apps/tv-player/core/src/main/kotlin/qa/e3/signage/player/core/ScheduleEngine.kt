@@ -7,8 +7,10 @@ import java.time.format.DateTimeParseException
 
 /**
  * Local schedule evaluation. Higher numeric priority wins. On a tie: emergency,
- * then later startAt, then campaign id. Null start/end means always in the date
- * window (still respects day-of-week and daily play hours). Expired dated
+ * then later startAt, then campaign id.
+ *
+ * Ongoing / evergreen packages (null/blank startAt and endAt) always play —
+ * daily hours and weekdays apply only to dated campaign windows. Expired dated
  * windows drop out with no cloud call.
  */
 object ScheduleEngine {
@@ -17,6 +19,8 @@ object ScheduleEngine {
         val end = parseInstant(schedule.endAt)
         if (start != null && now.isBefore(start)) return false
         if (end != null && now.isAfter(end)) return false
+        // CMS "Ongoing" = no date bounds → always on until pause/archive.
+        if (start == null && end == null) return true
         val zone = zoneId(schedule.timezone)
         val local = ZonedDateTime.ofInstant(now, zone)
         val days = schedule.daysOfWeek.ifEmpty { listOf(0, 1, 2, 3, 4, 5, 6) }

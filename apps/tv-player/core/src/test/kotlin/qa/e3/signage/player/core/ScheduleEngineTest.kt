@@ -86,16 +86,25 @@ class ScheduleEngineTest {
     }
 
     @Test
-    fun nullDatesStayInWindow() {
+    fun nullDatesAreAlwaysOnIgnoringDailyHours() {
         val noon = Instant.parse("2026-08-25T09:00:00Z")
         val morning = Instant.parse("2026-08-25T07:00:00Z")
         val farFuture = Instant.parse("2028-01-01T09:00:00Z")
         val evergreen = schedule(startAt = null, endAt = null, campaignId = "loop")
         val blank = schedule(startAt = "", endAt = "", campaignId = "blank")
+        val restrictedHours = schedule(
+            startAt = null,
+            endAt = null,
+            startTime = "18:00",
+            endTime = "22:00",
+            days = listOf(1),
+            campaignId = "always",
+        )
         assertTrue(ScheduleEngine.isWindowOpen(evergreen, noon))
+        assertTrue(ScheduleEngine.isWindowOpen(evergreen, morning))
         assertTrue(ScheduleEngine.isWindowOpen(evergreen, farFuture))
         assertTrue(ScheduleEngine.isWindowOpen(blank, noon))
-        assertFalse(ScheduleEngine.isWindowOpen(evergreen, morning))
+        assertTrue(ScheduleEngine.isWindowOpen(restrictedHours, morning))
         assertEquals("loop", ScheduleEngine.selectActive(listOf(evergreen), noon)?.campaignId)
     }
 }

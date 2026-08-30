@@ -232,7 +232,14 @@ function NewCampaignPage() {
     if (next === "ongoing") {
       setDraft({
         ...draft,
-        schedule: { ...draft.schedule, startDate: "", endDate: "" },
+        schedule: {
+          ...draft.schedule,
+          startDate: "",
+          endDate: "",
+          startTime: "00:00",
+          endTime: "00:00",
+          days: [...DAYS],
+        },
       });
       return;
     }
@@ -243,6 +250,12 @@ function NewCampaignPage() {
           ...draft.schedule,
           startDate: localIsoDate(),
           endDate: addDaysIso(localIsoDate(), 16),
+          startTime: draft.schedule.startTime === "00:00" && draft.schedule.endTime === "00:00"
+            ? "09:00"
+            : draft.schedule.startTime,
+          endTime: draft.schedule.startTime === "00:00" && draft.schedule.endTime === "00:00"
+            ? "22:00"
+            : draft.schedule.endTime,
         },
       });
     }
@@ -419,7 +432,8 @@ function NewCampaignPage() {
               </div>
               {ongoing ? (
                 <p className="text-sm text-muted-foreground">
-                  This campaign stays eligible until you pause or archive it. Daily play hours and days of week still apply.
+                  Plays 24/7 until you pause or archive it. Daily play hours and weekdays are only
+                  used for Scheduled campaigns.
                 </p>
               ) : null}
               <div className="grid gap-4 sm:grid-cols-2">
@@ -447,8 +461,6 @@ function NewCampaignPage() {
                   }
                 />
               </div>
-                </>
-              )}
               <div className="space-y-2">
                 <Label htmlFor="s-stime">Start time</Label>
                 <Input
@@ -525,6 +537,8 @@ function NewCampaignPage() {
                   </SelectContent>
                 </Select>
               </div>
+                </>
+              )}
               </div>
             </div>
           ) : null}
@@ -566,7 +580,7 @@ function NewCampaignPage() {
                     </dt>
                     <dd className="mt-1 text-sm font-medium">
                       {ongoing
-                        ? `Ongoing · ${draft.schedule.startTime}–${draft.schedule.endTime}`
+                        ? "Ongoing · plays 24/7"
                         : `${draft.schedule.startDate} → ${draft.schedule.endDate} · ${draft.schedule.startTime}–${draft.schedule.endTime}`}
                     </dd>
                   </div>
