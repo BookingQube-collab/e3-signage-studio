@@ -16,13 +16,6 @@ import {
   E3QueryBoundary,
   E3StatusBadge,
 } from "@/components/e3";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { playlistService, screenService } from "@/services";
 import { NO_LOCATION_ACCESS_MESSAGE } from "@/lib/location-scope";
 import { adminMonitoringRefetchInterval } from "@/lib/monitoring";
@@ -30,6 +23,7 @@ import { bindPreviewClips } from "@/lib/playlist-preview";
 import { invalidateKeysInBackground, writeEntityCache } from "@/lib/query-cache";
 import { useLiveMonitoring } from "@/lib/use-live-monitoring";
 import { PlaylistLoopPreview } from "@/features/playlists/PlaylistLoopPreview";
+import { PlaylistPickerCards } from "@/features/playlists/PlaylistPickerCards";
 import { EditScreenDialog } from "@/features/screens/EditScreenDialog";
 import { RepairScreenDialog } from "@/features/screens/RepairScreenDialog";
 import { hasPermission } from "@/lib/rbac";
@@ -317,7 +311,10 @@ function ScreenDetailPage() {
                       <E3Button
                         variant="outline"
                         className="w-full justify-start"
-                        onClick={() => setPlaylistOpen(true)}
+                        onClick={() => {
+                          setNextPlaylist(screenQuery.data?.playlistId ?? "");
+                          setPlaylistOpen(true);
+                        }}
                       >
                         <MonitorPlay /> Change Playlist
                       </E3Button>
@@ -395,6 +392,7 @@ function ScreenDetailPage() {
               }}
               title="Change playlist"
               description="The screen will download the new content on the next sync."
+              className="sm:max-w-2xl"
               footer={
                 <>
                   <E3Button variant="outline" disabled={changePlaylist.isPending} onClick={() => setPlaylistOpen(false)}>
@@ -403,7 +401,7 @@ function ScreenDetailPage() {
                   <E3Button
                     variant="primary"
                     loading={changePlaylist.isPending}
-                    disabled={!nextPlaylist}
+                    disabled={!nextPlaylist || nextPlaylist === screenQuery.data?.playlistId}
                     onClick={() => changePlaylist.mutate(nextPlaylist)}
                   >
                     Apply
@@ -411,18 +409,15 @@ function ScreenDetailPage() {
                 </>
               }
             >
-              <Select value={nextPlaylist} onValueChange={setNextPlaylist}>
-                <SelectTrigger aria-label="Playlist">
-                  <SelectValue placeholder="Select a playlist" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(playlists.data ?? []).map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <PlaylistPickerCards
+                playlists={playlists.data ?? []}
+                selectedId={nextPlaylist}
+                onSelect={(id) => setNextPlaylist(id)}
+                isLoading={playlists.isLoading}
+                isError={playlists.isError}
+                onRetry={() => void playlists.refetch()}
+                columns="modal"
+              />
             </E3Modal>
 
             <E3Modal

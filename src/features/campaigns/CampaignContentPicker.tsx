@@ -1,13 +1,10 @@
 import { Link } from "@tanstack/react-router";
-import { LayoutTemplate, ListVideo } from "lucide-react";
+import { LayoutTemplate } from "lucide-react";
 
 import { E3EmptyState, E3Skeletons, MediaThumb } from "@/components/e3";
 import { CampaignContentPreview } from "@/features/campaigns/CampaignContentPreview";
 import { mediaForRef } from "@/features/layouts/LayoutCanvas";
-import {
-  PlaylistPreviewStrip,
-  playlistDurationLabel,
-} from "@/features/playlists/PlaylistPreviewStrip";
+import { PlaylistPickerCards } from "@/features/playlists/PlaylistPickerCards";
 import { cn } from "@/lib/utils";
 import type { Layout, Media, Playlist } from "@/types";
 
@@ -34,7 +31,31 @@ export function CampaignContentPicker({
   onSelect: (id: string, name: string) => void;
   onRetry?: () => void;
 }) {
-  const options = contentType === "Playlist" ? playlists : layouts;
+  if (contentType === "Playlist") {
+    return (
+      <div className="space-y-5">
+        <PlaylistPickerCards
+          playlists={playlists}
+          selectedId={contentId}
+          onSelect={onSelect}
+          isLoading={isLoading}
+          isError={isError}
+          onRetry={onRetry}
+        />
+        {contentId ? (
+          <CampaignContentPreview
+            contentType={contentType}
+            contentId={contentId}
+            contentName={contentName}
+          />
+        ) : (
+          <p className="rounded-xl border border-dashed border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+            Select a playlist to see how it will look on screen.
+          </p>
+        )}
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
@@ -47,8 +68,8 @@ export function CampaignContentPicker({
   if (isError) {
     return (
       <E3EmptyState
-        icon={contentType === "Playlist" ? ListVideo : LayoutTemplate}
-        title={`Could not load ${contentType.toLowerCase()}s`}
+        icon={LayoutTemplate}
+        title="Could not load layouts"
         description="Check your connection and try again."
         action={
           onRetry ? (
@@ -65,22 +86,18 @@ export function CampaignContentPicker({
     );
   }
 
-  if (options.length === 0) {
+  if (layouts.length === 0) {
     return (
       <E3EmptyState
-        icon={contentType === "Playlist" ? ListVideo : LayoutTemplate}
-        title={contentType === "Playlist" ? "No playlists yet" : "No layouts yet"}
-        description={
-          contentType === "Playlist"
-            ? "Create a playlist with media first, then pick it for this campaign."
-            : "Create a layout with zones first, then pick it for this campaign."
-        }
+        icon={LayoutTemplate}
+        title="No layouts yet"
+        description="Create a layout with zones first, then pick it for this campaign."
         action={
           <Link
-            to={contentType === "Playlist" ? "/playlists/new" : "/layouts/new"}
+            to="/layouts/new"
             className="inline-flex items-center rounded-full border border-border bg-card px-4 py-1.5 text-sm font-medium text-foreground hover:bg-accent"
           >
-            {contentType === "Playlist" ? "Create playlist" : "Create layout"}
+            Create layout
           </Link>
         }
       />
@@ -90,60 +107,32 @@ export function CampaignContentPicker({
   return (
     <div className="space-y-5">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {contentType === "Playlist"
-          ? playlists.map((playlist) => {
-              const items = Array.isArray(playlist.items) ? playlist.items : [];
-              const selected = contentId === playlist.id;
-              return (
-                <button
-                  key={playlist.id}
-                  type="button"
-                  aria-pressed={selected}
-                  onClick={() => onSelect(playlist.id, playlist.name)}
-                  className={cn(
-                    "rounded-xl border bg-card p-3 text-left transition-colors",
-                    selected
-                      ? "e3-gradient-border border-transparent ring-2 ring-e3-pink/70"
-                      : "border-border hover:border-e3-purple/40 hover:bg-accent/40",
-                  )}
-                >
-                  <PlaylistPreviewStrip playlist={playlist} size="lg" />
-                  <span className="mt-3 block truncate font-medium text-foreground">
-                    {playlist.name || "Untitled playlist"}
-                  </span>
-                  <span className="mt-0.5 block text-xs tabular-nums text-muted-foreground">
-                    {items.length} item{items.length === 1 ? "" : "s"}
-                    {items.length > 0 ? ` · ${playlistDurationLabel(playlist)}` : ""}
-                  </span>
-                </button>
-              );
-            })
-          : layouts.map((layout) => {
-              const zones = Array.isArray(layout.zones) ? layout.zones : [];
-              const selected = contentId === layout.id;
-              return (
-                <button
-                  key={layout.id}
-                  type="button"
-                  aria-pressed={selected}
-                  onClick={() => onSelect(layout.id, layout.name)}
-                  className={cn(
-                    "rounded-xl border bg-card p-3 text-left transition-colors",
-                    selected
-                      ? "e3-gradient-border border-transparent ring-2 ring-e3-pink/70"
-                      : "border-border hover:border-e3-purple/40 hover:bg-accent/40",
-                  )}
-                >
-                  <LayoutPickerPreview layout={layout} mediaLibrary={mediaLibrary} />
-                  <span className="mt-3 block truncate font-medium text-foreground">
-                    {layout.name || "Untitled layout"}
-                  </span>
-                  <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                    {layout.preset} · {zones.length} zone{zones.length === 1 ? "" : "s"}
-                  </span>
-                </button>
-              );
-            })}
+        {layouts.map((layout) => {
+          const zones = Array.isArray(layout.zones) ? layout.zones : [];
+          const selected = contentId === layout.id;
+          return (
+            <button
+              key={layout.id}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onSelect(layout.id, layout.name)}
+              className={cn(
+                "rounded-xl border bg-card p-3 text-left transition-colors",
+                selected
+                  ? "e3-gradient-border border-transparent ring-2 ring-e3-pink/70"
+                  : "border-border hover:border-e3-purple/40 hover:bg-accent/40",
+              )}
+            >
+              <LayoutPickerPreview layout={layout} mediaLibrary={mediaLibrary} />
+              <span className="mt-3 block truncate font-medium text-foreground">
+                {layout.name || "Untitled layout"}
+              </span>
+              <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                {layout.preset} · {zones.length} zone{zones.length === 1 ? "" : "s"}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {contentId ? (
@@ -154,7 +143,7 @@ export function CampaignContentPicker({
         />
       ) : (
         <p className="rounded-xl border border-dashed border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-          Select a {contentType.toLowerCase()} to see how it will look on screen.
+          Select a layout to see how it will look on screen.
         </p>
       )}
     </div>
