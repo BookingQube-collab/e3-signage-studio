@@ -15,6 +15,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import qa.e3.signage.player.E3PlayerApplication
+import qa.e3.signage.player.core.ALL_DECODE_FAILED_HOLD_MS
+import qa.e3.signage.player.core.DecodeFailureTracker
 import qa.e3.signage.player.core.FitMode
 import qa.e3.signage.player.core.HEARTBEAT_INTERVAL_MS
 import qa.e3.signage.player.core.ContentPackageState
@@ -263,8 +265,9 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 delay(15_000)
                 continue
             }
-            val items = resolvePlaylistItems(manifest.playlist, manifest.assets, root)
+                val items = resolvePlaylistItems(manifest.playlist, manifest.assets, root)
             val sequencer = PlaylistSequencer(items, manifest.playlist?.loop ?: true)
+            val decodeFailures = DecodeFailureTracker()
             if (sequencer.isEmpty()) {
                 closeOpenPlay(PlaybackResult.INTERRUPTED)
                 if (hasPlayableLayoutContent(plan)) {
@@ -339,12 +342,27 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 }
                 closeOpenPlay(result)
                 // Failed clips must not freeze the loop — show error briefly, then skip.
+                // If every video failed this pass, hold a stable re-encode message instead of thrashing.
                 if (result == PlaybackResult.ERROR) {
                     Log.w(TAG, "video error; skipping ${item.localFilename}")
+                    if (item.kind == PlaylistItemKind.VIDEO) {
+                        decodeFailures.recordFailure(item.mediaId)
+                    }
+                    if (decodeFailures.allVideosFailed(items)) {
+                        Log.w(TAG, "all playlist videos failed decode (${decodeFailures.failedCount()})")
+                        showPlaybackProblem(WaitingKind.CODEC_UNSUPPORTED)
+                        withTimeoutOrNull(ALL_DECODE_FAILED_HOLD_MS) {
+                            app.container.sync.activations.first()
+                        }
+                        decodeFailures.clear()
+                        break
+                    }
                     if (_ui.value.waitingKind == null || _ui.value.contentDisplaying) {
                         showPlaybackProblem(WaitingKind.PLAYBACK_ERROR)
                     }
                     delay(1_200)
+                } else if (result == PlaybackResult.COMPLETED && item.kind == PlaylistItemKind.VIDEO) {
+                    decodeFailures.recordSuccess(item.mediaId)
                 }
                 if (packages.activeVersion() != manifest.manifestVersion) {
                     break
@@ -399,6 +417,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         val kind = when {
             progress.isFailed -> WaitingKind.DOWNLOAD_FAILED
             progress.isBusy -> WaitingKind.LOADING_CONTENT
+            current.waitingKind == WaitingKind.CODEC_UNSUPPORTED -> WaitingKind.CODEC_UNSUPPORTED
             current.waitingKind == WaitingKind.PLAYBACK_ERROR -> WaitingKind.PLAYBACK_ERROR
             current.waitingKind == WaitingKind.LOADING_CONTENT -> WaitingKind.LOADING_CONTENT
             current.waitingKind == WaitingKind.DOWNLOAD_FAILED -> WaitingKind.DOWNLOAD_FAILED

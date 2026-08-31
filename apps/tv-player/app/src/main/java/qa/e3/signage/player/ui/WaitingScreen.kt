@@ -51,6 +51,8 @@ enum class WaitingKind {
     LOADING_CONTENT,
     DOWNLOAD_FAILED,
     PLAYBACK_ERROR,
+    /** Every video in the playlist failed to decode — stop thrashing skip/retry. */
+    CODEC_UNSUPPORTED,
     EMPTY_PLAYLIST,
     OFF_HOURS,
 }
@@ -123,6 +125,15 @@ fun waitingCopy(kind: WaitingKind, overrides: WaitingOverrides = WaitingOverride
             quips = listOf(
                 "Unsupported codec or corrupt file — trying the next clip.",
                 "No blank screen. We skip bad clips and keep looping.",
+            ),
+        )
+        WaitingKind.CODEC_UNSUPPORTED -> WaitingCopy(
+            kicker = "UNSUPPORTED VIDEO",
+            headline = "Re-encode videos as H.264 MP4",
+            body = "This TV cannot decode the playlist (common with WhatsApp / HEVC clips). Export H.264 + AAC stereo, upload again, then use Sync Now.",
+            quips = listOf(
+                "Holding here — Sync Now pulls a new playlist when ready.",
+                "Phone videos often use HEVC. Signage TVs need H.264 MP4.",
             ),
         )
         WaitingKind.EMPTY_PLAYLIST -> WaitingCopy(
@@ -201,10 +212,10 @@ fun WaitingScreen(
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.55f)),
             )
-            WaitingCopyColumn(copy, quip, showTextBrand = false, downloadProgress = downloadProgress)
+            WaitingCopyColumn(copy, quip, showTextBrand = false, downloadProgress = downloadProgress, kind = kind)
         } else {
             E3BrandStage {
-                WaitingCopyColumn(copy, quip, showTextBrand = false, downloadProgress = downloadProgress) {
+                WaitingCopyColumn(copy, quip, showTextBrand = false, downloadProgress = downloadProgress, kind = kind) {
                     WaitingBrandMark(brand, overrides.localBrandIconPath, overrides.localLogoPath)
                 }
             }
@@ -266,6 +277,7 @@ private fun WaitingCopyColumn(
     quip: String,
     showTextBrand: Boolean,
     downloadProgress: DownloadProgressUi? = null,
+    kind: WaitingKind = WaitingKind.FIRST_PUBLISH,
     brandSlot: (@Composable () -> Unit)? = null,
 ) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -371,6 +383,7 @@ private fun WaitingCopyColumn(
                     text = when {
                         downloadProgress?.failed == true -> "  Online · download needs retry"
                         downloadProgress != null -> "  Online · downloading content"
+                        kind == WaitingKind.CODEC_UNSUPPORTED -> "  Paired · waiting for Sync / re-encode"
                         else -> "  Paired · waiting for content"
                     },
                     color = Color.White,

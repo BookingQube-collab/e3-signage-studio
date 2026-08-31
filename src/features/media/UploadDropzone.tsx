@@ -4,6 +4,7 @@ import { toast } from "sonner";
 
 import { E3Button, E3Progress } from "@/components/e3";
 import { ACCEPT_MEDIA, collectUploadableFiles, uploadLimitsHint } from "@/lib/media-file";
+import { assessTvVideoCompat, MEDIA_LIBRARY_CODEC_HINT, tvVideoUploadWarning } from "@/lib/video-codec-hint";
 import { cn } from "@/lib/utils";
 
 interface PendingUpload {
@@ -43,6 +44,11 @@ export function UploadDropzone({
     if (accepted.length === 0) {
       if (inputRef.current) inputRef.current.value = "";
       return;
+    }
+    for (const file of accepted) {
+      const compat = await assessTvVideoCompat(file);
+      const warning = tvVideoUploadWarning(file.name, compat);
+      if (warning) toast.warning(warning);
     }
     const batch = accepted.map((file, index) => ({
       id: `${index}:${file.name}:${file.size}:${file.lastModified}`,
@@ -97,6 +103,9 @@ export function UploadDropzone({
         </p>
         <p className="mt-1 text-sm text-muted-foreground">{hint ?? "Video · Image · Promotional Media"}</p>
         <p className="mt-1 text-xs text-muted-foreground">{uploadLimitsHint()}</p>
+        <p className="mx-auto mt-3 max-w-xl text-xs leading-relaxed text-amber-700/90 dark:text-amber-400/90">
+          {MEDIA_LIBRARY_CODEC_HINT}
+        </p>
         <E3Button
           className="mt-5"
           variant="primary"

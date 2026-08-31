@@ -40,7 +40,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -378,11 +377,12 @@ private fun ImageSoundtrackPlayer(fileUri: String?, generation: Int) {
         if (fileUri.isNullOrBlank()) {
             return@DisposableEffect onDispose { }
         }
-        val player = ExoPlayer.Builder(context).build().apply {
+        val player = buildSignageExoPlayer(context).apply {
             val uri = Uri.parse(requireLocalPlaybackUri(fileUri).toString())
-            setMediaItem(MediaItem.fromUri(uri))
+            setMediaItem(mediaItemForLocalVideo(uri))
             volume = 1f
             playWhenReady = true
+            addAnalyticsListener(decoderInitLogger())
             prepare()
         }
         onDispose { player.release() }
@@ -407,11 +407,12 @@ private fun LocalVideoZone(
     // the next prepare() — critical on TCL where two concurrent ExoPlayers hang.
     val playerRef = remember { mutableStateOf<ExoPlayer?>(null) }
     DisposableEffect(key, generation, fileUri, loop) {
-        val player = ExoPlayer.Builder(context).build().apply {
+        val player = buildSignageExoPlayer(context).apply {
             val uri = Uri.parse(requireLocalPlaybackUri(fileUri).toString())
-            setMediaItem(MediaItem.fromUri(uri))
+            setMediaItem(mediaItemForLocalVideo(uri))
             repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
             playWhenReady = true
+            addAnalyticsListener(decoderInitLogger())
             prepare()
         }
         playerRef.value = player
@@ -446,6 +447,7 @@ private fun LocalVideoZone(
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                player.logPlaybackFailure(error, "zone video gen=$generation")
                 // Do not treat errors as "display ready" — that revealed a blank shutter.
                 markTransitionReady()
                 onFinished(generation, true)

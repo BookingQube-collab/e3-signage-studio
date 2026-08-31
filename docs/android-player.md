@@ -18,7 +18,7 @@ gradlew.bat :app:bundleRelease
 | Debug APK (sideload) | `:app:assembleDebug` | `dist/e3-signage-player-<versionName>-debug.apk` |
 | Release AAB (Play / internal app sharing) | `:app:bundleRelease` | `app/build/outputs/bundle/release/app-release.aab` |
 
-`assembleDebug` (and `assembleRelease`) also copy the APK into the repo `dist/` folder as `e3-signage-player-<versionName>-<buildType>.apk` (currently **0.31.0**). `dist/` is gitignored.
+`assembleDebug` (and `assembleRelease`) also copy the APK into the repo `dist/` folder as `e3-signage-player-<versionName>-<buildType>.apk` (currently **0.32.0**). `dist/` is gitignored.
 
 `local.properties` (gitignored; see `local.properties.example`):
 
@@ -29,7 +29,7 @@ api.base.url=https://e3-cms.vercel.app
 
 `api.base.url` must be reachable from the TV. Do not use `localhost` or the emulator alias on a physical box. Release signing is not stored in this repo; `bundleRelease` is unsigned unless you configure a keystore locally.
 
-Current player version: **0.31.0** (`versionCode` 31).
+Current player version: **0.32.0** (`versionCode` 32). **0.32+** enables ExoPlayer software decoder fallback when hardware decode fails (common on TCL with WhatsApp / HEVC MP4s) and stops infinite PLAYBACK ISSUE thrashing when every playlist clip is unplayable.
 
 Unpaired pairing screen branding is loaded from `GET /api/devices/player-branding` (no device token): org waiting-screen mode/image plus CMS logo. Install this APK (or newer) for admin branding to appear before pair.
 
@@ -44,7 +44,7 @@ Screen orientation is driven by CMS **Edit screen → Orientation** (four Window
 
    ```
    adb connect <tv-ip>
-   adb install -r dist/e3-signage-player-0.31.0-debug.apk
+   adb install -r dist/e3-signage-player-0.32.0-debug.apk
    ```
 
 3. Open **E3 Signage** from Apps. Enter the 6-digit pairing code in the CMS **Pair a screen** dialog.
@@ -75,7 +75,7 @@ Same APK. Use the vendor’s file installer or `adb`. Confirm the box can instal
 | OS | `minSdk` 24 (Android 7.0). **Recommended:** Android 10 / Google TV or newer |
 | RAM | 1 GB minimum for 1080p stills + short clips. **Recommended:** 2 GB+ |
 | Storage | Enough free space for the active package plus the previous READY package. **Recommended:** 8 GB free before large video libraries |
-| Codecs | Video: H.264 (AVC) in `video/mp4`. Audio: AAC. Images: JPEG, PNG, WebP. Other containers are rejected at upload |
+| Codecs | Video: **H.264 (AVC)** in `video/mp4`. Audio: **AAC**. Images: JPEG, PNG, WebP. Other containers are rejected at upload. WhatsApp / phone **HEVC (H.265)** often downloads fine but fails to decode on TCL — re-export as H.264 before publishing. CMS Media Library warns on risky codecs at upload. |
 | 4K | The player will attempt 4K MP4 if the SoC decoder supports it. It is **not** guaranteed on every box |
 | Portrait | CMS **Portrait** / **Portrait (upside down)** rotate the UI full-bleed via Compose. Use upside-down if the mount is inverted. Publish a portrait layout (1080×1920) to the screen. |
 | Auto-launch | The app is a Leanback + standard launcher. Best-effort `BOOT_COMPLETED` start exists; many vendors ignore it or block activity starts from a receiver |
