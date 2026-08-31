@@ -39,6 +39,7 @@ class PackageSyncCoordinator(
     private val waitingScreen: WaitingScreenStore,
     private val display: ScreenDisplayStore,
     private val onActivated: () -> Unit = {},
+    private val onAuthFailure: (httpCode: Int, source: String) -> Boolean = { _, _ -> false },
 ) {
     private val mutex = Mutex()
     private val _activations = MutableSharedFlow<Int>(extraBufferCapacity = 1)
@@ -56,6 +57,9 @@ class PackageSyncCoordinator(
             api.syncStatus(credentials.deviceId, credentials.deviceToken)
         } catch (error: Exception) {
             Log.w(TAG, "sync-status: ${error.message}")
+            if (error is DeviceHttpException) {
+                onAuthFailure(error.httpCode, "sync-status")
+            }
             return
         }
         persistRotatedToken(store, status.rotatedToken)
@@ -185,6 +189,10 @@ class PackageSyncCoordinator(
             fetched
         } catch (error: DeviceHttpException) {
             if (error.httpCode == 403) throw ScreenDisabledException()
+            if (error.httpCode == 401) {
+                onAuthFailure(401, "manifest")
+                return null
+            }
             if (error.httpCode == 404) {
                 Log.i(TAG, "No published content yet")
                 return null

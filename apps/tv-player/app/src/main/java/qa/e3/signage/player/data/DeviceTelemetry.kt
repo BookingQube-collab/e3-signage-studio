@@ -43,6 +43,7 @@ class DeviceTelemetry(
     private val json: Json,
     private val filesDir: File,
     private val appVersion: String,
+    private val onAuthFailure: (httpCode: Int, source: String) -> Boolean = { _, _ -> false },
 ) {
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -92,6 +93,9 @@ class DeviceTelemetry(
                     flushLocked(live.deviceId, live.deviceToken, live.screenId)
                 } catch (error: Exception) {
                     Log.w(TAG, "heartbeat: ${error.message}")
+                    if (error is DeviceHttpException && onAuthFailure(error.httpCode, "heartbeat")) {
+                        return@withLock
+                    }
                     queueHeartbeat(encoded)
                 }
             }
@@ -168,6 +172,9 @@ class DeviceTelemetry(
             db.pendingUploadDao().deleteKind(QueuedUpload.KIND_HEARTBEAT)
         } catch (error: Exception) {
             Log.w(TAG, "queued heartbeat: ${error.message}")
+            if (error is DeviceHttpException) {
+                onAuthFailure(error.httpCode, "queued-heartbeat")
+            }
         }
     }
 
@@ -214,6 +221,7 @@ class DeviceTelemetry(
             }
         } catch (error: DeviceHttpException) {
             Log.w(TAG, "playback-logs ${error.httpCode}: ${error.message}")
+            if (onAuthFailure(error.httpCode, "playback-logs")) return
             if (error.httpCode in 400..499 && error.httpCode != 401 && error.httpCode != 403) {
                 batchRows.forEach { db.playbackLogDao().delete(it.event.clientEventId) }
             }
@@ -238,6 +246,7 @@ class DeviceTelemetry(
             events.forEach { db.errorLogDao().delete(it.clientEventId) }
         } catch (error: DeviceHttpException) {
             Log.w(TAG, "error-logs ${error.httpCode}: ${error.message}")
+            if (onAuthFailure(error.httpCode, "error-logs")) return
             if (error.httpCode in 400..499 && error.httpCode != 401 && error.httpCode != 403) {
                 events.forEach { db.errorLogDao().delete(it.clientEventId) }
             }

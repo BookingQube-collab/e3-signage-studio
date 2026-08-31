@@ -79,6 +79,8 @@ export type ScreenService = {
   /** Second-pass signed stills for grid cards (does not block listScreens). */
   nowPlayingThumbnails: (mediaIds: string[]) => Promise<Record<string, string | null>>;
   pair: (input: ScreenPairInput) => Promise<Screen>;
+  /** Revoke the current device token so the TV returns to the pairing-code screen. */
+  beginRepair: (id: string) => Promise<Screen>;
   repair: (id: string, code: string) => Promise<Screen>;
   update: (id: string, patch: Partial<Screen>) => Promise<Screen>;
   duplicate: (id: string) => Promise<Screen>;

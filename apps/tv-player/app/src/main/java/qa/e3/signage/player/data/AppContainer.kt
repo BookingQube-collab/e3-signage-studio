@@ -16,6 +16,7 @@ class AppContainer(context: Context) {
 
     val db: PlayerDatabase = PlayerDatabase.create(context)
     val store: DeviceCredentialStore = EncryptedCredentialStore(context)
+    val session = PairingSession(store)
     val apiBaseUrl: String = BuildConfig.API_BASE_URL.trim()
     val api: DeviceApi = RetrofitDeviceApi(
         apiBaseUrl.ifBlank { "https://e3-cms.vercel.app" },
@@ -38,6 +39,7 @@ class AppContainer(context: Context) {
         json = json,
         filesDir = PlayerFiles.root(context),
         appVersion = BuildConfig.VERSION_NAME,
+        onAuthFailure = { code, source -> session.handleAuthFailure(code, source) },
     )
     val sync = PackageSyncCoordinator(
         api = api,
@@ -48,6 +50,7 @@ class AppContainer(context: Context) {
         waitingScreen = waitingScreen,
         display = display,
         onActivated = { telemetry.noteSuccessfulSync() },
+        onAuthFailure = { code, source -> session.handleAuthFailure(code, source) },
     )
 
     val apiConfigured: Boolean = apiBaseUrl.isNotBlank()

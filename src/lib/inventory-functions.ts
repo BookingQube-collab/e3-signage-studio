@@ -164,6 +164,13 @@ export const syncNowFn = createServerFn({ method: "POST" })
     return requestScreenSync(data.accessToken, data.id);
   });
 
+export const beginRepairScreenFn = createServerFn({ method: "POST" })
+  .validator(z.object({ accessToken: z.string(), id: z.string().uuid() }))
+  .handler(async ({ data }): Promise<ScreenRecord> => {
+    const { beginRepairScreen } = await import("@/server/inventory.server");
+    return beginRepairScreen(data.accessToken, data.id);
+  });
+
 export const repairScreenFn = createServerFn({ method: "POST" })
   .validator(
     z.object({

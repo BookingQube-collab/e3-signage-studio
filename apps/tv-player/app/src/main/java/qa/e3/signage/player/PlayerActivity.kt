@@ -8,9 +8,6 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -31,7 +28,7 @@ class PlayerActivity : ComponentActivity() {
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         val app = application as E3PlayerApplication
         setContent {
-            var paired by remember { mutableStateOf(app.container.store.read() != null) }
+            val paired by app.container.session.paired.collectAsStateWithLifecycle()
             val orientation by app.container.display.orientation.collectAsStateWithLifecycle()
             DisposableEffect(Unit) {
                 hideSystemBars()
@@ -40,11 +37,11 @@ class PlayerActivity : ComponentActivity() {
             val displayOrientation =
                 if (paired) orientation else ScreenDisplayStore.LANDSCAPE
             DisplayOrientedFrame(orientation = displayOrientation) {
-                key(displayOrientation) {
+                key(paired, displayOrientation) {
                     if (paired) {
                         PlaybackRoute()
                     } else {
-                        PairingRoute(onPaired = { paired = true })
+                        PairingRoute(onPaired = { app.container.session.markPaired() })
                     }
                 }
             }

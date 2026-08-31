@@ -52,7 +52,9 @@ Open **`apps/tv-player`** (not the repo root) in Android Studio, or point Cursor
 
 - Media3 / ExoPlayer for video, BitmapFactory for JPG / PNG / WebP
 - Sources are local `file://` paths only — never signed cloud URLs
-- Mixed playlists loop, skip failed items, honor image duration; the same clip is rebuilt when the playlist wraps
+- Mixed playlists loop, skip failed items, honor image duration; videos play to natural end (playlist duration is not a trim cap)
+- Video→video handoff uses a single ExoPlayer (no dual-decoder FADE) so TCL / low-end SoCs do not black-screen on 2+ clip playlists
+- The same clip is rebuilt when the playlist wraps
 - Layout zones scale to the physical display (FIT / FILL / COVER / CONTAIN / STRETCH)
 - Local schedule windows use the campaign timezone (default Asia/Qatar)
 - No admin chrome, titles, or player controls
@@ -64,7 +66,7 @@ Open **`apps/tv-player`** (not the repo root) in Android Studio, or point Cursor
 gradlew.bat :app:assembleDebug
 ```
 
-Install the versioned APK copied to the repo `dist/` folder (gitignored), e.g. `dist/e3-signage-player-0.27.0-debug.apk`. Open **E3 Signage**, enter the 6-digit code in the CMS **Pair a screen** dialog. Uninstall a previous sideload first if the TV keeps the old generic icon.
+Install the versioned APK copied to the repo `dist/` folder (gitignored), e.g. `dist/e3-signage-player-0.28.0-debug.apk`. Open **E3 Signage**, enter the 6-digit code in the CMS **Pair a screen** dialog. Uninstall a previous sideload first if the TV keeps the old generic icon.
 
 ## Tests
 

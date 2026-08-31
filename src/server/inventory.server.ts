@@ -1246,6 +1246,52 @@ export async function requestScreenSync(accessToken: string, id: string): Promis
   return next;
 }
 
+export async function beginRepairScreen(
+  accessToken: string,
+  id: string,
+): Promise<ScreenRecord> {
+  const auth = await requireCmsPermission(accessToken, "screens.manage");
+  const current = await getScreen(accessToken, id);
+  if (!current) throw new Error("Screen not found.");
+  await requireScreenLocation(accessToken, auth, current);
+
+  const admin = getServiceRoleClient();
+  const now = new Date().toISOString();
+  const { error: tokenError } = await admin
+    .from("device_tokens")
+    .update({ revoked_at: now })
+    .eq("screen_id", id)
+    .is("revoked_at", null);
+  throwIfError(tokenError, "Could not revoke device tokens.");
+
+  const { error: pairError } = await admin
+    .from("device_pairing_codes")
+    .update({ consumed_at: now })
+    .eq("screen_id", id)
+    .is("consumed_at", null);
+  throwIfError(pairError, "Could not invalidate pairing codes.");
+
+  const { error: heartbeatError } = await admin
+    .from("screens")
+    .update({ last_heartbeat_at: null })
+    .eq("id", id);
+  throwIfError(heartbeatError, "Could not reset the screen connection.");
+
+  const { error: syncError } = await admin
+    .from("device_sync_states")
+    .update({
+      sync_state: "WAITING",
+      sync_progress: 0,
+      package_state: "PENDING",
+    })
+    .eq("screen_id", id);
+  throwIfError(syncError, "Could not reset sync state.");
+
+  const next = await getScreen(accessToken, id);
+  if (!next) throw new Error("Screen not found.");
+  return next;
+}
+
 export async function repairScreen(
   accessToken: string,
   id: string,

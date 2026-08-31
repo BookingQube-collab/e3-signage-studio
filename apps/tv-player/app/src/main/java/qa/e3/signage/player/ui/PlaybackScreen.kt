@@ -8,6 +8,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -30,6 +31,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -67,15 +69,30 @@ import java.util.LinkedHashMap
 @Composable
 fun PlaybackRoute(viewModel: PlaybackViewModel = viewModel()) {
     val state by viewModel.ui.collectAsStateWithLifecycle()
-    PlaybackScreen(state, onVideoFinished = viewModel::onVideoFinished)
+    PlaybackScreen(
+        state = state,
+        onVideoFinished = viewModel::onVideoFinished,
+        onVideoReady = viewModel::onVideoReady,
+        onRequestRePair = { viewModel.requestRePair() },
+    )
 }
 
 @Composable
-fun PlaybackScreen(state: PlaybackUiState, onVideoFinished: (Int, Boolean) -> Unit) {
+fun PlaybackScreen(
+    state: PlaybackUiState,
+    onVideoFinished: (Int, Boolean) -> Unit,
+    onVideoReady: (Int) -> Unit = {},
+    onRequestRePair: () -> Unit = {},
+) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(parseHex(state.background)),
+            .background(parseHex(state.background))
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onLongPress = { onRequestRePair() },
+                )
+            },
     ) {
         ImageSoundtrackPlayer(
             fileUri = if (state.playing) state.soundtrackUri else null,
@@ -90,6 +107,7 @@ fun PlaybackScreen(state: PlaybackUiState, onVideoFinished: (Int, Boolean) -> Un
             zones = state.zones,
             timezone = state.timezone,
             onVideoFinished = onVideoFinished,
+            onVideoReady = onVideoReady,
         )
     }
 }
@@ -111,6 +129,7 @@ private fun ScaledLayoutCanvas(
     zones: List<ZoneUiState>,
     timezone: String,
     onVideoFinished: (Int, Boolean) -> Unit,
+    onVideoReady: (Int) -> Unit,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val lw = layoutWidth.coerceAtLeast(1)
@@ -137,7 +156,7 @@ private fun ScaledLayoutCanvas(
                             with(density) { zH.toDp() },
                         ),
                 ) {
-                    TransitioningZone(zone, timezone, onVideoFinished)
+                    TransitioningZone(zone, timezone, onVideoFinished, onVideoReady)
                 }
             }
         }
@@ -159,7 +178,12 @@ private fun ZonePresentation.itemTransition(): ItemTransition = when (this) {
 }
 
 @Composable
-private fun TransitioningZone(zone: ZoneUiState, timezone: String, onVideoFinished: (Int, Boolean) -> Unit) {
+private fun TransitioningZone(
+    zone: ZoneUiState,
+    timezone: String,
+    onVideoFinished: (Int, Boolean) -> Unit,
+    onVideoReady: (Int) -> Unit,
+) {
     val presentation = zone.presentation
     var outgoing by remember { mutableStateOf<ZonePresentation?>(null) }
     var incoming by remember { mutableStateOf(presentation) }
@@ -171,17 +195,23 @@ private fun TransitioningZone(zone: ZoneUiState, timezone: String, onVideoFinish
             incoming = presentation
             return@LaunchedEffect
         }
-        outgoing = incoming
+        val previous = incoming
+        val effect = presentation.itemTransition()
+        val previousIsVideo = previous is ZonePresentation.Video
+        val nextIsVideo = presentation is ZonePresentation.Video
+        // Hardware video decoders are scarce on TCL / signage SoCs. Keeping the
+        // outgoing ExoPlayer alive during a FADE while preparing the next clip
+        // deadlocks the second decoder → black screen on 2+ video playlists.
+        if (previousIsVideo || nextIsVideo || effect.isInstant()) {
+            outgoing = null
+            incoming = presentation
+            progress.snapTo(1f)
+            return@LaunchedEffect
+        }
+        outgoing = previous
         val gate = CompletableDeferred<Unit>()
         readyGate = gate
         incoming = presentation
-        val effect = presentation.itemTransition()
-        if (effect.isInstant() || outgoing == null) {
-            progress.snapTo(1f)
-            outgoing = null
-            return@LaunchedEffect
-        }
-        // Hold previous frame until incoming image/video has something to show.
         progress.snapTo(0f)
         withTimeoutOrNull(2_500) { gate.await() }
         progress.animateTo(1f, tween(ITEM_TRANSITION_MS))
@@ -194,7 +224,7 @@ private fun TransitioningZone(zone: ZoneUiState, timezone: String, onVideoFinish
         val effect = incoming.itemTransition()
         if (out != null) {
             TransitionLayer(LayerRole.PREVIOUS, effect, t) {
-                ZoneMedia(out, zone.fit, timezone, onVideoFinished, layerAlpha = layerAlpha(LayerRole.PREVIOUS, effect, t), onReady = {})
+                ZoneMedia(out, zone.fit, timezone, onVideoFinished, onVideoReady, layerAlpha = layerAlpha(LayerRole.PREVIOUS, effect, t), onReady = {})
             }
         }
         TransitionLayer(LayerRole.CURRENT, effect, t) {
@@ -203,6 +233,7 @@ private fun TransitioningZone(zone: ZoneUiState, timezone: String, onVideoFinish
                 zone.fit,
                 timezone,
                 onVideoFinished,
+                onVideoReady,
                 layerAlpha = layerAlpha(LayerRole.CURRENT, effect, t),
                 onReady = { readyGate.complete(Unit) },
             )
@@ -283,6 +314,7 @@ private fun ZoneMedia(
     fit: FitMode,
     timezone: String,
     onVideoFinished: (Int, Boolean) -> Unit,
+    onVideoReady: (Int) -> Unit,
     layerAlpha: Float,
     onReady: () -> Unit,
 ) {
@@ -295,7 +327,10 @@ private fun ZoneMedia(
             fit = fit,
             layerAlpha = layerAlpha,
             onFinished = onVideoFinished,
-            onReady = onReady,
+            onReady = {
+                onReady()
+                onVideoReady(presentation.generation)
+            },
         )
         is ZonePresentation.Image -> LocalImageZone(presentation.fileUri, fit, onReady)
         ZonePresentation.Clock -> {
@@ -343,16 +378,19 @@ private fun LocalVideoZone(
     onReady: () -> Unit,
 ) {
     val context = LocalContext.current
-    val player = remember(key, generation) {
-        ExoPlayer.Builder(context).build().apply {
+    // Hold the player in a ref so AndroidView can bind after DisposableEffect creates it.
+    // Create+release only inside DisposableEffect so the previous decoder is freed before
+    // the next prepare() — critical on TCL where two concurrent ExoPlayers hang.
+    val playerRef = remember { mutableStateOf<ExoPlayer?>(null) }
+    DisposableEffect(key, generation, fileUri, loop) {
+        val player = ExoPlayer.Builder(context).build().apply {
             val uri = Uri.parse(requireLocalPlaybackUri(fileUri).toString())
             setMediaItem(MediaItem.fromUri(uri))
             repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
             playWhenReady = true
             prepare()
         }
-    }
-    DisposableEffect(player, generation) {
+        playerRef.value = player
         var readySent = false
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -381,6 +419,9 @@ private fun LocalVideoZone(
         onDispose {
             player.removeListener(listener)
             player.release()
+            if (playerRef.value === player) {
+                playerRef.value = null
+            }
         }
     }
     val resize = when (exoResizeMode(fit)) {
@@ -388,6 +429,7 @@ private fun LocalVideoZone(
         "ZOOM" -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
         else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
     }
+    val player = playerRef.value
     AndroidView(
         factory = { ctx ->
             (LayoutInflater.from(ctx).inflate(R.layout.player_texture, null, false) as PlayerView).apply {

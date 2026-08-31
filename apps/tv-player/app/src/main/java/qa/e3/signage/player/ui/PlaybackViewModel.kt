@@ -34,6 +34,8 @@ import qa.e3.signage.player.core.nextSyncPollDelayMs
 import qa.e3.signage.player.core.planZones
 import qa.e3.signage.player.core.resolvePlaylistItems
 import qa.e3.signage.player.core.startPlayback
+import qa.e3.signage.player.core.VIDEO_READY_TIMEOUT_MS
+import qa.e3.signage.player.core.videoPlaybackSafetyTimeoutMs
 
 data class PlaybackUiState(
     val playing: Boolean = false,
@@ -85,6 +87,9 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         private set
 
     @Volatile
+    private var videoReady: CompletableDeferred<Unit> = CompletableDeferred()
+
+    @Volatile
     private var videoFailed = false
 
     @Volatile
@@ -119,11 +124,23 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     @Volatile
     private var soundtrackGeneration = 0
 
+    fun onVideoReady(generation: Int) {
+        if (generation == videoGeneration) {
+            videoReady.complete(Unit)
+        }
+    }
+
     fun onVideoFinished(generation: Int, failed: Boolean = false) {
         if (generation == videoGeneration) {
             videoFailed = failed
+            videoReady.complete(Unit)
             videoFinished.complete(Unit)
         }
+    }
+
+    /** Long-press on the TV clears credentials so Repair can show a new pairing code. */
+    fun requestRePair() {
+        app.container.session.invalidate("user long-press re-pair")
     }
 
     private suspend fun playLoop() {
@@ -210,6 +227,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 if (item.kind == PlaylistItemKind.VIDEO) {
                     videoGeneration += 1
                     videoFailed = false
+                    videoReady = CompletableDeferred()
                     videoFinished = CompletableDeferred()
                 }
                 openPlay = startPlayback(
@@ -228,26 +246,13 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                             manifest.manifestVersion,
                         )
                     }
-                    PlaylistItemKind.VIDEO -> {
-                        val cap = (item.durationSeconds * 1000).toLong().coerceAtLeast(250L)
-                        val ended = withTimeoutOrNull(cap) {
-                            while (!videoFinished.isCompleted) {
-                                if (shouldShowLoadingForNewerPackage(manifest.manifestVersion)) {
-                                    return@withTimeoutOrNull null
-                                }
-                                withTimeoutOrNull(2_000) { videoFinished.await() }
-                            }
-                        }
-                        when {
-                            shouldShowLoadingForNewerPackage(manifest.manifestVersion) ->
-                                PlaybackResult.INTERRUPTED
-                            videoFailed -> PlaybackResult.ERROR
-                            ended == null -> PlaybackResult.INTERRUPTED
-                            else -> PlaybackResult.COMPLETED
-                        }
-                    }
+                    PlaylistItemKind.VIDEO -> awaitVideoItem(item, manifest.manifestVersion)
                 }
                 closeOpenPlay(result)
+                // Failed clips must not freeze the loop — skip to the next item.
+                if (result == PlaybackResult.ERROR) {
+                    Log.w(TAG, "video error; skipping ${item.localFilename}")
+                }
                 if (packages.activeVersion() != manifest.manifestVersion) {
                     break
                 }
@@ -312,6 +317,60 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             waited += slice
         }
         return PlaybackResult.COMPLETED
+    }
+
+    /**
+     * Videos play to natural end (or error). Playlist duration is not a trim cap —
+     * that caused 10s restarts ("plays fast") and premature advances into a second
+     * ExoPlayer while the first decoder was still held.
+     */
+    private suspend fun awaitVideoItem(
+        item: ResolvedPlaylistItem,
+        activeVersion: Int,
+    ): PlaybackResult {
+        val ready = withTimeoutOrNull(VIDEO_READY_TIMEOUT_MS) {
+            while (!videoReady.isCompleted) {
+                if (shouldShowLoadingForNewerPackage(activeVersion)) return@withTimeoutOrNull null
+                if (packages.activeVersion() != activeVersion) return@withTimeoutOrNull null
+                withTimeoutOrNull(1_000) { videoReady.await() }
+            }
+            Unit
+        }
+        if (shouldShowLoadingForNewerPackage(activeVersion) || packages.activeVersion() != activeVersion) {
+            return PlaybackResult.INTERRUPTED
+        }
+        if (ready == null && !videoFinished.isCompleted) {
+            Log.w(TAG, "video not ready in ${VIDEO_READY_TIMEOUT_MS}ms: ${item.localFilename}")
+            videoFailed = true
+            return PlaybackResult.ERROR
+        }
+        if (videoFailed || videoFinished.isCompleted) {
+            return if (videoFailed) PlaybackResult.ERROR else PlaybackResult.COMPLETED
+        }
+
+        val safety = videoPlaybackSafetyTimeoutMs(item.durationSeconds)
+        val ended = withTimeoutOrNull(safety) {
+            while (!videoFinished.isCompleted) {
+                if (shouldShowLoadingForNewerPackage(activeVersion)) {
+                    return@withTimeoutOrNull null
+                }
+                if (packages.activeVersion() != activeVersion) {
+                    return@withTimeoutOrNull null
+                }
+                withTimeoutOrNull(2_000) { videoFinished.await() }
+            }
+            Unit
+        }
+        return when {
+            shouldShowLoadingForNewerPackage(activeVersion) ||
+                packages.activeVersion() != activeVersion -> PlaybackResult.INTERRUPTED
+            videoFailed -> PlaybackResult.ERROR
+            ended == null -> {
+                Log.w(TAG, "video safety timeout: ${item.localFilename}")
+                PlaybackResult.ERROR
+            }
+            else -> PlaybackResult.COMPLETED
+        }
     }
 
     private suspend fun waitingKindWhilePreparing(

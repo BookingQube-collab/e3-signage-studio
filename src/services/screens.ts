@@ -1,4 +1,5 @@
 import {
+  beginRepairScreenFn,
   duplicateScreenFn,
   getScreenFn,
   listScreensByLocationFn,
@@ -84,6 +85,12 @@ export const liveScreenService: ScreenService = {
         resolution: input.resolution,
         groupIds: input.groupIds.filter(isUuid),
       },
+    });
+    return toUiScreen(row);
+  },
+  beginRepair: async (id) => {
+    const row = await beginRepairScreenFn({
+      data: { accessToken: await accessToken(), id },
     });
     return toUiScreen(row);
   },
