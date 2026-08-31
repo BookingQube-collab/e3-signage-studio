@@ -119,8 +119,12 @@ function ScreenDetailPage() {
         entity: next,
       });
       setPlaylistOpen(false);
-      toast.success("Playlist assigned and packaged — tap Sync Now to push to the TV now");
-      invalidateKeysInBackground(qc, [["playlist", next.playlistId]]);
+      toast.success(
+        next.playlistName
+          ? `Assigned “${next.playlistName}” — tap Sync Now to push to the TV`
+          : "Playlist assigned — tap Sync Now to push to the TV",
+      );
+      invalidateKeysInBackground(qc, [["playlist", next.playlistId], ["screen", id]]);
     },
     onError: (err: Error) => {
       toast.error(err.message || "Could not change playlist");
@@ -240,20 +244,46 @@ function ScreenDetailPage() {
                   <E3CardHeader
                     title="Current content"
                     description={
-                      previewClips.length > 1
-                        ? `${screen.nowPlaying ?? "Assigned playlist"} · ${previewClips.length} items looping`
+                      screen.playlistName
+                        ? previewClips.length > 0
+                          ? `Playlist: ${screen.playlistName} · ${previewClips.length} items`
+                          : `Playlist: ${screen.playlistName}`
                         : (screen.nowPlaying ?? "Nothing playing")
                     }
                   />
                   <E3CardBody>
+                    {screen.playlistName ? (
+                      <p className="mb-3 text-sm text-muted-foreground">
+                        {screen.localVersion !== screen.cloudVersion ? (
+                          <>
+                            TV is behind cloud — tap <span className="font-medium text-foreground">Sync Now</span>
+                            {screen.nowPlaying ? (
+                              <>
+                                {" "}
+                                · last seen on TV:{" "}
+                                <span className="text-foreground">{screen.nowPlaying}</span>
+                              </>
+                            ) : null}
+                          </>
+                        ) : screen.nowPlaying ? (
+                          <>
+                            Now playing: <span className="text-foreground">{screen.nowPlaying}</span>
+                          </>
+                        ) : (
+                          "Waiting for the TV to report playback"
+                        )}
+                      </p>
+                    ) : null}
                     <PlaylistLoopPreview
                       clips={previewClips}
                       startMediaId={screen.nowPlayingMediaId}
                       orientation={screen.orientation}
                       emptyLabel={
-                        screen.nowPlaying
-                          ? `${screen.nowPlaying} · ${screen.resolution} · ${screen.orientation}`
-                          : "No playback"
+                        screen.playlistName
+                          ? `${screen.playlistName} · ${screen.resolution} · ${screen.orientation}`
+                          : screen.nowPlaying
+                            ? `${screen.nowPlaying} · ${screen.resolution} · ${screen.orientation}`
+                            : "No playback"
                       }
                     />
 
@@ -401,7 +431,7 @@ function ScreenDetailPage() {
                 <E3Card>
                   <E3CardHeader title="Health" />
                   <E3CardBody className="space-y-3 text-sm">
-                    <div className="flex justify-between">
+                    <div className="flex justify-between gap-3">
                       <span className="text-muted-foreground">Version match</span>
                       <span
                         className={
@@ -413,6 +443,16 @@ function ScreenDetailPage() {
                         {screen.localVersion === screen.cloudVersion ? "In sync" : "Behind cloud"}
                       </span>
                     </div>
+                    {screen.localVersion !== screen.cloudVersion && canManageScreens ? (
+                      <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+                        Cloud has a newer package than this TV. Tap Sync Now, then wait for the
+                        heartbeat — the assigned playlist is already{" "}
+                        <span className="font-medium text-foreground">
+                          {screen.playlistName ?? "saved"}
+                        </span>
+                        .
+                      </p>
+                    ) : null}
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Heartbeat</span>
                       <span>{screen.lastSeen}</span>

@@ -56,8 +56,13 @@ export function playlistSequenceFingerprint(
 ): string {
   return items
     .map((item) => {
-      const duration = Math.max(0.1, Number(item.durationSeconds) || 0);
-      const transition = String(item.transition ?? "FADE").trim().toUpperCase() || "FADE";
+      // One decimal avoids float noise (DB numeric vs JSON) causing perpetual stale republish.
+      const duration = Math.round(Math.max(0.1, Number(item.durationSeconds) || 0) * 10) / 10;
+      const transition =
+        String(item.transition ?? "FADE")
+          .trim()
+          .toUpperCase()
+          .replace(/\s+/g, "_") || "FADE";
       const audio = item.audioMediaVersionId ? `:${item.audioMediaVersionId}` : "";
       return `${item.mediaVersionId}:${duration}:${transition}${audio}`;
     })

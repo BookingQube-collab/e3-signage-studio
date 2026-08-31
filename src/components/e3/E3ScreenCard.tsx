@@ -98,7 +98,11 @@ export function E3ScreenCard({
             <div className="flex size-full flex-col items-center justify-center gap-1.5 px-3 text-muted-foreground">
               <MonitorPlay className="size-8 opacity-40" aria-hidden />
               <span className="line-clamp-2 text-center text-xs">
-                {screen.nowPlaying ?? "Nothing playing"}
+                {screen.playlistName
+                  ? screen.nowPlaying
+                    ? screen.nowPlaying
+                    : screen.playlistName
+                  : (screen.nowPlaying ?? "Nothing playing")}
               </span>
             </div>
           )}
@@ -107,12 +111,16 @@ export function E3ScreenCard({
         <dl className="mt-4 space-y-2 text-sm">
           <div className="flex min-w-0 items-center gap-2">
             <MonitorPlay className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-            <dt className="sr-only">Now playing</dt>
-            <dd className="min-w-0 truncate">{screen.nowPlaying ?? "Nothing playing"}</dd>
+            <dt className="sr-only">Playlist</dt>
+            <dd className="min-w-0 truncate font-medium">
+              {screen.playlistName ?? "No playlist assigned"}
+            </dd>
           </div>
           <div className="flex justify-between gap-3 text-xs text-muted-foreground">
-            <dt>Playlist</dt>
-            <dd className="min-w-0 truncate text-foreground">{screen.playlistName ?? "—"}</dd>
+            <dt>Now playing</dt>
+            <dd className="min-w-0 truncate text-foreground">
+              {screen.nowPlaying ?? "Nothing playing"}
+            </dd>
           </div>
           <div className="flex justify-between gap-3 text-xs text-muted-foreground">
             <dt>Last seen</dt>

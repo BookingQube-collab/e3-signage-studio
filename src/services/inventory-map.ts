@@ -107,13 +107,15 @@ export function toUiScreenStatus(
 ): ScreenStatus {
   if (operational === "DISABLED" || connectivity === "DISABLED") return "disabled";
   if (connectivity !== "ONLINE") return "offline";
+  // UPDATING means package READY (activating) — not a stuck download. Pairing READY/ACTIVE
+  // syncState with UPDATING was showing SYNCING + Ready together and looked broken.
   if (
     operational === "SYNCING" ||
     operational === "DOWNLOADING" ||
     operational === "VERIFYING" ||
-    operational === "UPDATING" ||
     syncState === "DOWNLOADING" ||
-    syncState === "VERIFYING"
+    syncState === "VERIFYING" ||
+    syncState === "NOTIFIED"
   ) {
     return "syncing";
   }

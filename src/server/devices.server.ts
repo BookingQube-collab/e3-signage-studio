@@ -965,13 +965,15 @@ export async function deviceHeartbeat(
   });
   throwIfError(hbError, "Could not store heartbeat.");
 
+  // Never overwrite screens.current_playlist_id from heartbeat — that column is the
+  // CMS always-on assignment. Player activePlaylistId is telemetry only (campaign vs
+  // default playlist). Wiping it made sync-status republish an idle package forever.
   const screenPatch: Record<string, unknown> = {
     last_heartbeat_at: now,
     app_version: parsed.data.appVersion,
     operational_status: operationalStatus,
     total_storage: parsed.data.totalStorageBytes,
     available_storage: parsed.data.availableStorageBytes,
-    current_playlist_id: parsed.data.activePlaylistId ?? null,
     currently_playing_media_id: parsed.data.currentlyPlayingMediaId ?? null,
     last_error: parsed.data.lastError ?? null,
     local_manifest_version: parsed.data.activeManifestVersion ?? 0,
@@ -986,7 +988,9 @@ export async function deviceHeartbeat(
 
   const { data: sync } = await auth.admin
     .from("device_sync_states")
-    .select("sync_state")
+    .select(
+      "sync_state, cloud_manifest_version, pending_manifest_id, active_manifest_id, sync_requested_at",
+    )
     .eq("screen_id", auth.screen.id)
     .maybeSingle();
   const from = asString((sync as { sync_state?: string } | null)?.sync_state, "WAITING");
@@ -1002,6 +1006,21 @@ export async function deviceHeartbeat(
   } else if (from !== to && isSyncState(to)) {
     patch["sync_state"] = to;
   }
+
+  // Safety net: if the TV already reports ACTIVE at/above cloud version, clear
+  // sync_requested / pending so CMS stops showing SYNCING after a missed confirm.
+  const reportedVersion = parsed.data.activeManifestVersion ?? 0;
+  const cloudVersion = asNumber(
+    (sync as { cloud_manifest_version?: number } | null)?.cloud_manifest_version,
+    asNumber(auth.screen.cloud_manifest_version, 0),
+  );
+  if (to === "ACTIVE" && reportedVersion > 0 && reportedVersion >= cloudVersion) {
+    patch["sync_requested_at"] = null;
+    patch["pending_manifest_id"] = null;
+    patch["package_state"] = "ACTIVE";
+    patch["sync_progress"] = 100;
+  }
+
   if (sync) {
     const { error } = await auth.admin.from("device_sync_states").update(patch).eq("screen_id", auth.screen.id);
     throwIfError(error, "Could not update sync state.");
@@ -1071,6 +1090,10 @@ export async function deviceSyncConfirmation(
     updated_at: now,
   };
   if (nextPackage === "ACTIVE") {
+    const cloudVersion = asNumber(
+      (sync as { cloud_manifest_version?: number } | null)?.cloud_manifest_version,
+      asNumber(auth.screen.cloud_manifest_version, 0),
+    );
     patch["previous_manifest_id"] = asNullableString(
       (sync as { active_manifest_id?: string | null } | null)?.active_manifest_id,
     );
@@ -1078,7 +1101,12 @@ export async function deviceSyncConfirmation(
     if (manifestId && manifestId === asNullableString((sync as { pending_manifest_id?: string | null } | null)?.pending_manifest_id)) {
       patch["pending_manifest_id"] = null;
     }
-    patch["sync_requested_at"] = null;
+    // Only clear the sync flag when the device caught up to (or past) cloud.
+    // Confirming an older package must not hide a newer pending publish.
+    if (parsed.data.manifestVersion >= cloudVersion) {
+      patch["sync_requested_at"] = null;
+      patch["pending_manifest_id"] = null;
+    }
     patch["sync_progress"] = 100;
     await auth.admin
       .from("screens")
