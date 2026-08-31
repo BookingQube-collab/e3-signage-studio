@@ -294,29 +294,32 @@ export const liveMediaService: MediaService = {
     const row = await archiveMediaFn({ data: { accessToken: await accessToken(), id } });
     return toUiMedia(row);
   },
-  remove: async (id, options) =>
+  remove: async (id, _options) =>
     deleteMediaFn({
       data: {
         accessToken: await accessToken(),
         id,
-        deleteFromStorage: options?.deleteFromStorage === true,
+        deleteFromStorage: true,
       },
     }),
-  removeMany: async (ids, options) =>
+  removeMany: async (ids, _options) =>
     deleteMediaBulkFn({
       data: {
         accessToken: await accessToken(),
         ids,
-        deleteFromStorage: options?.deleteFromStorage === true,
+        deleteFromStorage: true,
       },
     }),
   downloadUrl: async (id) => mediaDownloadUrlFn({ data: { accessToken: await accessToken(), id } }),
   resyncFromStorage: async (folderId) => {
     try {
-      const rows = await resyncMediaFromStorageFn({
+      const result = await resyncMediaFromStorageFn({
         data: { accessToken: await accessToken(), folderId: folderId ?? null },
       });
-      return rows.map(toUiMedia);
+      return {
+        media: result.media.map(toUiMedia),
+        purgedCount: result.purgedCount,
+      };
     } catch (error) {
       throw new Error(describeResyncError(error instanceof Error ? error.message : ""));
     }
@@ -329,13 +332,13 @@ export const liveMediaService: MediaService = {
     const row = await createMediaFolderFn({ data: { accessToken: await accessToken(), name } });
     return toUiFolder(row);
   },
-  deleteFolder: async (id, options) => {
+  deleteFolder: async (id, _options) => {
     try {
       return await deleteMediaFolderFn({
         data: {
           accessToken: await accessToken(),
           id,
-          deleteFromStorage: options?.deleteFromStorage === true,
+          deleteFromStorage: true,
         },
       });
     } catch (error) {

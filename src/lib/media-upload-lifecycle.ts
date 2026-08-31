@@ -76,7 +76,10 @@ export function shouldResyncPromote(status: string, objectFound: boolean): boole
   return status === "PROCESSING" || status === "FAILED";
 }
 
-/** Reattach R2 objects that have no READY library row. Never duplicate a key that already lists. */
+/**
+ * Keys not referenced by any library version row are orphans.
+ * Sync must purge them from R2 — never recreate library rows for deleted media.
+ */
 export function shouldImportOrphanStorageKey(
   key: string,
   readyOrKnownKeys: Iterable<string>,
@@ -86,11 +89,19 @@ export function shouldImportOrphanStorageKey(
   return !known.has(key);
 }
 
+/** Same rule as import detection; callers purge instead of re-importing. */
+export function shouldPurgeOrphanStorageKey(
+  key: string,
+  referencedKeys: Iterable<string>,
+): boolean {
+  return shouldImportOrphanStorageKey(key, referencedKeys);
+}
+
 export function orphanStorageKeysOnPage(
   pageKeys: string[],
   readyOrKnownKeys: Iterable<string>,
 ): string[] {
-  return pageKeys.filter((key) => shouldImportOrphanStorageKey(key, readyOrKnownKeys));
+  return pageKeys.filter((key) => shouldPurgeOrphanStorageKey(key, readyOrKnownKeys));
 }
 
 /** Archived or failed rows whose bytes are still in the bucket should come back as READY. */
@@ -104,10 +115,24 @@ export function shouldResyncRestoreLibraryRow(
   return status !== "READY";
 }
 
-export function describeResyncToast(restored: number): { title: string } {
-  if (restored <= 0) return { title: "Library is in sync with Cloudflare" };
+export function describeResyncToast(restored: number, purgedCount = 0): { title: string } {
+  if (restored <= 0 && purgedCount <= 0) {
+    return { title: "Library is in sync with Cloudflare" };
+  }
+  if (restored <= 0) {
+    return {
+      title: `Removed ${purgedCount} leftover file${purgedCount === 1 ? "" : "s"} from Cloudflare`,
+    };
+  }
+  if (purgedCount <= 0) {
+    return {
+      title: `${restored} file${restored === 1 ? "" : "s"} restored from Cloudflare`,
+    };
+  }
   return {
-    title: `${restored} file${restored === 1 ? "" : "s"} restored from Cloudflare`,
+    title: `${restored} restored · ${purgedCount} leftover Cloudflare file${
+      purgedCount === 1 ? "" : "s"
+    } removed`,
   };
 }
 

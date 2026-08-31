@@ -222,9 +222,11 @@ test("resync promotes pending rows whose objects exist and never duplicates READ
   assert.equal(shouldResyncPromote("PROCESSING", false), false);
   assert.equal(describeResyncToast(0).title, "Library is in sync with Cloudflare");
   assert.match(describeResyncToast(2).title, /2 files restored/);
+  assert.match(describeResyncToast(0, 3).title, /3 leftover files from Cloudflare/);
+  assert.match(describeResyncToast(1, 2).title, /1 restored/);
 });
 
-test("resync reattaches R2 objects that have no READY library row", () => {
+test("orphans without a library version row are purged, not re-imported", () => {
   const ready = ["org/media-a/v1/aaa.jpg"];
   const page = ["org/media-a/v1/aaa.jpg", "org/media-b/v1/bbb.jpg", "org/media-c/v1/ccc.jpg"];
   assert.equal(shouldImportOrphanStorageKey("org/media-b/v1/bbb.jpg", ready), true);

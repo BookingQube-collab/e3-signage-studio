@@ -158,8 +158,8 @@ export function folderDeleteCopy(
   const files = fileCount === 1 ? "1 file" : `${fileCount} files`;
   return {
     title,
-    description: `This deletes the folder and ${files} inside. This cannot be undone.`,
-    detail: `${folderName} has ${files}. They will be removed from the library with the folder.`,
+    description: `This deletes the folder and ${files} from the library and Cloudflare. This cannot be undone.`,
+    detail: `${folderName} has ${files}. They will be removed from the library and Cloudflare with the folder.`,
     confirmLabel: `Delete folder and ${files}`,
   };
 }

@@ -61,7 +61,7 @@ export const completeMediaUploadFn = createServerFn({ method: "POST" })
 
 export const resyncMediaFromStorageFn = createServerFn({ method: "POST" })
   .validator(accessTokenSchema.extend({ folderId: z.string().uuid().nullable() }))
-  .handler(async ({ data }): Promise<MediaRecord[]> => {
+  .handler(async ({ data }): Promise<{ media: MediaRecord[]; purgedCount: number }> => {
     const { resyncFromStorage } = await import("@/server/media.server");
     return resyncFromStorage(data.accessToken, data.folderId);
   });
@@ -110,7 +110,7 @@ export const deleteMediaFn = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<boolean> => {
     const { deleteMedia } = await import("@/server/media.server");
     return deleteMedia(data.accessToken, data.id, {
-      deleteFromStorage: data.deleteFromStorage === true,
+      deleteFromStorage: true,
     });
   });
 
@@ -124,7 +124,7 @@ export const deleteMediaBulkFn = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<boolean> => {
     const { deleteMediaBulk } = await import("@/server/media.server");
     return deleteMediaBulk(data.accessToken, data.ids, {
-      deleteFromStorage: data.deleteFromStorage === true,
+      deleteFromStorage: true,
     });
   });
 
@@ -159,7 +159,7 @@ export const deleteMediaFolderFn = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<boolean> => {
     const { deleteFolder } = await import("@/server/media.server");
     return deleteFolder(data.accessToken, data.id, {
-      deleteFromStorage: data.deleteFromStorage === true,
+      deleteFromStorage: true,
     });
   });
 

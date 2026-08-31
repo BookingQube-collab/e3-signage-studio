@@ -194,8 +194,9 @@ test("partitionBulkDelete does not throw when usedIn is missing", () => {
   assert.equal(blocked.length, 0);
 });
 
-test("deleteFromStorage is opt-in and R2/supabase copy differs", () => {
-  assert.equal(shouldDeleteFromStorage(undefined), false);
+test("deleteFromStorage defaults to hard-delete and R2/supabase copy differs", () => {
+  assert.equal(shouldDeleteFromStorage(undefined), true);
+  assert.equal(shouldDeleteFromStorage(null), true);
   assert.equal(shouldDeleteFromStorage(false), false);
   assert.equal(shouldDeleteFromStorage(true), true);
   const r2 = mediaStorageDeleteCopy("r2");

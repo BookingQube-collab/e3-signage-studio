@@ -151,7 +151,7 @@ test("folder delete warns and removes files in that folder", () => {
   assert.match(empty.description, /cannot be undone/i);
   const filled = folderDeleteCopy("InflataPark", 6);
   assert.equal(filled.confirmLabel, "Delete folder and 6 files");
-  assert.match(filled.description, /folder and 6 files inside/i);
+  assert.match(filled.description, /folder and 6 files from the library and Cloudflare/i);
   assert.match(filled.detail ?? "", /InflataPark has 6 files/);
   const folders = [
     { id: "f-inflata", name: "InflataPark" },

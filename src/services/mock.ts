@@ -308,7 +308,7 @@ export const mockServices: AppServices = {
       const existing = store.media.find((m) => m.id === id);
       return delay({ url: "#", filename: existing?.filename ?? "media" }, 100);
     },
-    resyncFromStorage: () => delay([] as Media[], 100),
+    resyncFromStorage: () => delay({ media: [] as Media[], purgedCount: 0 }, 100),
     listFolders: () => delay(store.folders),
     createFolder: (name: string) => {
       const resolved = resolveFolderCreate(store.folders, name, `fld-${Date.now()}`);

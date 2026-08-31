@@ -29,9 +29,7 @@ import {
   inferOrphanMediaMime,
   mediaTypeFromMime,
   normalizeChecksum,
-  parseMediaStorageKey,
   renameMediaDisplayName,
-  restoredLibraryFilename,
   ensurePlayableFilename,
   safeMediaFilename,
   uniqueLibraryFilename,
@@ -64,7 +62,6 @@ import {
   shouldSkipLibraryAutoSync,
   shouldSkipManualStorageResync,
   shouldListBucketBeforeHeadPromote,
-  isReadyLibraryCoveredKey,
   STORAGE_LIST_TIMEOUT_MS,
 } from "../lib/media-upload-lifecycle";
 import { requireCmsPermission } from "./auth.server";
@@ -972,44 +969,49 @@ async function promoteRowsInBatches(
   return promoted;
 }
 
-async function loadCoveredStorageKeys(
+async function loadReferencedStorageKeys(
   client: ReturnType<typeof getUserClient>,
   organizationId: string,
   storageKeys: string[],
 ): Promise<Set<string>> {
   const uniqueKeys = [...new Set(storageKeys.filter(Boolean))];
   if (uniqueKeys.length === 0) return new Set();
-  const { data: versionRaw, error } = await client
-    .from("media_versions")
-    .select("storage_key, media_id")
-    .in("storage_key", uniqueKeys);
-  throwIfError(error, "Could not match stored files.");
-  const versions = (versionRaw ?? []).map((row) => ({
+  const keySet = new Set(uniqueKeys);
+  const [{ data: byStorage, error: storageError }, { data: byThumb, error: thumbError }] =
+    await Promise.all([
+      client
+        .from("media_versions")
+        .select("storage_key, thumbnail_key, media_id")
+        .in("storage_key", uniqueKeys),
+      client
+        .from("media_versions")
+        .select("storage_key, thumbnail_key, media_id")
+        .in("thumbnail_key", uniqueKeys),
+    ]);
+  throwIfError(storageError, "Could not match stored files.");
+  throwIfError(thumbError, "Could not match stored thumbnails.");
+  const versions = [...(byStorage ?? []), ...(byThumb ?? [])].map((row) => ({
     storage_key: asString((row as { storage_key: string }).storage_key),
+    thumbnail_key: asNullableString((row as { thumbnail_key: string | null }).thumbnail_key),
     media_id: asString((row as { media_id: string }).media_id),
   }));
   if (versions.length === 0) return new Set();
   const { data: mediaRaw, error: mediaError } = await client
     .from("media")
-    .select("id, status, archived_at")
-    .in(
-      "id",
-      [...new Set(versions.map((row) => row.media_id))],
-    )
+    .select("id")
+    .in("id", [...new Set(versions.map((row) => row.media_id))])
     .eq("organization_id", organizationId);
   throwIfError(mediaError, "Could not match stored media.");
-  const readyIds = new Set(
-    (mediaRaw ?? [])
-      .filter((row) =>
-        isReadyLibraryCoveredKey({
-          hasMediaRow: true,
-          status: asString((row as { status: string }).status),
-          archivedAt: asNullableString((row as { archived_at: string | null }).archived_at),
-        }),
-      )
-      .map((row) => asString((row as { id: string }).id)),
-  );
-  return new Set(versions.filter((row) => readyIds.has(row.media_id)).map((row) => row.storage_key));
+  const orgMediaIds = new Set((mediaRaw ?? []).map((row) => asString((row as { id: string }).id)));
+  const referenced = new Set<string>();
+  for (const version of versions) {
+    if (!orgMediaIds.has(version.media_id)) continue;
+    if (version.storage_key && keySet.has(version.storage_key)) referenced.add(version.storage_key);
+    if (version.thumbnail_key && keySet.has(version.thumbnail_key)) {
+      referenced.add(version.thumbnail_key);
+    }
+  }
+  return referenced;
 }
 
 async function restoreLibraryRowsForKeys(
@@ -1089,160 +1091,6 @@ async function restoreLibraryRowsForKeys(
   return restored;
 }
 
-async function resolveOrphanMime(
-  key: string,
-  existing: MediaRow | null,
-): Promise<{ mime: AllowedMediaMime; sizeBytes: number } | null> {
-  const parsed = parseMediaStorageKey(key);
-  const fromExisting = existing ? mimeForRestoredRow(existing.mime_type, existing.name, key) : null;
-  const fromKey = inferOrphanMediaMime(key);
-  if (fromKey || fromExisting) {
-    return { mime: (fromKey ?? fromExisting) as AllowedMediaMime, sizeBytes: 0 };
-  }
-  try {
-    const stat = await statObject(key);
-    if (!stat) return null;
-    const mime = inferOrphanMediaMime(key, stat.contentType) ?? fromExisting;
-    if (!mime) return null;
-    return { mime, sizeBytes: stat.sizeBytes >= 0 ? stat.sizeBytes : 0 };
-  } catch {
-    return fromExisting ? { mime: fromExisting, sizeBytes: 0 } : null;
-  }
-}
-
-async function createLibraryRowsForOrphanKeys(
-  client: ReturnType<typeof getUserClient>,
-  organizationId: string,
-  keys: string[],
-  createdBy: string,
-  locationIds: string[],
-): Promise<MediaRow[]> {
-  const created: MediaRow[] = [];
-  for (const batch of chunkItems(keys, RESYNC_UPDATE_BATCH_SIZE)) {
-    const done = await Promise.all(
-      batch.map(async (key) => {
-        const parsed = parseMediaStorageKey(key);
-        if (!parsed || parsed.organizationId !== organizationId) return null;
-        try {
-          const existing = await getMediaRow(client, parsed.mediaId, organizationId);
-          const resolved = await resolveOrphanMime(key, existing);
-          if (!resolved) return null;
-          const { mime, sizeBytes } = resolved;
-          const thumbnailKey = mime.startsWith("image/") ? key : null;
-          if (existing) {
-            const restored = await restoreLibraryRowsForKeys(client, organizationId, [key]);
-            if (restored[0]) return restored[0];
-            if (isVisibleLibraryStatus(existing.status) && !existing.archived_at) return null;
-            const { data: versionRaw, error: versionError } = await client
-              .from("media_versions")
-              .insert({
-                media_id: existing.id,
-                version_number: parsed.versionNumber,
-                storage_key: key,
-                thumbnail_key: thumbnailKey,
-                size_bytes: sizeBytes,
-                width: null,
-                height: null,
-                duration_ms: null,
-                checksum_sha256: parsed.checksumSha256,
-                mime_type: mime,
-                status: "READY",
-                created_by: createdBy,
-              })
-              .select(VERSION_SELECT)
-              .single();
-            if (versionError?.code === "23505") {
-              const again = await restoreLibraryRowsForKeys(client, organizationId, [key]);
-              return again[0] ?? null;
-            }
-            throwIfError(versionError, "Could not restore media version.");
-            const version = mapVersion(versionRaw as Record<string, unknown>);
-            await markUploadReady(client, existing, version);
-            if (existing.archived_at) {
-              const { error: clearArchive } = await client
-                .from("media")
-                .update({ archived_at: null })
-                .eq("id", existing.id);
-              throwIfError(clearArchive, "Could not restore media.");
-            }
-            return applyRestoredLibraryMetadata(client, organizationId, {
-              ...existing,
-              status: "READY",
-              archived_at: null,
-              current_version_id: version.id,
-              mime_type: mime,
-            }, mime);
-          }
-          const filename = await uniqueNameInFolder(
-            client,
-            organizationId,
-            null,
-            restoredLibraryFilename(parsed.mediaId, mime),
-          );
-          const { data: mediaRaw, error: mediaError } = await client
-            .from("media")
-            .insert({
-              id: parsed.mediaId,
-              organization_id: organizationId,
-              name: filename,
-              type: mediaTypeFromMime(mime),
-              mime_type: mime,
-              status: "PROCESSING",
-              folder_id: null,
-              location_ids: locationIds,
-              created_by: createdBy,
-              uploaded_by: createdBy,
-            })
-            .select(MEDIA_SELECT)
-            .single();
-          if (mediaError?.code === "23505") {
-            const raced = await getMediaRow(client, parsed.mediaId, organizationId);
-            if (!raced) return null;
-            const restored = await restoreLibraryRowsForKeys(client, organizationId, [key]);
-            return restored[0] ?? null;
-          }
-          throwIfError(mediaError, "Could not restore media.");
-          const media = mapMedia(mediaRaw as Record<string, unknown>);
-          const { data: versionRaw, error: versionError } = await client
-            .from("media_versions")
-            .insert({
-              media_id: media.id,
-              version_number: parsed.versionNumber,
-              storage_key: key,
-              thumbnail_key: thumbnailKey,
-              size_bytes: sizeBytes,
-              width: null,
-              height: null,
-              duration_ms: null,
-              checksum_sha256: parsed.checksumSha256,
-              mime_type: mime,
-              status: "READY",
-              created_by: createdBy,
-            })
-            .select(VERSION_SELECT)
-            .single();
-          throwIfError(versionError, "Could not restore media version.");
-          const version = mapVersion(versionRaw as Record<string, unknown>);
-          await markUploadReady(client, media, version);
-          return applyRestoredLibraryMetadata(client, organizationId, {
-            ...media,
-            status: "READY",
-            current_version_id: version.id,
-            mime_type: mime,
-          }, mime);
-        } catch (error) {
-          if (isCanceledStatementError(error instanceof Error ? error.message : "")) throw error;
-          return null;
-        }
-      }),
-    );
-    for (const row of done) {
-      if (row) created.push(row);
-    }
-  }
-  return created;
-}
-
 type PromoteFromR2Options = {
   folderId?: string | null;
   maxPages: number;
@@ -1256,17 +1104,18 @@ async function promotePendingFromR2Pages(
   client: ReturnType<typeof getUserClient>,
   organizationId: string,
   options: PromoteFromR2Options,
-): Promise<MediaRow[]> {
+): Promise<{ promoted: MediaRow[]; purgedCount: number }> {
   const importOrphans = Boolean(options.importOrphans);
   if (!importOrphans) {
     if (shouldSkipLibraryAutoSync(await hasIncompleteUploads(client, organizationId, options.folderId))) {
-      return [];
+      return { promoted: [], purgedCount: 0 };
     }
   } else if (shouldSkipManualStorageResync()) {
-    return [];
+    return { promoted: [], purgedCount: 0 };
   }
 
   const promoted: MediaRow[] = [];
+  let purgedCount = 0;
   const seen = new Set<string>();
   const listBeforeHead = shouldListBucketBeforeHeadPromote(importOrphans);
 
@@ -1340,22 +1189,19 @@ async function promotePendingFromR2Pages(
           promoted.push(...take(await promoteRowsInBatches(client, matches)));
         }
         if (!importOrphans) continue;
+        // Restore archived / non-READY rows that still have DB records.
         const restored = await restoreLibraryRowsForKeys(client, organizationId, keyChunk);
         if (restored.length > 0) promoted.push(...take(restored));
-        const covered = await loadCoveredStorageKeys(client, organizationId, keyChunk);
-        const orphans = orphanStorageKeysOnPage(keyChunk, covered);
-        if (orphans.length === 0 || !options.createdBy) continue;
-        promoted.push(
-          ...take(
-            await createLibraryRowsForOrphanKeys(
-              client,
-              organizationId,
-              orphans,
-              options.createdBy ?? "",
-              options.locationIds ?? [],
-            ),
-          ),
-        );
+        // Never recreate library rows for deleted media. Purge true R2 orphans instead.
+        const referenced = await loadReferencedStorageKeys(client, organizationId, keyChunk);
+        const orphans = orphanStorageKeysOnPage(keyChunk, referenced);
+        if (orphans.length === 0) continue;
+        try {
+          await deleteObjects(orphans);
+          purgedCount += orphans.length;
+        } catch {
+          // Best-effort cleanup; next Sync can retry leftovers.
+        }
       }
 
       if (timedOut) break;
@@ -1380,10 +1226,10 @@ async function promotePendingFromR2Pages(
     }
   }
 
-  if (timedOut && promoted.length === 0) {
+  if (timedOut && promoted.length === 0 && purgedCount === 0) {
     throw new Error(RESYNC_TIMEOUT_MESSAGE);
   }
-  return promoted;
+  return { promoted, purgedCount };
 }
 
 const reconcileInFlight = new Map<string, Promise<void>>();
@@ -1629,20 +1475,24 @@ export async function completeUpload(
 export async function resyncFromStorage(
   accessToken: string,
   folderId: string | null,
-): Promise<MediaRecord[]> {
+): Promise<{ media: MediaRecord[]; purgedCount: number }> {
   const auth = await requireCmsPermission(accessToken, "media.manage");
   const client = getUserClient(accessToken);
   try {
-    const promoted = await promotePendingFromR2Pages(client, auth.profile.organizationId, {
-      folderId,
-      maxPages: RESYNC_R2_MAX_PAGES,
-      deadlineMs: Date.now() + RESYNC_MANUAL_DEADLINE_MS,
-      importOrphans: true,
-      createdBy: auth.userId,
-      locationIds: locationIdsForNewMedia(auth.profile),
-    });
-    if (promoted.length === 0) return [];
-    return toRecords(client, promoted, true);
+    const { promoted, purgedCount } = await promotePendingFromR2Pages(
+      client,
+      auth.profile.organizationId,
+      {
+        folderId,
+        maxPages: RESYNC_R2_MAX_PAGES,
+        deadlineMs: Date.now() + RESYNC_MANUAL_DEADLINE_MS,
+        importOrphans: true,
+        createdBy: auth.userId,
+        locationIds: locationIdsForNewMedia(auth.profile),
+      },
+    );
+    if (promoted.length === 0) return { media: [], purgedCount };
+    return { media: await toRecords(client, promoted, true), purgedCount };
   } catch (error) {
     throw new Error(describeResyncError(error instanceof Error ? error.message : ""));
   }
@@ -1781,7 +1631,7 @@ export async function archiveMedia(accessToken: string, id: string): Promise<Med
 export async function deleteMedia(
   accessToken: string,
   id: string,
-  options: { deleteFromStorage?: boolean } = {},
+  _options: { deleteFromStorage?: boolean } = {},
 ): Promise<boolean> {
   const auth = await requireCmsPermission(accessToken, "media.manage");
   const client = getUserClient(accessToken);
@@ -1789,14 +1639,15 @@ export async function deleteMedia(
   if (!existing) throw new Error("Media not found.");
   assertCanMutateOwnedContent(auth.profile, existing.created_by);
   await assertIdsDeletable(client, [existing]);
-  await purgeMediaRow(client, id, { deleteFromStorage: shouldDeleteFromStorage(options.deleteFromStorage) });
+  // Always hard-delete Cloudflare/R2 objects with the library row.
+  await purgeMediaRow(client, id, { deleteFromStorage: true });
   return true;
 }
 
 export async function deleteMediaBulk(
   accessToken: string,
   ids: string[],
-  options: { deleteFromStorage?: boolean } = {},
+  _options: { deleteFromStorage?: boolean } = {},
 ): Promise<boolean> {
   const auth = await requireCmsPermission(accessToken, "media.manage");
   const client = getUserClient(accessToken);
@@ -1808,9 +1659,8 @@ export async function deleteMediaBulk(
     assertCanMutateOwnedContent(auth.profile, row.created_by);
   }
   await assertIdsDeletable(client, rows);
-  const deleteFromStorage = shouldDeleteFromStorage(options.deleteFromStorage);
   for (const row of rows) {
-    await purgeMediaRow(client, row.id, { deleteFromStorage });
+    await purgeMediaRow(client, row.id, { deleteFromStorage: true });
   }
   return true;
 }
@@ -2079,7 +1929,7 @@ async function mediaRowsInFolder(
 export async function deleteFolder(
   accessToken: string,
   id: string,
-  options: { deleteFromStorage?: boolean } = {},
+  _options: { deleteFromStorage?: boolean } = {},
 ): Promise<boolean> {
   const auth = await requireCmsPermission(accessToken, "media.manage");
   const client = getUserClient(accessToken);
@@ -2094,7 +1944,7 @@ export async function deleteFolder(
   }
   const visible = rows.filter((row) => !row.archived_at && isVisibleLibraryStatus(row.status));
   await assertIdsDeletable(client, visible);
-  const deleteFromStorage = shouldDeleteFromStorage(options.deleteFromStorage);
+  const deleteFromStorage = true;
 
   const now = new Date().toISOString();
   if (visible.length > 0) {

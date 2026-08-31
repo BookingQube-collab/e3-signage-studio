@@ -186,14 +186,17 @@ export function uniquePlaylistNames<T extends { usedIn?: MediaUsage | null }>(it
 
 export type MediaStorageBackend = "r2" | "supabase";
 
-/** Normalize the optional CMS delete → object-store purge flag (opt-in). */
+/**
+ * CMS delete purges object storage by default. Pass `false` only to keep
+ * the R2/storage object (library row still removed).
+ */
 export function shouldDeleteFromStorage(flag: boolean | null | undefined): boolean {
-  return flag === true;
+  return flag !== false;
 }
 
 /**
- * Confirm-dialog copy for optionally purging Cloudflare R2 / Supabase Storage
- * after removing library rows.
+ * Confirm-dialog copy for optionally keeping Cloudflare R2 / Supabase Storage
+ * objects after removing library rows (hard-delete is the default).
  */
 export function mediaStorageDeleteCopy(backend: MediaStorageBackend = "r2"): {
   checkboxLabel: string;
