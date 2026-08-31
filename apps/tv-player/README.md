@@ -37,7 +37,7 @@ Open **`apps/tv-player`** (not the repo root) in Android Studio, or point Cursor
 - Poll `GET /api/devices/:id/sync-status` about every **15 seconds** while the player is in the foreground (plus a 15-minute WorkManager backup). Fetch `GET /api/devices/:id/manifest` only on a version bump or `syncRequested`.
 - Differential plan: keep files whose Room `MediaAsset` id+version+checksum still match; download only missing or mismatched files into `files/temp/{localFilename}.tmp` with HTTP Range resume, then SHA-256 verify and atomic move to `files/media/{image|video}/`.
 - Package states: PENDING → DOWNLOADING → VERIFYING → READY → ACTIVE. FAILED never becomes ACTIVE. **0.29+** activates as soon as the first playlist item is on disk (playlist-order download) and keeps fetching the rest; a stuck second large MP4 no longer blocks the first clip.
-- During download the TV shows **Downloading… %**, file count, and stall/retry copy — never a blank navy frame with no feedback. **0.30+** keeps that waiting UI over the preparing player until ExoPlayer/image actually paints the first frame (early ACTIVE no longer flashes blank).
+- During download the TV shows **Downloading… %**, file count, and stall/retry copy — never a blank navy frame with no feedback. **0.30+** keeps waiting over the preparing player; **0.31+** drops Waiting only on ExoPlayer `onRenderedFirstFrame` (not `STATE_READY`, which fired before the TextureView attached and left a blank shutter after download). Decode failures show an explicit playback-error screen, then skip/retry.
 - After READY, `manifests/vN.json` is already on disk; `manifests/active.json` and the Room ACTIVE row update together. The previous package is kept as READY for rollback.
 - Each state change is acked with `POST /api/devices/:id/sync-confirmation`. A disabled screen (manifest 403) does not activate new content.
 - Corrupt `.tmp` files are deleted and retried. A mid-download network drop (e.g. 63%) leaves the current playlist running and resumes later.
@@ -67,7 +67,7 @@ Open **`apps/tv-player`** (not the repo root) in Android Studio, or point Cursor
 gradlew.bat :app:assembleDebug
 ```
 
-Install the versioned APK copied to the repo `dist/` folder (gitignored), e.g. `dist/e3-signage-player-0.30.0-debug.apk`. Open **E3 Signage**, enter the 6-digit code in the CMS **Pair a screen** dialog. Uninstall a previous sideload first if the TV keeps the old generic icon.
+Install the versioned APK copied to the repo `dist/` folder (gitignored), e.g. `dist/e3-signage-player-0.31.0-debug.apk`. Open **E3 Signage**, enter the 6-digit code in the CMS **Pair a screen** dialog. Uninstall a previous sideload first if the TV keeps the old generic icon. Heartbeat / CMS screen detail reports `appVersion` from `BuildConfig.VERSION_NAME` — confirm **0.31.0** after sideload.
 
 ## Tests
 

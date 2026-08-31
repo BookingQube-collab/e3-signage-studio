@@ -18,11 +18,13 @@ class PlaybackWaitingPolicyTest {
     }
 
     @Test
-    fun holdsWhileStuckAtZeroPercentWaiting() {
+    fun holdsEvenWhenDownloadIdleAndWaitingCleared() {
+        // Post-download race: syncProgress.clear() + waitingKind nulled incorrectly
+        // must still cover the preparing player (never blank navy).
         assertTrue(
             shouldHoldPlaybackWaiting(
                 contentDisplaying = false,
-                downloadBusy = true,
+                downloadBusy = false,
                 downloadFailed = false,
                 alreadyWaiting = false,
             ),

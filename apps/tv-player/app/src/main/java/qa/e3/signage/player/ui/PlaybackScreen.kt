@@ -431,28 +431,29 @@ private fun LocalVideoZone(
         }
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_READY) {
-                    markDisplayReady()
-                }
+                // STATE_READY is not enough — it often fires before PlayerView attaches
+                // the TextureView, which cleared Waiting onto a black shutter (0.30).
                 if (playbackState == Player.STATE_READY || playbackState == Player.STATE_ENDED) {
                     markTransitionReady()
                 }
                 if (!loop && playbackState == Player.STATE_ENDED) onFinished(generation, false)
             }
 
+            override fun onRenderedFirstFrame() {
+                // First painted frame — only then is it safe to drop Waiting.
+                markDisplayReady()
+                markTransitionReady()
+            }
+
             override fun onPlayerError(error: PlaybackException) {
                 // Do not treat errors as "display ready" — that revealed a blank shutter.
                 markTransitionReady()
-                if (!loop) onFinished(generation, true)
+                onFinished(generation, true)
             }
         }
         player.addListener(listener)
         when (player.playbackState) {
-            Player.STATE_READY -> {
-                markDisplayReady()
-                markTransitionReady()
-            }
-            Player.STATE_ENDED -> markTransitionReady()
+            Player.STATE_READY, Player.STATE_ENDED -> markTransitionReady()
         }
         onDispose {
             player.removeListener(listener)
@@ -527,7 +528,8 @@ private fun LocalImageZone(fileUri: String, fit: FitMode, onReady: () -> Unit) {
             BitmapFactory.decodeFile(file.path)?.also { DecodedImageCache.put(file.path, it) }
         }
         bitmap = decoded
-        onReady()
+        // Only signal ready when pixels exist — a missing/corrupt image must not clear Waiting.
+        if (decoded != null) onReady()
     }
     val image = bitmap
     if (image != null) {

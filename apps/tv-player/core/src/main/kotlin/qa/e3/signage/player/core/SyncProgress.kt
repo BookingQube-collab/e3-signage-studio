@@ -36,6 +36,15 @@ fun formatSyncFileLabel(indexOneBased: Int, total: Int, filename: String?): Stri
     return if (total > 0) "$indexOneBased/$total · $name" else name
 }
 
+/**
+ * Human "File N of M" while [filesDone] is zero-based completed count.
+ * During the first download filesDone=0 → show 1 of M (not "File 0 of 1").
+ */
+fun syncProgressFileOrdinal(filesDone: Int, filesTotal: Int): Int {
+    if (filesTotal <= 0) return 0
+    return (filesDone + 1).coerceAtMost(filesTotal)
+}
+
 fun downloadStallMessage(timeoutMs: Long = DOWNLOAD_STALL_TIMEOUT_MS): String {
     val minutes = (timeoutMs / 60_000L).coerceAtLeast(1L)
     return "Download stalled — no data for $minutes min. Check Wi‑Fi and retry."

@@ -2,15 +2,20 @@ package qa.e3.signage.player.core
 
 /**
  * Keep the branded waiting / download UI until media is actually on screen.
- * Leaving "Downloading…" for a blank navy ExoPlayer shutter is the 0.29 regression
- * on slow Wi‑Fi: package goes ACTIVE (or playLoop sets playing) before first frame.
+ *
+ * 0.29 cleared Waiting as soon as the package went ACTIVE (playing=true) → blank navy.
+ * 0.30 held Waiting until ExoPlayer STATE_READY, but READY often fires *before* the
+ * PlayerView surface is attached (prepare in DisposableEffect, bind in AndroidView) →
+ * still blank after download completes. Hold until [contentDisplaying] (first rendered
+ * frame / decoded image), never the bare player canvas.
+ *
+ * [downloadBusy], [downloadFailed], and [alreadyWaiting] are retained for call-site
+ * clarity / future copy selection; they must not open a hole onto an empty SurfaceView.
  */
+@Suppress("UNUSED_PARAMETER")
 fun shouldHoldPlaybackWaiting(
     contentDisplaying: Boolean,
-    downloadBusy: Boolean,
-    downloadFailed: Boolean,
-    alreadyWaiting: Boolean,
-): Boolean {
-    if (contentDisplaying) return false
-    return alreadyWaiting || downloadBusy || downloadFailed
-}
+    downloadBusy: Boolean = false,
+    downloadFailed: Boolean = false,
+    alreadyWaiting: Boolean = false,
+): Boolean = !contentDisplaying

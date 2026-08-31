@@ -183,16 +183,8 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             videoFailed = failed
             videoReady.complete(Unit)
             videoFinished.complete(Unit)
-            if (failed && !_ui.value.contentDisplaying) {
-                val progress = app.container.syncProgress.state.value
-                _ui.value = _ui.value.copy(
-                    waitingKind = when {
-                        progress.isFailed -> WaitingKind.DOWNLOAD_FAILED
-                        else -> WaitingKind.LOADING_CONTENT
-                    },
-                    downloadProgress = currentDownloadProgressUi(),
-                    contentDisplaying = false,
-                )
+            if (failed) {
+                showPlaybackProblem(WaitingKind.PLAYBACK_ERROR)
             }
         }
     }
@@ -205,6 +197,22 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             contentDisplaying = true,
             // Hide download chrome once something is painting; remaining files continue in background.
             downloadProgress = null,
+        )
+    }
+
+    /** Cover the canvas after a decode/timeout failure — never leave a blank navy frame. */
+    private fun showPlaybackProblem(kind: WaitingKind = WaitingKind.PLAYBACK_ERROR) {
+        val progress = app.container.syncProgress.state.value
+        val waiting = when {
+            progress.isFailed -> WaitingKind.DOWNLOAD_FAILED
+            progress.isBusy -> WaitingKind.LOADING_CONTENT
+            else -> kind
+        }
+        _ui.value = _ui.value.copy(
+            waitingKind = waiting,
+            downloadProgress = currentDownloadProgressUi(),
+            contentDisplaying = false,
+            playing = false,
         )
     }
 
@@ -330,9 +338,13 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     PlaylistItemKind.VIDEO -> awaitVideoItem(item, manifest.manifestVersion)
                 }
                 closeOpenPlay(result)
-                // Failed clips must not freeze the loop — skip to the next item.
+                // Failed clips must not freeze the loop — show error briefly, then skip.
                 if (result == PlaybackResult.ERROR) {
                     Log.w(TAG, "video error; skipping ${item.localFilename}")
+                    if (_ui.value.waitingKind == null || _ui.value.contentDisplaying) {
+                        showPlaybackProblem(WaitingKind.PLAYBACK_ERROR)
+                    }
+                    delay(1_200)
                 }
                 if (packages.activeVersion() != manifest.manifestVersion) {
                     break
@@ -362,7 +374,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
 
     /**
      * Start zones under the waiting overlay when nothing has painted yet.
-     * Never clear Waiting until [revealContent] (ExoPlayer READY / image decoded).
+     * Never clear Waiting until [revealContent] (first rendered frame / image decoded).
      */
     private fun uiForStartingItem(
         plan: ZonePlan,
@@ -381,15 +393,20 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             alreadyWaiting = current.waitingKind != null,
         )
         if (!hold) {
+            // Prior clip already painted — seamless handoff, no waiting flash.
             return base.copy(contentDisplaying = true, waitingKind = null, downloadProgress = null)
+        }
+        val kind = when {
+            progress.isFailed -> WaitingKind.DOWNLOAD_FAILED
+            progress.isBusy -> WaitingKind.LOADING_CONTENT
+            current.waitingKind == WaitingKind.PLAYBACK_ERROR -> WaitingKind.PLAYBACK_ERROR
+            current.waitingKind == WaitingKind.LOADING_CONTENT -> WaitingKind.LOADING_CONTENT
+            current.waitingKind == WaitingKind.DOWNLOAD_FAILED -> WaitingKind.DOWNLOAD_FAILED
+            else -> WaitingKind.LOADING_CONTENT
         }
         return base.copy(
             contentDisplaying = false,
-            waitingKind = if (progress.isFailed) {
-                WaitingKind.DOWNLOAD_FAILED
-            } else {
-                WaitingKind.LOADING_CONTENT
-            },
+            waitingKind = kind,
             waitingOverrides = waitingOverrides(),
             downloadProgress = currentDownloadProgressUi(),
         )
@@ -462,6 +479,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         if (ready == null && !videoFinished.isCompleted) {
             Log.w(TAG, "video not ready in ${VIDEO_READY_TIMEOUT_MS}ms: ${item.localFilename}")
             videoFailed = true
+            showPlaybackProblem(WaitingKind.PLAYBACK_ERROR)
             return PlaybackResult.ERROR
         }
         if (videoFailed || videoFinished.isCompleted) {
@@ -487,6 +505,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             videoFailed -> PlaybackResult.ERROR
             ended == null -> {
                 Log.w(TAG, "video safety timeout: ${item.localFilename}")
+                showPlaybackProblem(WaitingKind.PLAYBACK_ERROR)
                 PlaybackResult.ERROR
             }
             else -> PlaybackResult.COMPLETED

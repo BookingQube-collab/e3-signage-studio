@@ -15,6 +15,15 @@ class SyncProgressTest {
     }
 
     @Test
+    fun fileOrdinalIsOneBasedWhileDownloading() {
+        assertEquals(1, syncProgressFileOrdinal(filesDone = 0, filesTotal = 1))
+        assertEquals(1, syncProgressFileOrdinal(filesDone = 0, filesTotal = 2))
+        assertEquals(2, syncProgressFileOrdinal(filesDone = 1, filesTotal = 2))
+        assertEquals(2, syncProgressFileOrdinal(filesDone = 2, filesTotal = 2))
+        assertEquals(0, syncProgressFileOrdinal(filesDone = 0, filesTotal = 0))
+    }
+
+    @Test
     fun stallMessageMentionsMinutes() {
         assertTrue(downloadStallMessage(3 * 60_000L).contains("3 min"))
     }

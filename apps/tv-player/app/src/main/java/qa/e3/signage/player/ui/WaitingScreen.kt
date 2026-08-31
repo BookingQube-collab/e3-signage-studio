@@ -50,6 +50,7 @@ enum class WaitingKind {
     FIRST_PUBLISH,
     LOADING_CONTENT,
     DOWNLOAD_FAILED,
+    PLAYBACK_ERROR,
     EMPTY_PLAYLIST,
     OFF_HOURS,
 }
@@ -113,6 +114,15 @@ fun waitingCopy(kind: WaitingKind, overrides: WaitingOverrides = WaitingOverride
             quips = listOf(
                 "Network hiccup. Sync Now kicks another try.",
                 "No blank forever — retry is on the way.",
+            ),
+        )
+        WaitingKind.PLAYBACK_ERROR -> WaitingCopy(
+            kicker = "PLAYBACK ISSUE",
+            headline = "Could not play this clip",
+            body = "The file downloaded, but this TV could not decode it. Skipping to the next item and retrying.",
+            quips = listOf(
+                "Unsupported codec or corrupt file — trying the next clip.",
+                "No blank screen. We skip bad clips and keep looping.",
             ),
         )
         WaitingKind.EMPTY_PLAYLIST -> WaitingCopy(
@@ -375,9 +385,15 @@ private fun WaitingCopyColumn(
 @Composable
 private fun DownloadProgressBlock(progress: DownloadProgressUi, narrow: Boolean) {
     val pct = progress.percent.coerceIn(0, 100)
+    // filesDone is completed count (0 while first file downloads) — show 1-based ordinal.
+    val fileOrdinal = when {
+        progress.filesTotal <= 0 -> 0
+        progress.failed -> progress.filesDone.coerceIn(0, progress.filesTotal)
+        else -> (progress.filesDone + 1).coerceAtMost(progress.filesTotal)
+    }
     val fileLine = when {
         progress.filesTotal > 0 ->
-            "File ${progress.filesDone.coerceAtMost(progress.filesTotal)} of ${progress.filesTotal}" +
+            "File $fileOrdinal of ${progress.filesTotal}" +
                 (progress.currentFile?.let { " · $it" } ?: "")
         else -> progress.currentFile.orEmpty()
     }
