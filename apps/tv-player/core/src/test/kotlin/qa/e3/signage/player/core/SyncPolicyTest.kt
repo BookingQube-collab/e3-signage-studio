@@ -81,6 +81,13 @@ class SyncPolicyTest {
                 packageState = ContentPackageState.ACTIVE,
             ),
         )
+        assertTrue(
+            isPreparingNewerPackage(
+                cloudManifestVersion = 5,
+                activeManifestVersion = 4,
+                packageState = ContentPackageState.FAILED,
+            ),
+        )
         assertEquals(15_000L, SYNC_STATUS_INTERVAL_MS)
         assertEquals(10_000L, SYNC_STATUS_IDLE_INTERVAL_MS)
         assertEquals(10_000L, nextSyncPollDelayMs(playing = false))

@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -25,6 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -46,6 +49,7 @@ import java.io.File
 enum class WaitingKind {
     FIRST_PUBLISH,
     LOADING_CONTENT,
+    DOWNLOAD_FAILED,
     EMPTY_PLAYLIST,
     OFF_HOURS,
 }
@@ -68,6 +72,15 @@ data class WaitingOverrides(
     val message: String? = null,
 )
 
+data class DownloadProgressUi(
+    val percent: Int = 0,
+    val filesDone: Int = 0,
+    val filesTotal: Int = 0,
+    val currentFile: String? = null,
+    val error: String? = null,
+    val failed: Boolean = false,
+)
+
 fun waitingCopy(kind: WaitingKind, overrides: WaitingOverrides = WaitingOverrides()): WaitingCopy {
     val builtIn = when (kind) {
         WaitingKind.FIRST_PUBLISH -> WaitingCopy(
@@ -82,14 +95,23 @@ fun waitingCopy(kind: WaitingKind, overrides: WaitingOverrides = WaitingOverride
             ),
         )
         WaitingKind.LOADING_CONTENT -> WaitingCopy(
-            kicker = "LOADING CONTENT",
-            headline = "Preparing your playlist",
-            body = "New campaign media is downloading and verifying. Playback starts as soon as the package is ready.",
+            kicker = "DOWNLOADING",
+            headline = "Downloading your playlist",
+            body = "Large videos can take several minutes on slow Wi‑Fi. Playback starts as soon as the first file is ready.",
             quips = listOf(
-                "Fetching the goods. Almost showtime.",
-                "Downloading slides and clips. Hang tight.",
-                "Verifying files so the loop does not hiccup mid-play.",
+                "Fetching clips. First ready file starts the loop.",
+                "Slow Wi‑Fi? Hang tight — progress is below.",
+                "Downloading in playlist order so showtime is sooner.",
                 "Content is on the way from the studio.",
+            ),
+        )
+        WaitingKind.DOWNLOAD_FAILED -> WaitingCopy(
+            kicker = "DOWNLOAD ISSUE",
+            headline = "Could not finish download",
+            body = "Check Wi‑Fi, then use Sync Now in the CMS. The player will also retry automatically.",
+            quips = listOf(
+                "Network hiccup. Sync Now kicks another try.",
+                "No blank forever — retry is on the way.",
             ),
         )
         WaitingKind.EMPTY_PLAYLIST -> WaitingCopy(
@@ -122,7 +144,11 @@ fun waitingCopy(kind: WaitingKind, overrides: WaitingOverrides = WaitingOverride
 }
 
 @Composable
-fun WaitingScreen(kind: WaitingKind, overrides: WaitingOverrides = WaitingOverrides()) {
+fun WaitingScreen(
+    kind: WaitingKind,
+    overrides: WaitingOverrides = WaitingOverrides(),
+    downloadProgress: DownloadProgressUi? = null,
+) {
     val copy = waitingCopy(kind, overrides)
     var quipIndex by remember(kind) { mutableIntStateOf(0) }
     LaunchedEffect(kind) {
@@ -162,12 +188,12 @@ fun WaitingScreen(kind: WaitingKind, overrides: WaitingOverrides = WaitingOverri
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.45f)),
+                    .background(Color.Black.copy(alpha = 0.55f)),
             )
-            WaitingCopyColumn(copy, quip, showTextBrand = false)
+            WaitingCopyColumn(copy, quip, showTextBrand = false, downloadProgress = downloadProgress)
         } else {
             E3BrandStage {
-                WaitingCopyColumn(copy, quip, showTextBrand = false) {
+                WaitingCopyColumn(copy, quip, showTextBrand = false, downloadProgress = downloadProgress) {
                     WaitingBrandMark(brand, overrides.localBrandIconPath, overrides.localLogoPath)
                 }
             }
@@ -228,6 +254,7 @@ private fun WaitingCopyColumn(
     copy: WaitingCopy,
     quip: String,
     showTextBrand: Boolean,
+    downloadProgress: DownloadProgressUi? = null,
     brandSlot: (@Composable () -> Unit)? = null,
 ) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -272,7 +299,7 @@ private fun WaitingCopyColumn(
             Spacer(Modifier.height(28.dp))
             Text(
                 text = copy.kicker,
-                color = E3Muted,
+                color = Color.White.copy(alpha = 0.75f),
                 fontFamily = Rajdhani,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = if (narrow) 15.sp else 18.sp,
@@ -283,13 +310,11 @@ private fun WaitingCopyColumn(
             Spacer(Modifier.height(16.dp))
             Text(
                 text = copy.headline,
-                style = TextStyle(
-                    brush = E3Gradient,
-                    fontFamily = Rajdhani,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = headlineSize,
-                    letterSpacing = 0.5.sp,
-                ),
+                color = Color.White,
+                fontFamily = Rajdhani,
+                fontWeight = FontWeight.Bold,
+                fontSize = headlineSize,
+                letterSpacing = 0.5.sp,
                 textAlign = TextAlign.Center,
                 softWrap = true,
                 modifier = Modifier.fillMaxWidth(),
@@ -305,9 +330,14 @@ private fun WaitingCopyColumn(
                 softWrap = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+            if (downloadProgress != null) {
+                Spacer(Modifier.height(28.dp))
+                DownloadProgressBlock(downloadProgress, narrow)
+            }
             Spacer(Modifier.height(22.dp))
             Text(
-                text = quip,
+                text = downloadProgress?.error?.takeIf { downloadProgress.failed }
+                    ?: quip,
                 color = Color.White.copy(alpha = 0.82f),
                 fontFamily = SpaceGrotesk,
                 fontSize = quipSize,
@@ -321,15 +351,82 @@ private fun WaitingCopyColumn(
                 Box(
                     Modifier
                         .size(10.dp)
-                        .background(Color(0xFF3DDC97), CircleShape),
+                        .background(
+                            if (downloadProgress?.failed == true) Color(0xFFFF6B6B) else Color(0xFF3DDC97),
+                            CircleShape,
+                        ),
                 )
                 Text(
-                    text = "  Paired · waiting for content",
+                    text = when {
+                        downloadProgress?.failed == true -> "  Online · download needs retry"
+                        downloadProgress != null -> "  Online · downloading content"
+                        else -> "  Paired · waiting for content"
+                    },
                     color = Color.White,
                     fontFamily = SpaceGrotesk,
                     fontSize = if (narrow) 14.sp else 16.sp,
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun DownloadProgressBlock(progress: DownloadProgressUi, narrow: Boolean) {
+    val pct = progress.percent.coerceIn(0, 100)
+    val fileLine = when {
+        progress.filesTotal > 0 ->
+            "File ${progress.filesDone.coerceAtMost(progress.filesTotal)} of ${progress.filesTotal}" +
+                (progress.currentFile?.let { " · $it" } ?: "")
+        else -> progress.currentFile.orEmpty()
+    }
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .fillMaxWidth()
+            .widthIn(max = 640.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.Black.copy(alpha = 0.45f))
+            .padding(horizontal = 20.dp, vertical = 18.dp),
+    ) {
+        Text(
+            text = if (progress.failed) "Download paused" else "Downloading… $pct%",
+            color = Color.White,
+            fontFamily = Rajdhani,
+            fontWeight = FontWeight.Bold,
+            fontSize = if (narrow) 26.sp else 32.sp,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(12.dp))
+        LinearProgressIndicator(
+            progress = { pct / 100f },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(10.dp)
+                .clip(RoundedCornerShape(5.dp)),
+            color = if (progress.failed) Color(0xFFFF6B6B) else Color(0xFF3DDC97),
+            trackColor = Color.White.copy(alpha = 0.2f),
+        )
+        if (fileLine.isNotBlank()) {
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = fileLine,
+                color = Color.White.copy(alpha = 0.9f),
+                fontFamily = SpaceGrotesk,
+                fontSize = if (narrow) 15.sp else 18.sp,
+                textAlign = TextAlign.Center,
+                softWrap = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "Slow Wi‑Fi may take several minutes for large MP4s.",
+            color = Color.White.copy(alpha = 0.7f),
+            fontFamily = SpaceGrotesk,
+            fontSize = if (narrow) 13.sp else 15.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }

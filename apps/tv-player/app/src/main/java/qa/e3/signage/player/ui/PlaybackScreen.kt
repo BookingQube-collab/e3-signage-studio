@@ -99,7 +99,7 @@ fun PlaybackScreen(
             generation = state.soundtrackGeneration,
         )
         if (!state.playing && state.waitingKind != null) {
-            WaitingScreen(state.waitingKind, state.waitingOverrides)
+            WaitingScreen(state.waitingKind, state.waitingOverrides, state.downloadProgress)
         }
         ScaledLayoutCanvas(
             layoutWidth = state.layoutWidth,

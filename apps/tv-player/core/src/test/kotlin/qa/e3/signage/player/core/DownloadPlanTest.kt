@@ -56,6 +56,26 @@ class DownloadPlanTest {
         assertEquals(99, progressPercent(999, 1_000))
     }
 
+    @Test
+    fun playlistOrderFetchedBeforeOtherAssets() {
+        val assets = listOf(
+            asset("layout", 1, "aaa", "bg.jpg", 100),
+            asset("v2", 1, "bbb", "second.mp4", 5_000),
+            asset("v1", 1, "ccc", "first.mp4", 5_000),
+        )
+        val playlist = ManifestPlaylist(
+            id = "pl",
+            version = 1,
+            loop = true,
+            items = listOf(
+                ManifestPlaylistItem("v1", "v1", 10.0, "CUT", "first.mp4"),
+                ManifestPlaylistItem("v2", "v2", 10.0, "CUT", "second.mp4"),
+            ),
+        )
+        val plan = planDownloads(assets, inventory = emptyList(), playlist = playlist)
+        assertEquals(listOf("v1", "v2", "layout"), plan.toFetch.map { it.id })
+    }
+
     private fun asset(
         id: String,
         version: Int,

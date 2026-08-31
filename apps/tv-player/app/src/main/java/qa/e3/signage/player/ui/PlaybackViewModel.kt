@@ -45,6 +45,7 @@ data class PlaybackUiState(
     val zones: List<ZoneUiState> = emptyList(),
     val waitingKind: WaitingKind? = WaitingKind.FIRST_PUBLISH,
     val waitingOverrides: WaitingOverrides = WaitingOverrides(),
+    val downloadProgress: DownloadProgressUi? = null,
     val timezone: String = "Asia/Qatar",
     val playingMediaId: String? = null,
     val soundtrackUri: String? = null,
@@ -116,6 +117,41 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 }
             }
         }
+        viewModelScope.launch {
+            app.container.syncProgress.state.collect { progress ->
+                val progressUi = when {
+                    progress.isBusy || progress.isFailed -> DownloadProgressUi(
+                        percent = progress.percent,
+                        filesDone = progress.filesDone,
+                        filesTotal = progress.filesTotal,
+                        currentFile = progress.currentFile,
+                        error = progress.error,
+                        failed = progress.isFailed,
+                    )
+                    else -> null
+                }
+                val current = _ui.value
+                when {
+                    progress.isFailed && !current.playing -> {
+                        _ui.value = current.copy(
+                            waitingKind = WaitingKind.DOWNLOAD_FAILED,
+                            downloadProgress = progressUi,
+                        )
+                    }
+                    progress.isBusy && !current.playing -> {
+                        _ui.value = current.copy(
+                            waitingKind = WaitingKind.LOADING_CONTENT,
+                            downloadProgress = progressUi,
+                        )
+                    }
+                    else -> {
+                        if (current.downloadProgress != progressUi) {
+                            _ui.value = current.copy(downloadProgress = progressUi)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     @Volatile
@@ -152,6 +188,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 _ui.value = PlaybackUiState(
                     waitingKind = waitingKindWhilePreparing(),
                     waitingOverrides = waitingOverrides,
+                    downloadProgress = currentDownloadProgressUi(),
                 )
                 withTimeoutOrNull(2_000) { app.container.sync.activations.first() }
                 continue
@@ -196,6 +233,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     background = plan.background,
                     waitingKind = waitingKindWhilePreparing(fallback = WaitingKind.EMPTY_PLAYLIST),
                     waitingOverrides = waitingOverrides,
+                    downloadProgress = currentDownloadProgressUi(),
                     timezone = tz,
                 )
                 withTimeoutOrNull(2_000) { app.container.sync.activations.first() }
@@ -218,6 +256,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                         background = plan.background,
                         waitingKind = WaitingKind.LOADING_CONTENT,
                         waitingOverrides = waitingOverrides(),
+                        downloadProgress = currentDownloadProgressUi(),
                         timezone = tz,
                     )
                     withTimeoutOrNull(2_000) { app.container.sync.activations.first() }
@@ -262,6 +301,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                         background = plan.background,
                         waitingKind = WaitingKind.LOADING_CONTENT,
                         waitingOverrides = waitingOverrides(),
+                        downloadProgress = currentDownloadProgressUi(),
                         timezone = tz,
                     )
                     withTimeoutOrNull(2_000) { app.container.sync.activations.first() }
@@ -298,6 +338,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     background = background,
                     waitingKind = WaitingKind.LOADING_CONTENT,
                     waitingOverrides = waitingOverrides(),
+                    downloadProgress = currentDownloadProgressUi(),
                     timezone = timezone,
                 )
                 withTimeoutOrNull(2_000) { app.container.sync.activations.first() }
@@ -383,6 +424,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             ContentPackageState.VERIFYING,
             ContentPackageState.READY,
             -> WaitingKind.LOADING_CONTENT
+            ContentPackageState.FAILED -> WaitingKind.DOWNLOAD_FAILED
             else -> fallback
         }
     }
@@ -395,6 +437,19 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         } catch (error: Exception) {
             Log.w(TAG, "proof-of-play: ${error.message}")
         }
+    }
+
+    private fun currentDownloadProgressUi(): DownloadProgressUi? {
+        val progress = app.container.syncProgress.state.value
+        if (!progress.isBusy && !progress.isFailed) return null
+        return DownloadProgressUi(
+            percent = progress.percent,
+            filesDone = progress.filesDone,
+            filesTotal = progress.filesTotal,
+            currentFile = progress.currentFile,
+            error = progress.error,
+            failed = progress.isFailed,
+        )
     }
 
     private fun waitingOverrides(): WaitingOverrides {

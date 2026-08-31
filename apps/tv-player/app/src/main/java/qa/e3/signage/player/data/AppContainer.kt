@@ -31,6 +31,7 @@ class AppContainer(context: Context) {
         json = json,
     )
     val display = ScreenDisplayStore(context)
+    val syncProgress = SyncProgressStore()
     val telemetry = DeviceTelemetry(
         context = context,
         api = api,
@@ -49,6 +50,7 @@ class AppContainer(context: Context) {
         filesDir = PlayerFiles.root(context),
         waitingScreen = waitingScreen,
         display = display,
+        syncProgress = syncProgress,
         onActivated = { telemetry.noteSuccessfulSync() },
         onAuthFailure = { code, source -> session.handleAuthFailure(code, source) },
     )

@@ -2,8 +2,10 @@ package qa.e3.signage.player.data
 
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import qa.e3.signage.player.core.DOWNLOAD_STALL_TIMEOUT_MS
 import qa.e3.signage.player.core.FinalizeResult
 import qa.e3.signage.player.core.ManifestAsset
+import qa.e3.signage.player.core.downloadStallMessage
 import qa.e3.signage.player.core.expectedMediaFile
 import qa.e3.signage.player.core.finalizeVerifiedFile
 import qa.e3.signage.player.core.safeLocalFilename
@@ -18,6 +20,10 @@ class ChecksumFailedException(
     val assetId: String,
     val localFilename: String,
 ) : IOException("Checksum mismatch for $localFilename")
+
+class DownloadStalledException(
+    message: String = downloadStallMessage(),
+) : IOException(message)
 
 class AssetDownloader(private val client: OkHttpClient) {
     fun downloadVerified(
@@ -98,6 +104,9 @@ class AssetDownloader(private val client: OkHttpClient) {
 
     private fun copyStream(input: InputStream, out: OutputStream, onBytes: (Long) -> Unit, start: Long) {
         var total = start
+        var windowStartNs = System.nanoTime()
+        var windowStartBytes = start
+        if (start > 0L) onBytes(start)
         val buf = ByteArray(DEFAULT_BUFFER_SIZE)
         while (true) {
             val n = input.read(buf)
@@ -105,6 +114,15 @@ class AssetDownloader(private val client: OkHttpClient) {
             out.write(buf, 0, n)
             total += n
             onBytes(total)
+            val now = System.nanoTime()
+            val windowMs = (now - windowStartNs) / 1_000_000L
+            if (windowMs >= DOWNLOAD_STALL_TIMEOUT_MS) {
+                if (total <= windowStartBytes) {
+                    throw DownloadStalledException()
+                }
+                windowStartNs = now
+                windowStartBytes = total
+            }
         }
         out.flush()
         if (out is FileOutputStream) out.fd.sync()

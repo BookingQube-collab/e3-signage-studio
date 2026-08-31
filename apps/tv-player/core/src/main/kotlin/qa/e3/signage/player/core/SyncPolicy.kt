@@ -80,6 +80,7 @@ fun isPreparingNewerPackage(
         ContentPackageState.DOWNLOADING,
         ContentPackageState.VERIFYING,
         ContentPackageState.READY,
+        ContentPackageState.FAILED,
         -> true
         else -> false
     }

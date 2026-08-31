@@ -33,5 +33,15 @@ fun checksumMatches(file: File, expectedHex: String): Boolean {
 fun firstInvalidAsset(root: File, assets: List<ManifestAsset>): ManifestAsset? =
     assets.firstOrNull { !checksumMatches(expectedMediaFile(root, it), it.checksum) }
 
+/**
+ * Corrupt on-disk files only — missing files are OK during progressive download
+ * (play first ready clip while later assets are still fetching).
+ */
+fun firstCorruptPresentAsset(root: File, assets: List<ManifestAsset>): ManifestAsset? =
+    assets.firstOrNull { asset ->
+        val file = expectedMediaFile(root, asset)
+        file.isFile && !checksumMatches(file, asset.checksum)
+    }
+
 private fun toHex(bytes: ByteArray): String =
     bytes.joinToString("") { b -> "%02x".format(b.toInt() and 0xff) }

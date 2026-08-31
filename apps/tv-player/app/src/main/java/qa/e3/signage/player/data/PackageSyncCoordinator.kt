@@ -15,15 +15,17 @@ import qa.e3.signage.player.core.DeviceCredentials
 import qa.e3.signage.player.core.DeviceCredentialStore
 import qa.e3.signage.player.core.DeviceHttpException
 import qa.e3.signage.player.core.SyncConfirmationRequest
+import qa.e3.signage.player.core.assetsSequenceKey
 import qa.e3.signage.player.core.expectedMediaFile
+import qa.e3.signage.player.core.firstCorruptPresentAsset
 import qa.e3.signage.player.core.firstInvalidAsset
+import qa.e3.signage.player.core.hasPlayableLocalPlaylistItem
+import qa.e3.signage.player.core.layoutsSequenceKey
 import qa.e3.signage.player.core.persistRotatedToken
 import qa.e3.signage.player.core.planDownloads
+import qa.e3.signage.player.core.playlistSequenceKey
 import qa.e3.signage.player.core.progressPercent
 import qa.e3.signage.player.core.pruneUnusedStorage
-import qa.e3.signage.player.core.playlistSequenceKey
-import qa.e3.signage.player.core.assetsSequenceKey
-import qa.e3.signage.player.core.layoutsSequenceKey
 import qa.e3.signage.player.core.scheduleWindowsKey
 import qa.e3.signage.player.core.shouldFetchManifest
 import qa.e3.signage.player.core.versionedManifestFile
@@ -38,6 +40,7 @@ class PackageSyncCoordinator(
     private val filesDir: File,
     private val waitingScreen: WaitingScreenStore,
     private val display: ScreenDisplayStore,
+    private val syncProgress: SyncProgressStore,
     private val onActivated: () -> Unit = {},
     private val onAuthFailure: (httpCode: Int, source: String) -> Boolean = { _, _ -> false },
 ) {
@@ -75,6 +78,25 @@ class PackageSyncCoordinator(
         if (inflight == null &&
             !shouldFetchManifest(status.manifestVersion, activeVersion, status.syncRequested)
         ) {
+            // Same version ACTIVE but some assets may still be missing (progressive play).
+            if (status.manifestVersion == activeVersion && activeVersion > 0) {
+                val activeManifest = packages.loadActive()?.first
+                if (activeManifest != null) {
+                    val remaining = planDownloads(activeManifest.assets, packages.inventory(), activeManifest.playlist)
+                    if (remaining.toFetch.isNotEmpty()) {
+                        val path = packages.writeManifestFile(activeManifest).canonicalPath
+                        try {
+                            downloadAndActivate(live, activeManifest, path, alreadyActive = true)
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (error: Exception) {
+                            Log.w(TAG, "resume remaining assets: ${error.message}")
+                            syncProgress.fail(error.message)
+                            packages.noteError(error.message)
+                        }
+                    }
+                }
+            }
             return
         }
 
@@ -115,7 +137,14 @@ class PackageSyncCoordinator(
                 activate(live, manifest, path)
                 return
             }
+            val remaining = planDownloads(manifest.assets, packages.inventory(), manifest.playlist)
+            if (remaining.toFetch.isNotEmpty()) {
+                val path = packages.writeManifestFile(manifest).canonicalPath
+                downloadAndActivate(live, manifest, path, alreadyActive = true)
+                return
+            }
             confirm(live, manifest.manifestVersion, ContentPackageState.ACTIVE)
+            syncProgress.clear()
             return
         }
 
@@ -127,7 +156,7 @@ class PackageSyncCoordinator(
         }
 
         try {
-            downloadAndActivate(live, manifest, path)
+            downloadAndActivate(live, manifest, path, alreadyActive = false)
         } catch (_: ScreenDisabledException) {
             Log.w(TAG, "screen disabled; keeping previous ACTIVE")
             failInflight(live, manifest.manifestVersion, path, error = "This screen is disabled.")
@@ -144,11 +173,23 @@ class PackageSyncCoordinator(
             throw error
         } catch (error: IOException) {
             Log.w(TAG, "download paused at ${error.message}")
-            packages.persistPackage(manifest.manifestVersion, ContentPackageState.DOWNLOADING, path)
-            packages.noteError(error.message)
+            if (packages.activeVersion() == manifest.manifestVersion) {
+                // Partial package already playing — keep ACTIVE, resume later.
+                syncProgress.fail(error.message)
+                packages.noteError(error.message)
+            } else {
+                packages.persistPackage(manifest.manifestVersion, ContentPackageState.DOWNLOADING, path)
+                syncProgress.fail(error.message)
+                packages.noteError(error.message)
+            }
         } catch (error: Exception) {
             Log.w(TAG, "package sync failed: ${error.message}")
-            failInflight(live, manifest.manifestVersion, path, error = error.message)
+            if (packages.activeVersion() == manifest.manifestVersion) {
+                syncProgress.fail(error.message)
+                packages.noteError(error.message)
+            } else {
+                failInflight(live, manifest.manifestVersion, path, error = error.message)
+            }
         }
     }
 
@@ -206,54 +247,193 @@ class PackageSyncCoordinator(
         credentials: DeviceCredentials,
         manifest: ContentManifest,
         path: String,
+        alreadyActive: Boolean,
     ) {
         val existing = packages.findByVersion(manifest.manifestVersion)
         val existingState = existing?.state?.let { runCatching { ContentPackageState.valueOf(it) }.getOrNull() }
-        if (existingState == ContentPackageState.READY) {
+        if (existingState == ContentPackageState.READY && !alreadyActive) {
             activate(credentials, manifest, path)
+            syncProgress.clear()
             return
         }
 
-        packages.persistPackage(manifest.manifestVersion, ContentPackageState.DOWNLOADING, path)
-        confirm(credentials, manifest.manifestVersion, ContentPackageState.DOWNLOADING)
-
-        val plan = planDownloads(manifest.assets, packages.inventory())
-        var completedBytes = 0L
-        val needed = plan.neededBytes
-        var lastLogged = -25
-        for (asset in plan.toFetch) {
-            val file = downloader.downloadVerified(asset, filesDir) { soFar ->
-                val pct = progressPercent(completedBytes + soFar, needed)
-                if (pct >= lastLogged + 25) {
-                    lastLogged = pct
-                    Log.i(TAG, "download $pct% of needed bytes (${asset.localFilename})")
-                }
-            }
-            packages.saveAsset(asset, file.canonicalPath)
-            completedBytes += asset.fileSize.coerceAtLeast(0L)
+        if (!alreadyActive) {
+            packages.persistPackage(manifest.manifestVersion, ContentPackageState.DOWNLOADING, path)
+            confirm(credentials, manifest.manifestVersion, ContentPackageState.DOWNLOADING)
         }
 
-        packages.persistPackage(manifest.manifestVersion, ContentPackageState.VERIFYING, path)
-        confirm(credentials, manifest.manifestVersion, ContentPackageState.VERIFYING)
+        val plan = planDownloads(manifest.assets, packages.inventory(), manifest.playlist)
+        val needed = plan.neededBytes
+        val filesTotal = plan.toFetch.size
+        syncProgress.beginDownload(filesTotal, needed)
 
-        var invalid = firstInvalidAsset(filesDir, manifest.assets)
+        // Already-local playlist items can activate immediately (skip waiting for toFetch).
+        var activated = alreadyActive || packages.activeVersion() == manifest.manifestVersion
+        if (!activated && hasPlayableLocalPlaylistItem(manifest, filesDir)) {
+            packages.saveAssets(manifest)
+            packages.persistPackage(manifest.manifestVersion, ContentPackageState.READY, path)
+            confirm(credentials, manifest.manifestVersion, ContentPackageState.READY)
+            activate(credentials, manifest, path)
+            activated = true
+            Log.i(TAG, "early ACTIVE v${manifest.manifestVersion} from cached playlist media")
+        }
+
+        if (plan.toFetch.isEmpty()) {
+            finishFullPackage(credentials, manifest, path, activated)
+            return
+        }
+
+        var completedBytes = 0L
+        var filesDone = 0
+        var lastLogged = -25
+        var hardFailure: Exception? = null
+
+        for (asset in plan.toFetch) {
+            syncProgress.onFileProgress(
+                filesDone = filesDone,
+                filesTotal = filesTotal,
+                currentFile = asset.localFilename,
+                bytesDownloaded = completedBytes,
+                bytesTotal = needed,
+            )
+            try {
+                val file = downloader.downloadVerified(asset, filesDir) { soFar ->
+                    val pct = progressPercent(completedBytes + soFar, needed)
+                    syncProgress.onFileProgress(
+                        filesDone = filesDone,
+                        filesTotal = filesTotal,
+                        currentFile = asset.localFilename,
+                        bytesDownloaded = completedBytes + soFar,
+                        bytesTotal = needed,
+                    )
+                    if (pct >= lastLogged + 5) {
+                        lastLogged = pct
+                        Log.i(TAG, "download $pct% ($filesDone/$filesTotal) ${asset.localFilename}")
+                    }
+                }
+                packages.saveAsset(asset, file.canonicalPath)
+                completedBytes += asset.fileSize.coerceAtLeast(0L)
+                filesDone += 1
+                syncProgress.onFileProgress(
+                    filesDone = filesDone,
+                    filesTotal = filesTotal,
+                    currentFile = asset.localFilename,
+                    bytesDownloaded = completedBytes,
+                    bytesTotal = needed,
+                )
+
+                if (!activated && hasPlayableLocalPlaylistItem(manifest, filesDir)) {
+                    packages.saveAssets(manifest)
+                    packages.persistPackage(manifest.manifestVersion, ContentPackageState.READY, path)
+                    confirm(credentials, manifest.manifestVersion, ContentPackageState.READY)
+                    activate(credentials, manifest, path)
+                    activated = true
+                    Log.i(
+                        TAG,
+                        "early ACTIVE v${manifest.manifestVersion} after $filesDone/$filesTotal files",
+                    )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                Log.w(TAG, "asset ${asset.localFilename} failed: ${error.message}")
+                hardFailure = error
+                // Soft-fail this file and keep going so a bad/slow second clip
+                // does not block the first ready video forever.
+                if (activated || hasPlayableLocalPlaylistItem(manifest, filesDir)) {
+                    if (!activated) {
+                        packages.saveAssets(manifest)
+                        packages.persistPackage(manifest.manifestVersion, ContentPackageState.READY, path)
+                        confirm(credentials, manifest.manifestVersion, ContentPackageState.READY)
+                        activate(credentials, manifest, path)
+                        activated = true
+                        Log.i(TAG, "early ACTIVE after soft-fail on ${asset.localFilename}")
+                    }
+                    continue
+                }
+                throw error
+            }
+        }
+
+        if (!activated) {
+            if (hardFailure != null) throw hardFailure
+            throw IOException("No playable playlist media after download")
+        }
+
+        syncProgress.beginVerifying(filesTotal)
+        packages.persistPackage(manifest.manifestVersion, ContentPackageState.VERIFYING, path)
+        if (!alreadyActive) {
+            confirm(credentials, manifest.manifestVersion, ContentPackageState.VERIFYING)
+        }
+
+        var invalid = firstCorruptPresentAsset(filesDir, manifest.assets)
         var repairs = 0
         while (invalid != null && repairs < 1) {
             runCatching { expectedMediaFile(filesDir, invalid).delete() }
-            val repaired = downloader.downloadVerified(invalid, filesDir) {}
-            packages.saveAsset(invalid, repaired.canonicalPath)
+            try {
+                val repaired = downloader.downloadVerified(invalid, filesDir) {}
+                packages.saveAsset(invalid, repaired.canonicalPath)
+            } catch (error: Exception) {
+                Log.w(TAG, "repair ${invalid.localFilename}: ${error.message}")
+                break
+            }
             repairs += 1
-            invalid = firstInvalidAsset(filesDir, manifest.assets)
+            invalid = firstCorruptPresentAsset(filesDir, manifest.assets)
         }
-        if (invalid != null) {
-            runCatching { expectedMediaFile(filesDir, invalid).delete() }
-            throw ChecksumFailedException(invalid.id, invalid.localFilename)
+
+        // Only hard-fail when nothing playable remains.
+        val stillMissing = firstInvalidAsset(filesDir, manifest.assets)
+        if (stillMissing != null && !hasPlayableLocalPlaylistItem(manifest, filesDir)) {
+            runCatching { expectedMediaFile(filesDir, stillMissing).delete() }
+            throw ChecksumFailedException(stillMissing.id, stillMissing.localFilename)
+        }
+        if (stillMissing != null) {
+            Log.w(TAG, "soft-missing ${stillMissing.localFilename}; playing partial playlist")
+            packages.noteError("Partial package: waiting on ${stillMissing.localFilename}")
         }
 
         packages.saveAssets(manifest)
-        packages.persistPackage(manifest.manifestVersion, ContentPackageState.READY, path)
-        confirm(credentials, manifest.manifestVersion, ContentPackageState.READY)
-        activate(credentials, manifest, path)
+        if (stillMissing == null) {
+            packages.persistPackage(manifest.manifestVersion, ContentPackageState.READY, path)
+            if (!alreadyActive) {
+                confirm(credentials, manifest.manifestVersion, ContentPackageState.READY)
+            }
+            if (packages.activeVersion() != manifest.manifestVersion) {
+                activate(credentials, manifest, path)
+            } else {
+                confirm(credentials, manifest.manifestVersion, ContentPackageState.ACTIVE)
+                _activations.tryEmit(manifest.manifestVersion)
+            }
+            syncProgress.clear()
+        } else {
+            // Stay ACTIVE with partial media; next poll resumes remaining downloads.
+            confirm(credentials, manifest.manifestVersion, ContentPackageState.ACTIVE)
+            syncProgress.onFileProgress(
+                filesDone = filesDone,
+                filesTotal = filesTotal,
+                currentFile = stillMissing.localFilename,
+                bytesDownloaded = completedBytes,
+                bytesTotal = needed,
+            )
+            _activations.tryEmit(manifest.manifestVersion)
+        }
+    }
+
+    private suspend fun finishFullPackage(
+        credentials: DeviceCredentials,
+        manifest: ContentManifest,
+        path: String,
+        activated: Boolean,
+    ) {
+        packages.saveAssets(manifest)
+        if (!activated) {
+            packages.persistPackage(manifest.manifestVersion, ContentPackageState.READY, path)
+            confirm(credentials, manifest.manifestVersion, ContentPackageState.READY)
+            activate(credentials, manifest, path)
+        } else {
+            confirm(credentials, manifest.manifestVersion, ContentPackageState.ACTIVE)
+        }
+        syncProgress.clear()
     }
 
     private suspend fun activate(
@@ -290,6 +470,7 @@ class PackageSyncCoordinator(
     ) {
         packages.persistPackage(version, ContentPackageState.FAILED, path)
         packages.noteError(error)
+        syncProgress.fail(error)
         confirm(
             credentials,
             version,
