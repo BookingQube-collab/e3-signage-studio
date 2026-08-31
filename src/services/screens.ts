@@ -5,6 +5,7 @@ import {
   listScreensFn,
   pairScreenFn,
   repairScreenFn,
+  signNowPlayingThumbnailsFn,
   syncNowFn,
   unpairScreenFn,
   updateScreenFn,
@@ -61,6 +62,13 @@ export const liveScreenService: ScreenService = {
       data: { accessToken: await accessToken(), locationId },
     });
     return rows.map(toUiScreen);
+  },
+  nowPlayingThumbnails: async (mediaIds) => {
+    const ids = [...new Set(mediaIds.filter(isUuid))].slice(0, 200);
+    if (ids.length === 0) return {};
+    return signNowPlayingThumbnailsFn({
+      data: { accessToken: await accessToken(), mediaIds: ids },
+    });
   },
   pair: async (input) => {
     const orientation = ORIENTATION_FROM_UI[input.orientation];

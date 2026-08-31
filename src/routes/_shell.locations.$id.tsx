@@ -37,6 +37,7 @@ import { campaignService, locationService, mediaService, screenService } from "@
 import { NO_LOCATION_ACCESS_MESSAGE } from "@/lib/location-scope";
 import { invalidateKeysInBackground, writeEntityCache } from "@/lib/query-cache";
 import { hasPermission } from "@/lib/rbac";
+import { useNowPlayingThumbnails } from "@/lib/use-now-playing-thumbs";
 import type { Campaign, Media } from "@/types";
 
 export const Route = createFileRoute("/_shell/locations/$id")({
@@ -95,7 +96,8 @@ function LocationDetailPage() {
   });
 
   const location = locationQuery.data;
-  const screens = screensQuery.data ?? [];
+  const listedScreens = screensQuery.data ?? [];
+  const { screens } = useNowPlayingThumbnails(listedScreens, screensQuery.isSuccess);
   const campaigns = (campaignsQuery.data ?? []).filter((c) => c.locationIds.includes(id));
   const datedCampaigns = campaigns.filter((c) => isDatedSchedule(c.schedule));
   const online = screens.filter((s) => s.status === "online").length;

@@ -287,27 +287,55 @@ function isMediaType(value: string): value is MediaType {
   return (MEDIA_TYPES as readonly string[]).includes(value);
 }
 
-type NowPlayingPreview = {
+type NowPlayingMeta = {
   name: string;
   type: MediaType | null;
-  thumbnailUrl: string | null;
-  previewUrl: string | null;
 };
 
 /**
- * Sign posters + playable preview URLs for currently-playing media on screen cards.
- * Video files are included so cards can mute-loop a short clip (unique now-playing set is small).
+ * List path only: names/types for "now playing" labels.
+ * Deliberately skips media_versions + URL signing so Screens list is not blocked
+ * on storage crypto / createSignedUrls (that work hydrates in a second pass).
  */
-async function loadNowPlayingPreviews(
+async function loadNowPlayingMeta(
   client: ReturnType<typeof getUserClient>,
   mediaIds: string[],
-): Promise<Map<string, NowPlayingPreview>> {
-  const out = new Map<string, NowPlayingPreview>();
+): Promise<Map<string, NowPlayingMeta>> {
+  const out = new Map<string, NowPlayingMeta>();
   if (mediaIds.length === 0) return out;
 
   const { data: mediaRows, error: mediaError } = await client
     .from("media")
-    .select("id, name, type, current_version_id")
+    .select("id, name, type")
+    .in("id", mediaIds);
+  throwIfError(mediaError, "Could not load now-playing media.");
+
+  for (const raw of mediaRows ?? []) {
+    const row = raw as Record<string, unknown>;
+    const typeRaw = asString(row["type"]);
+    out.set(asString(row["id"]), {
+      name: asString(row["name"]),
+      type: isMediaType(typeRaw) ? typeRaw : null,
+    });
+  }
+  return out;
+}
+
+/**
+ * Second-pass card thumbs: sign image stills / poster keys only.
+ * Never signs full video objects — N cards downloading MP4s froze the CMS.
+ * Signing failures are soft: callers still get null URLs instead of failing the list.
+ */
+async function signNowPlayingStillUrls(
+  client: ReturnType<typeof getUserClient>,
+  mediaIds: string[],
+): Promise<Map<string, string | null>> {
+  const out = new Map<string, string | null>();
+  if (mediaIds.length === 0) return out;
+
+  const { data: mediaRows, error: mediaError } = await client
+    .from("media")
+    .select("id, current_version_id")
     .in("id", mediaIds);
   throwIfError(mediaError, "Could not load now-playing media.");
 
@@ -332,37 +360,34 @@ async function loadNowPlayingPreviews(
   const picked = (mediaRows ?? []).map((raw) => {
     const row = raw as Record<string, unknown>;
     const id = asString(row["id"]);
-    const typeRaw = asString(row["type"]);
-    const type = isMediaType(typeRaw) ? typeRaw : null;
     const current = versionById.get(asString(row["current_version_id"]));
     const status = current ? asString(current["status"]) : "";
     const storageKey =
       current && status === "READY" ? asNullableString(current["storage_key"]) : null;
     const mime = current ? asString(current["mime_type"]).toLowerCase() : "";
     const isImage = mime.startsWith("image/");
-    // Screens grid: image stills only. Never sign full MP4 keys for card thumbs —
-    // clients mounting those videos across many screens hung the CMS.
-    const previewKey = isImage ? storageKey : null;
     const thumbnailKey =
       asNullableString(current?.["thumbnail_key"]) ?? (isImage ? storageKey : null);
-    keys.push(...mediaKeysToSign({ previewKey, thumbnailKey, isImage, signAllPreviews: true }));
-    return { id, name: asString(row["name"]), type, previewKey, thumbnailKey, isImage };
+    keys.push(
+      ...mediaKeysToSign({
+        previewKey: isImage ? storageKey : null,
+        thumbnailKey,
+        isImage,
+        signAllPreviews: false,
+      }),
+    );
+    return { id, thumbnailKey };
   });
 
-  const urls = await createObjectDownloadUrls(keys);
+  let urls = new Map<string, string>();
+  try {
+    urls = await createObjectDownloadUrls(keys);
+  } catch {
+    urls = new Map();
+  }
+
   for (const item of picked) {
-    const thumbnailUrl = item.thumbnailKey ? (urls.get(item.thumbnailKey) ?? null) : null;
-    const previewUrl = item.previewKey
-      ? (urls.get(item.previewKey) ?? null)
-      : item.isImage
-        ? thumbnailUrl
-        : null;
-    out.set(item.id, {
-      name: item.name,
-      type: item.type,
-      thumbnailUrl,
-      previewUrl,
-    });
+    out.set(item.id, item.thumbnailKey ? (urls.get(item.thumbnailKey) ?? null) : null);
   }
   return out;
 }
@@ -404,12 +429,13 @@ async function loadScreenRecords(
     playlistIds.length > 0
       ? client.from("playlists").select("id, name").in("id", playlistIds)
       : Promise.resolve({ data: [] as Array<{ id: string; name: string }>, error: null }),
-    loadNowPlayingPreviews(client, mediaIds),
+    loadNowPlayingMeta(client, mediaIds),
   ]);
 
   throwIfError(locRes.error, "Could not load locations.");
   throwIfError(memberRes.error, "Could not load screen groups.");
   throwIfError(syncRes.error, "Could not load sync state.");
+  throwIfError(playlistRes.error, "Could not load playlists.");
 
   const locationName = new Map<string, string>();
   for (const row of locRes.data ?? []) {
@@ -487,8 +513,9 @@ async function loadScreenRecords(
       nowPlaying: playing?.name ?? null,
       nowPlayingMediaId: row.currently_playing_media_id,
       nowPlayingMediaType: playing?.type ?? null,
-      nowPlayingThumbnailUrl: playing?.thumbnailUrl ?? null,
-      nowPlayingPreviewUrl: playing?.previewUrl ?? null,
+      // Signed thumbs hydrate via signNowPlayingThumbnails — never block the list.
+      nowPlayingThumbnailUrl: null,
+      nowPlayingPreviewUrl: null,
       syncState,
       syncProgress: sync?.progress ?? 0,
       lastHeartbeatAt: row.last_heartbeat_at,
@@ -793,6 +820,21 @@ export async function listScreensByLocation(
   locationId: string,
 ): Promise<ScreenRecord[]> {
   return listScreenRows(accessToken, locationId);
+}
+
+/** Signed still URLs for Screens card thumbs — call after listScreens paints. */
+export async function signNowPlayingThumbnails(
+  accessToken: string,
+  mediaIds: string[],
+): Promise<Record<string, string | null>> {
+  await requireCmsPermission(accessToken, "screens.view");
+  const unique = [...new Set(mediaIds.filter(Boolean))];
+  if (unique.length === 0) return {};
+  const client = getUserClient(accessToken);
+  const urls = await signNowPlayingStillUrls(client, unique);
+  const out: Record<string, string | null> = {};
+  for (const id of unique) out[id] = urls.get(id) ?? null;
+  return out;
 }
 
 export async function getScreen(accessToken: string, id: string): Promise<ScreenRecord | null> {

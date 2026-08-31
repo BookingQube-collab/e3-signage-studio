@@ -88,6 +88,14 @@ export const mockServices: AppServices = {
     get: (id: string) => delay(store.screens.find((s) => s.id === id) ?? null),
     listByLocation: (locationId: string) =>
       delay(store.screens.filter((s) => s.locationId === locationId)),
+    nowPlayingThumbnails: (mediaIds: string[]) => {
+      const out: Record<string, string | null> = {};
+      for (const id of mediaIds) {
+        const screen = store.screens.find((s) => s.nowPlayingMediaId === id);
+        out[id] = screen?.nowPlayingThumbnailUrl ?? null;
+      }
+      return delay(out, 50);
+    },
     pair: (input) => {
       const location = store.locations.find((l) => l.id === input.locationId);
       const screen: Screen = {

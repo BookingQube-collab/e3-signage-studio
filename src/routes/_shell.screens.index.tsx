@@ -38,6 +38,7 @@ import { hasPermission } from "@/lib/rbac";
 import { hasQueryClientContext } from "@/lib/router-preload";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
 import { useLiveMonitoring } from "@/lib/use-live-monitoring";
+import { useNowPlayingThumbnails } from "@/lib/use-now-playing-thumbs";
 import { useViewPreference } from "@/lib/view-preference";
 import { cn } from "@/lib/utils";
 import { locationService, screenGroupService, screenService } from "@/services";
@@ -113,7 +114,11 @@ function ScreensPage() {
     },
   });
 
-  const allScreens = useMemo(() => screensQuery.data ?? [], [screensQuery.data]);
+  const listedScreens = useMemo(() => screensQuery.data ?? [], [screensQuery.data]);
+  const { screens: allScreens } = useNowPlayingThumbnails(
+    listedScreens,
+    screensQuery.isSuccess && view === "grid",
+  );
   const screenGroups = groups.data ?? [];
 
   const rows = useMemo(() => {

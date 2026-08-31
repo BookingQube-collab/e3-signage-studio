@@ -76,6 +76,8 @@ export type ScreenService = {
   list: () => Promise<Screen[]>;
   get: (id: string) => Promise<Screen | null>;
   listByLocation: (locationId: string) => Promise<Screen[]>;
+  /** Second-pass signed stills for grid cards (does not block listScreens). */
+  nowPlayingThumbnails: (mediaIds: string[]) => Promise<Record<string, string | null>>;
   pair: (input: ScreenPairInput) => Promise<Screen>;
   repair: (id: string, code: string) => Promise<Screen>;
   update: (id: string, patch: Partial<Screen>) => Promise<Screen>;

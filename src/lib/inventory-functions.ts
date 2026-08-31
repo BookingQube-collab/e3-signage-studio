@@ -99,6 +99,18 @@ export const listScreensByLocationFn = createServerFn({ method: "POST" })
     return listScreensByLocation(data.accessToken, data.locationId);
   });
 
+export const signNowPlayingThumbnailsFn = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      accessToken: z.string(),
+      mediaIds: z.array(z.string().uuid()).max(200),
+    }),
+  )
+  .handler(async ({ data }): Promise<Record<string, string | null>> => {
+    const { signNowPlayingThumbnails } = await import("@/server/inventory.server");
+    return signNowPlayingThumbnails(data.accessToken, data.mediaIds);
+  });
+
 export const pairScreenFn = createServerFn({ method: "POST" })
   .validator(
     z.object({
