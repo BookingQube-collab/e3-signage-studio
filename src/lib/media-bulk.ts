@@ -26,9 +26,8 @@ export function isLivePlaylistStatus(
 }
 
 /**
- * Media delete is blocked only when a non-archived playlist still holds the file
- * AND that playlist is assigned to a screen or a non-archived campaign.
- * Orphan draft/active playlists in the library alone must not block delete.
+ * Media delete strips playlist usage and republishes screens.
+ * `blockingLivePlaylistIds` is still used to surface "used in" labels in the CMS.
  */
 export function blockingLivePlaylistIds(
   playlists: PlaylistUsageRow[],
@@ -223,7 +222,8 @@ export function partitionBulkDelete<T extends { id: string; filename: string; us
 ): { deletable: T[]; blocked: T[]; playlistNames: string[] } {
   const set = new Set(selectedIds);
   const selected = items.filter((item) => set.has(item.id));
-  const deletable = selected.filter((item) => (item.usedIn?.playlists ?? []).length === 0);
+  // Delete is always allowed; "blocked" is only a strip-from-playlist warning list.
+  const deletable = selected;
   const blocked = selected.filter((item) => (item.usedIn?.playlists ?? []).length > 0);
   return { deletable, blocked, playlistNames: uniquePlaylistNames(blocked) };
 }
@@ -235,16 +235,18 @@ export function inUseDeleteMessage(
   const files = blocked.map((item) => item.filename).join(", ");
   const playlists = uniquePlaylistNames(blocked);
   const list = playlists.length > 0 ? playlists.join(", ") : "a playlist";
-  return `Cannot delete ${files}. Used in live playlist${playlists.length === 1 ? "" : "s"}: ${list}. Remove ${
+  return `Deleting ${files} removes ${
     blocked.length === 1 ? "it" : "them"
-  } from those playlists or archive instead — deleting would take the files off the live screens.`;
+  } from live playlist${playlists.length === 1 ? "" : "s"}: ${list}. Affected screens get a new package without ${
+    blocked.length === 1 ? "this file" : "these files"
+  }.`;
 }
 
+/** Kept for callers; media delete strips playlist usage instead of hard-blocking. */
 export function assertBulkDeleteAllowed(
-  blocked: Array<{ filename: string; usedIn: MediaUsage }>,
+  _blocked: Array<{ filename: string; usedIn: MediaUsage }>,
 ): void {
-  if (blocked.length === 0) return;
-  throw new Error(inUseDeleteMessage(blocked));
+  // no-op
 }
 
 export function applyBulkDelete<T extends { id: string }>(items: T[], ids: Iterable<string>): T[] {

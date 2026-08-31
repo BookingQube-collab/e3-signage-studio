@@ -16,9 +16,7 @@ import {
 
 import type { MediaFolderRecord, MediaRecord } from "@/services/media-map";
 import {
-  assertBulkDeleteAllowed,
   blockingLivePlaylistIds,
-  liveUsagePlaylistIds,
   MAX_BULK_MEDIA_IDS,
   shouldDeleteFromStorage,
 } from "../lib/media-bulk";
@@ -83,7 +81,7 @@ import {
   storageBackendName,
   UPLOAD_URL_TTL_SECONDS,
 } from "./storage.server";
-import { getUserClient } from "./supabase.server";
+import { getServiceRoleClient, getUserClient } from "./supabase.server";
 
 const MEDIA_SELECT =
   "id, organization_id, name, type, mime_type, current_version_id, status, archived_at, folder_id, location_ids, created_at, updated_at, created_by, uploaded_by";
@@ -1638,9 +1636,8 @@ export async function deleteMedia(
   const existing = await getMediaRow(client, id, auth.profile.organizationId);
   if (!existing) throw new Error("Media not found.");
   assertCanMutateOwnedContent(auth.profile, existing.created_by);
-  await assertIdsDeletable(client, [existing]);
   // Always hard-delete Cloudflare/R2 objects with the library row.
-  await purgeMediaRow(client, id, { deleteFromStorage: true });
+  await purgeMediaRow(client, id, { deleteFromStorage: true, accessToken });
   return true;
 }
 
@@ -1658,9 +1655,8 @@ export async function deleteMediaBulk(
   for (const row of rows) {
     assertCanMutateOwnedContent(auth.profile, row.created_by);
   }
-  await assertIdsDeletable(client, rows);
   for (const row of rows) {
-    await purgeMediaRow(client, row.id, { deleteFromStorage: true });
+    await purgeMediaRow(client, row.id, { deleteFromStorage: true, accessToken });
   }
   return true;
 }
@@ -1679,87 +1675,112 @@ async function getMediaRows(
   return (data ?? []).map((row) => mapMedia(row as Record<string, unknown>));
 }
 
-async function assertIdsDeletable(
+/**
+ * Strip playlist / layout / published-package references so media_versions can
+ * be hard-deleted. Prefer delete over block: product wants library delete to win.
+ */
+async function detachMediaDependents(
   client: ReturnType<typeof getUserClient>,
-  rows: MediaRow[],
-): Promise<void> {
-  const ids = rows.map((row) => row.id);
-  const usedIn = await loadUsedIn(client, ids);
-  const blocked = rows
-    .map((row) => ({
-      filename: row.name,
-      usedIn: usedIn.get(row.id) ?? { playlists: [], campaigns: [], screens: [] },
-    }))
-    .filter((item) => item.usedIn.playlists.length > 0);
-  assertBulkDeleteAllowed(blocked);
-}
-
-async function detachNonLivePlaylistItems(
-  client: ReturnType<typeof getUserClient>,
+  admin: ReturnType<typeof getServiceRoleClient>,
   mediaId: string,
-): Promise<void> {
-  const { data: itemRows, error } = await client
+  mediaName: string,
+): Promise<{ screenIds: string[]; playlistIds: string[] }> {
+  const screenIds = new Set<string>();
+
+  const { data: itemRows, error: itemError } = await client
     .from("playlist_items")
     .select("id, playlist_id, media_id, audio_media_id")
     .or(`media_id.eq.${mediaId},audio_media_id.eq.${mediaId}`);
-  throwIfError(error, "Could not check media usage.");
+  throwIfError(itemError, "Could not check media usage.");
+
   const playlistIds = [
     ...new Set((itemRows ?? []).map((row) => asString((row as { playlist_id: string }).playlist_id))),
   ].filter(Boolean);
-  if (playlistIds.length === 0) return;
 
-  const { data: playlists, error: playlistError } = await client
-    .from("playlists")
-    .select("id, status, archived_at")
-    .in("id", playlistIds);
-  throwIfError(playlistError, "Could not check playlist usage.");
-  const liveIds = liveUsagePlaylistIds(
-    (playlists ?? []).map((row) => ({
-      id: asString((row as { id: string }).id),
-      status: asString((row as { status: string }).status),
-      archived_at: asNullableString((row as { archived_at: string | null }).archived_at),
-    })),
-  );
-  const staleVisualIds = (itemRows ?? [])
-    .filter(
-      (row) =>
-        asString((row as { media_id: string }).media_id) === mediaId &&
-        !liveIds.has(asString((row as { playlist_id: string }).playlist_id)),
-    )
+  const visualIds = (itemRows ?? [])
+    .filter((row) => asString((row as { media_id: string }).media_id) === mediaId)
     .map((row) => asString((row as { id: string }).id))
     .filter(Boolean);
-  const staleAudioIds = (itemRows ?? [])
+  const audioOnlyIds = (itemRows ?? [])
     .filter(
       (row) =>
         asString((row as { audio_media_id?: string | null }).audio_media_id) === mediaId &&
-        asString((row as { media_id: string }).media_id) !== mediaId &&
-        !liveIds.has(asString((row as { playlist_id: string }).playlist_id)),
+        asString((row as { media_id: string }).media_id) !== mediaId,
     )
     .map((row) => asString((row as { id: string }).id))
     .filter(Boolean);
-  if (staleVisualIds.length > 0) {
-    const { error: deleteError } = await client.from("playlist_items").delete().in("id", staleVisualIds);
-    throwIfError(deleteError, "Could not clear archived playlist usage.");
+
+  if (visualIds.length > 0) {
+    const { error: deleteError } = await client.from("playlist_items").delete().in("id", visualIds);
+    throwIfError(deleteError, "Could not remove media from playlists.");
   }
-  if (staleAudioIds.length > 0) {
+  if (audioOnlyIds.length > 0) {
     const { error: clearError } = await client
       .from("playlist_items")
       .update({ audio_media_id: null, audio_media_version_id: null })
-      .in("id", staleAudioIds);
-    throwIfError(clearError, "Could not clear archived playlist soundtrack.");
+      .in("id", audioOnlyIds);
+    throwIfError(clearError, "Could not clear playlist soundtrack.");
   }
+
+  const contentRefs = [...new Set([mediaId, mediaName].filter(Boolean))];
+  if (contentRefs.length > 0) {
+    const { data: zones, error: zoneError } = await client
+      .from("layout_zones")
+      .select("id, content_ref")
+      .in("content_ref", contentRefs);
+    throwIfError(zoneError, "Could not check layout usage.");
+    const zoneIds = (zones ?? []).map((row) => asString((row as { id: string }).id)).filter(Boolean);
+    if (zoneIds.length > 0) {
+      const { error: clearZones } = await client
+        .from("layout_zones")
+        .update({ content_ref: null })
+        .in("id", zoneIds);
+      throwIfError(clearZones, "Could not clear layout zone media.");
+    }
+  }
+
+  const { data: assetRows, error: assetError } = await admin
+    .from("manifest_assets")
+    .select("manifest_id")
+    .eq("media_id", mediaId);
+  throwIfError(assetError, "Could not load published packages for this media.");
+  const manifestIds = [
+    ...new Set(
+      (assetRows ?? []).map((row) => asString((row as { manifest_id: string }).manifest_id)).filter(Boolean),
+    ),
+  ];
+  if (manifestIds.length > 0) {
+    const { data: manifests, error: manifestError } = await admin
+      .from("content_manifests")
+      .select("screen_id")
+      .in("id", manifestIds);
+    throwIfError(manifestError, "Could not load screens for package republish.");
+    for (const row of manifests ?? []) {
+      const id = asString((row as { screen_id: string }).screen_id);
+      if (id) screenIds.add(id);
+    }
+  }
+
+  return { screenIds: [...screenIds], playlistIds };
 }
 
 async function purgeMediaRow(
   client: ReturnType<typeof getUserClient>,
   id: string,
-  options: { deleteFromStorage?: boolean } = {},
+  options: { deleteFromStorage?: boolean; accessToken?: string } = {},
 ): Promise<void> {
-  await detachNonLivePlaylistItems(client, id);
   const deleteFromStorage = shouldDeleteFromStorage(options.deleteFromStorage);
+  const { data: mediaMeta, error: mediaMetaError } = await client
+    .from("media")
+    .select("name")
+    .eq("id", id)
+    .maybeSingle();
+  throwIfError(mediaMetaError, "Could not load media.");
+  const mediaName = asString((mediaMeta as { name?: string } | null)?.name);
+
   const { data: versions, error: versionError } = await client
     .from("media_versions")
-    .select("storage_key, thumbnail_key")
+    .select("id, storage_key, thumbnail_key")
     .eq("media_id", id);
   throwIfError(versionError, "Could not load media versions.");
   const keys = deleteFromStorage
@@ -1773,6 +1794,32 @@ async function purgeMediaRow(
         ),
       ]
     : [];
+
+  const admin = getServiceRoleClient();
+  const { screenIds, playlistIds } = await detachMediaDependents(client, admin, id, mediaName);
+
+  // Push fresh packages without this asset before dropping FK-restricted rows.
+  if (options.accessToken && (screenIds.length > 0 || playlistIds.length > 0)) {
+    try {
+      const { republishScreens, republishScreensUsingPlaylist } = await import("./campaigns.server");
+      for (const playlistId of playlistIds) {
+        await republishScreensUsingPlaylist(options.accessToken, playlistId);
+      }
+      await republishScreens(options.accessToken, screenIds);
+    } catch (error) {
+      console.warn(
+        "[media] republish after delete failed",
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
+  const { error: deleteAssets } = await admin.from("manifest_assets").delete().eq("media_id", id);
+  throwIfError(deleteAssets, "Could not clear published package assets.");
+
+  // playback_logs.media_id is ON DELETE RESTRICT — drop history rows so hard-delete can proceed.
+  const { error: deleteLogs } = await admin.from("playback_logs").delete().eq("media_id", id);
+  throwIfError(deleteLogs, "Could not clear playback history for this media.");
 
   const { error: clearCurrent } = await client
     .from("media")
@@ -1943,7 +1990,6 @@ export async function deleteFolder(
     assertCanMutateOwnedContent(auth.profile, row.created_by);
   }
   const visible = rows.filter((row) => !row.archived_at && isVisibleLibraryStatus(row.status));
-  await assertIdsDeletable(client, visible);
   const deleteFromStorage = true;
 
   const now = new Date().toISOString();
@@ -1977,7 +2023,7 @@ export async function deleteFolder(
 
   try {
     for (const row of rows) {
-      await purgeMediaRow(client, row.id, { deleteFromStorage });
+      await purgeMediaRow(client, row.id, { deleteFromStorage, accessToken });
     }
     await client.from("media_folders").delete().eq("id", id);
   } catch (error) {
@@ -1986,7 +2032,7 @@ export async function deleteFolder(
     throw new Error(
       describeCanceledStatement(
         raw,
-        "Could not finish deleting this folder. It is still in the library. Try again, or remove files from live playlists first.",
+        "Could not finish deleting this folder. It is still in the library. Try again.",
       ),
     );
   }

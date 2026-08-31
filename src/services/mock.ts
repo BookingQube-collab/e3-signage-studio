@@ -1,5 +1,5 @@
 import * as db from "@/mocks/data";
-import { applyBulkFolderMove, assertBulkDeleteAllowed, partitionBulkDelete } from "@/lib/media-bulk";
+import { applyBulkFolderMove, partitionBulkDelete } from "@/lib/media-bulk";
 import { findFolderByName, resolveFolderCreate } from "@/lib/media-folders";
 import type {
   Campaign,
@@ -283,19 +283,11 @@ export const mockServices: AppServices = {
     remove: (id: string) => {
       const existing = store.media.find((m) => m.id === id);
       if (!existing) return Promise.reject(new Error("Media not found."));
-      if (existing.usedIn.playlists.length > 0) {
-        return Promise.reject(new Error("This media is used in a playlist. Archive it instead of deleting."));
-      }
       store.media = store.media.filter((m) => m.id !== id);
       return delay(true, 200);
     },
     removeMany: (ids: string[]) => {
-      const { blocked, deletable } = partitionBulkDelete(store.media, ids);
-      try {
-        assertBulkDeleteAllowed(blocked);
-      } catch (error) {
-        return Promise.reject(error);
-      }
+      const { deletable } = partitionBulkDelete(store.media, ids);
       const deletableIds = new Set(deletable.map((item) => item.id));
       store.media = store.media.filter((m) => !deletableIds.has(m.id));
       store.folders = store.folders.map((f) => ({
@@ -327,15 +319,6 @@ export const mockServices: AppServices = {
     },
     deleteFolder: (id: string) => {
       const inFolder = store.media.filter((m) => m.folderId === id);
-      const { blocked } = partitionBulkDelete(
-        inFolder,
-        inFolder.map((item) => item.id),
-      );
-      try {
-        assertBulkDeleteAllowed(blocked);
-      } catch (error) {
-        return Promise.reject(error);
-      }
       const removed = new Set(inFolder.map((item) => item.id));
       store.media = store.media.filter((m) => !removed.has(m.id));
       store.folders = store.folders.filter((f) => f.id !== id);

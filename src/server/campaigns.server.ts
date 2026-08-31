@@ -1781,6 +1781,17 @@ export async function resolveAndPublishScreenContent(
   await notifyScreens(accessToken, [screenId], {});
 }
 
+/** Rebuild packages for the given screens (campaign winner → playlist → idle). */
+export async function republishScreens(
+  accessToken: string,
+  screenIds: string[],
+): Promise<number> {
+  const unique = [...new Set(screenIds.filter(isUuid))];
+  if (unique.length === 0) return 0;
+  await notifyScreens(accessToken, unique, {});
+  return unique.length;
+}
+
 export async function listCampaigns(accessToken: string): Promise<CampaignRecord[]> {
   const auth = await requireCmsPermission(accessToken, "campaigns.view");
   const client = getUserClient(accessToken);

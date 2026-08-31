@@ -155,11 +155,11 @@ test("orphan library playlists do not block media delete without a screen or cam
   assert.deepEqual([...blockingLivePlaylistIds(playlists, ["p-live", "p-old"])], ["p-live"]);
   assert.deepEqual([...blockingLivePlaylistIds(playlists, ["p-missing"])], []);
 });
-test("bulk delete is blocked when a file is in a live playlist, naming that playlist", () => {
+test("bulk delete allows in-use files and warns with playlist names", () => {
   const { deletable, blocked, playlistNames } = partitionBulkDelete(items, ["m-wire", "m-rajan"]);
   assert.deepEqual(
     deletable.map((item) => item.id),
-    ["m-wire"],
+    ["m-wire", "m-rajan"],
   );
   assert.deepEqual(
     blocked.map((item) => item.filename),
@@ -168,19 +168,20 @@ test("bulk delete is blocked when a file is in a live playlist, naming that play
   assert.deepEqual(playlistNames, ["Rajan Room Playlist"]);
   assert.match(inUseDeleteMessage(blocked), /Rajan Room Playlist/);
   assert.match(inUseDeleteMessage(blocked), /rajan\.jpeg/);
-  assert.throws(
-    () => assertBulkDeleteAllowed(blocked),
-    (err: Error) => /Rajan Room Playlist/.test(err.message) && /rajan\.jpeg/.test(err.message),
-  );
+  assert.match(inUseDeleteMessage(blocked), /removes/);
+  assert.doesNotThrow(() => assertBulkDeleteAllowed(blocked));
   assert.doesNotThrow(() => assertBulkDeleteAllowed([]));
-  const remaining = applyBulkDelete(items, deletable.map((item) => item.id));
+  const remaining = applyBulkDelete(
+    items,
+    deletable.map((item) => item.id),
+  );
   assert.equal(
     remaining.some((item) => item.id === "m-wire"),
     false,
   );
   assert.equal(
     remaining.some((item) => item.id === "m-rajan"),
-    true,
+    false,
   );
 });
 

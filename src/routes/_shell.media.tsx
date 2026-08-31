@@ -520,7 +520,7 @@ function MediaPage() {
     deleteOpen ||
     Boolean(deleteFile) ||
     Boolean(deleteFolderTarget);
-  const deletingFolderId = deleteFolder.isPending ? (deleteFolder.variables?.id ?? null) : null;
+  const deletingFolderId = deleteFolder.isPending ? (deleteFolder.variables ?? null) : null;
   const uploadBlockedInThisFolder = Boolean(deletingFolderId && folderId === deletingFolderId);
   const bulkPlan = partitionBulkDelete(libraryMedia, selectedIds);
   const folderFiles = deleteFolderTarget
@@ -946,11 +946,15 @@ function MediaPage() {
           if (!open && removeMany.isPending) return;
           setDeleteOpen(open);
         }}
-        title={bulkPlan.deletable.length > 0 ? "Delete files?" : "These files stay on the live screens"}
+        title={
+          bulkPlan.blocked.length > 0 && bulkPlan.deletable.length === bulkPlan.blocked.length
+            ? "Delete files used on live screens?"
+            : "Delete files?"
+        }
         description={
           bulkPlan.blocked.length > 0
-            ? "Files in live playlists are never deleted silently."
-            : "This permanently removes files from the library and Cloudflare. Files used in live playlists cannot be deleted."
+            ? "Files in live playlists are removed from those playlists, then deleted from the library and Cloudflare."
+            : "This permanently removes files from the library and Cloudflare."
         }
         footer={
           <>
@@ -961,7 +965,7 @@ function MediaPage() {
                 setDeleteOpen(false);
               }}
             >
-              {bulkPlan.deletable.length > 0 ? "Cancel" : "Close"}
+              Cancel
             </E3Button>
             {bulkPlan.deletable.length > 0 ? (
               <E3Button
@@ -969,9 +973,7 @@ function MediaPage() {
                 loading={removeMany.isPending}
                 onClick={() => removeMany.mutate(bulkPlan.deletable.map((item) => item.id))}
               >
-                {bulkPlan.blocked.length > 0
-                  ? `Delete ${bulkPlan.deletable.length} unused`
-                  : `Delete ${bulkPlan.deletable.length}`}
+                {`Delete ${bulkPlan.deletable.length}`}
               </E3Button>
             ) : null}
           </>
@@ -980,7 +982,7 @@ function MediaPage() {
         <div className="space-y-3">
           {bulkPlan.blocked.length > 0 ? (
             <E3Alert
-              severity="critical"
+              severity="warning"
               title="Used in live playlists"
               detail={inUseDeleteMessage(bulkPlan.blocked)}
             />
@@ -990,12 +992,6 @@ function MediaPage() {
               library and Cloudflare.
             </p>
           )}
-          {bulkPlan.blocked.length > 0 && bulkPlan.deletable.length > 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {bulkPlan.deletable.length} unused file{bulkPlan.deletable.length === 1 ? "" : "s"} can still be deleted.
-              In-use files stay so the live TV keeps playing.
-            </p>
-          ) : null}
         </div>
       </E3Modal>
 
@@ -1135,7 +1131,11 @@ function MediaPage() {
           }
         }}
         title={deleteFile ? `Delete ${deleteFile.filename}?` : "Delete file?"}
-        description="This permanently removes the file from the library and Cloudflare. Files used in live playlists cannot be deleted."
+        description={
+          (deleteFile?.usedIn.playlists.length ?? 0) > 0
+            ? "This removes the file from live playlists, then permanently deletes it from the library and Cloudflare. Screens get an updated package."
+            : "This permanently removes the file from the library and Cloudflare."
+        }
         footer={
           <>
             <E3Button
@@ -1170,7 +1170,7 @@ function MediaPage() {
         title={deleteFolderTarget ? folderCopy.title : "Delete folder?"}
         description={
           folderPlan.blocked.length > 0
-            ? "Files in live playlists are never deleted silently."
+            ? "Files in live playlists are removed from those playlists, then the folder and its files are deleted."
             : folderCopy.description
         }
         footer={
@@ -1182,25 +1182,23 @@ function MediaPage() {
                 setDeleteFolderTarget(null);
               }}
             >
-              {folderPlan.blocked.length > 0 && folderPlan.deletable.length === 0 ? "Close" : "Cancel"}
+              Cancel
             </E3Button>
-            {folderPlan.blocked.length === 0 ? (
-              <E3Button
-                variant="danger"
-                loading={deleteFolder.isPending}
-                disabled={!deleteFolderTarget}
-                onClick={() => deleteFolderTarget && deleteFolder.mutate(deleteFolderTarget.id)}
-              >
-                {folderCopy.confirmLabel}
-              </E3Button>
-            ) : null}
+            <E3Button
+              variant="danger"
+              loading={deleteFolder.isPending}
+              disabled={!deleteFolderTarget}
+              onClick={() => deleteFolderTarget && deleteFolder.mutate(deleteFolderTarget.id)}
+            >
+              {folderCopy.confirmLabel}
+            </E3Button>
           </>
         }
       >
         <div className="space-y-3">
           {folderPlan.blocked.length > 0 ? (
             <E3Alert
-              severity="critical"
+              severity="warning"
               title="Used in live playlists"
               detail={inUseDeleteMessage(folderPlan.blocked)}
             />
@@ -1209,12 +1207,6 @@ function MediaPage() {
           ) : (
             <p className="text-sm text-muted-foreground">Remove this empty folder from the library.</p>
           )}
-          {folderPlan.blocked.length > 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Remove {folderPlan.blocked.length === 1 ? "that file" : "those files"} from live playlists
-              first, then delete the folder. The folder and its other files stay so the live TV keeps playing.
-            </p>
-          ) : null}
         </div>
       </E3Modal>
     </div>
