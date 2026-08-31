@@ -33,12 +33,15 @@ import qa.e3.signage.player.core.isPreparingNewerPackage
 import qa.e3.signage.player.core.nextSyncPollDelayMs
 import qa.e3.signage.player.core.planZones
 import qa.e3.signage.player.core.resolvePlaylistItems
+import qa.e3.signage.player.core.shouldHoldPlaybackWaiting
 import qa.e3.signage.player.core.startPlayback
 import qa.e3.signage.player.core.VIDEO_READY_TIMEOUT_MS
 import qa.e3.signage.player.core.videoPlaybackSafetyTimeoutMs
 
 data class PlaybackUiState(
     val playing: Boolean = false,
+    /** True only after ExoPlayer/image has actually painted — not merely file-on-disk. */
+    val contentDisplaying: Boolean = false,
     val background: String = "#000000",
     val layoutWidth: Int = 1920,
     val layoutHeight: Int = 1080,
@@ -70,7 +73,7 @@ sealed class ZonePresentation {
         val loop: Boolean = false,
         val transition: String = "CUT",
     ) : ZonePresentation()
-    data class Image(val fileUri: String, val key: String, val transition: String = "CUT") : ZonePresentation()
+    data class Image(val fileUri: String, val key: String, val generation: Int = 0, val transition: String = "CUT") : ZonePresentation()
     data object Clock : ZonePresentation()
     data object Date : ZonePresentation()
     data object Empty : ZonePresentation()
@@ -132,13 +135,14 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 }
                 val current = _ui.value
                 when {
-                    progress.isFailed && !current.playing -> {
+                    progress.isFailed && !current.contentDisplaying -> {
                         _ui.value = current.copy(
                             waitingKind = WaitingKind.DOWNLOAD_FAILED,
                             downloadProgress = progressUi,
+                            contentDisplaying = false,
                         )
                     }
-                    progress.isBusy && !current.playing -> {
+                    progress.isBusy && !current.contentDisplaying -> {
                         _ui.value = current.copy(
                             waitingKind = WaitingKind.LOADING_CONTENT,
                             downloadProgress = progressUi,
@@ -163,6 +167,14 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     fun onVideoReady(generation: Int) {
         if (generation == videoGeneration) {
             videoReady.complete(Unit)
+            revealContent()
+        }
+    }
+
+    /** Image (or layout static) finished decoding and is on screen. */
+    fun onContentReady(generation: Int) {
+        if (generation == videoGeneration) {
+            revealContent()
         }
     }
 
@@ -171,7 +183,29 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             videoFailed = failed
             videoReady.complete(Unit)
             videoFinished.complete(Unit)
+            if (failed && !_ui.value.contentDisplaying) {
+                val progress = app.container.syncProgress.state.value
+                _ui.value = _ui.value.copy(
+                    waitingKind = when {
+                        progress.isFailed -> WaitingKind.DOWNLOAD_FAILED
+                        else -> WaitingKind.LOADING_CONTENT
+                    },
+                    downloadProgress = currentDownloadProgressUi(),
+                    contentDisplaying = false,
+                )
+            }
         }
+    }
+
+    private fun revealContent() {
+        val current = _ui.value
+        if (current.contentDisplaying && current.waitingKind == null) return
+        _ui.value = current.copy(
+            waitingKind = null,
+            contentDisplaying = true,
+            // Hide download chrome once something is painting; remaining files continue in background.
+            downloadProgress = null,
+        )
     }
 
     /** Long-press on the TV clears credentials so Repair can show a new pairing code. */
@@ -189,6 +223,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     waitingKind = waitingKindWhilePreparing(),
                     waitingOverrides = waitingOverrides,
                     downloadProgress = currentDownloadProgressUi(),
+                    contentDisplaying = false,
                 )
                 withTimeoutOrNull(2_000) { app.container.sync.activations.first() }
                 continue
@@ -211,6 +246,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 closeOpenPlay(PlaybackResult.INTERRUPTED)
                 _ui.value = PlaybackUiState(
                     playing = false,
+                    contentDisplaying = false,
                     background = plan.background,
                     waitingKind = WaitingKind.OFF_HOURS,
                     waitingOverrides = waitingOverrides,
@@ -225,11 +261,13 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 closeOpenPlay(PlaybackResult.INTERRUPTED)
                 if (hasPlayableLayoutContent(plan)) {
                     _ui.value = buildUi(plan, null, tz, videoGeneration, soundtrackGeneration)
+                        .copy(contentDisplaying = true, waitingKind = null)
                     holdLayoutUntilChange(manifest.schedules, manifest.manifestVersion, plan.background, tz)
                     continue
                 }
                 _ui.value = PlaybackUiState(
                     playing = false,
+                    contentDisplaying = false,
                     background = plan.background,
                     waitingKind = waitingKindWhilePreparing(fallback = WaitingKind.EMPTY_PLAYLIST),
                     waitingOverrides = waitingOverrides,
@@ -253,6 +291,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     closeOpenPlay(PlaybackResult.INTERRUPTED)
                     _ui.value = PlaybackUiState(
                         playing = false,
+                        contentDisplaying = false,
                         background = plan.background,
                         waitingKind = WaitingKind.LOADING_CONTENT,
                         waitingOverrides = waitingOverrides(),
@@ -268,6 +307,9 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     videoFailed = false
                     videoReady = CompletableDeferred()
                     videoFinished = CompletableDeferred()
+                } else {
+                    // Images share the generation counter so onContentReady can reveal.
+                    videoGeneration += 1
                 }
                 openPlay = startPlayback(
                     item,
@@ -277,7 +319,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 if (item.kind == PlaylistItemKind.IMAGE && !item.audioFileUri.isNullOrBlank()) {
                     soundtrackGeneration += 1
                 }
-                _ui.value = buildUi(plan, item, tz, videoGeneration, soundtrackGeneration)
+                _ui.value = uiForStartingItem(plan, item, tz, videoGeneration, soundtrackGeneration)
                 val result = when (item.kind) {
                     PlaylistItemKind.IMAGE -> {
                         awaitItemHold(
@@ -298,6 +340,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 if (shouldShowLoadingForNewerPackage(manifest.manifestVersion)) {
                     _ui.value = PlaybackUiState(
                         playing = false,
+                        contentDisplaying = false,
                         background = plan.background,
                         waitingKind = WaitingKind.LOADING_CONTENT,
                         waitingOverrides = waitingOverrides(),
@@ -315,6 +358,41 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 }
             }
         }
+    }
+
+    /**
+     * Start zones under the waiting overlay when nothing has painted yet.
+     * Never clear Waiting until [revealContent] (ExoPlayer READY / image decoded).
+     */
+    private fun uiForStartingItem(
+        plan: ZonePlan,
+        item: ResolvedPlaylistItem,
+        timezone: String,
+        videoGeneration: Int,
+        soundtrackGeneration: Int,
+    ): PlaybackUiState {
+        val base = buildUi(plan, item, timezone, videoGeneration, soundtrackGeneration)
+        val progress = app.container.syncProgress.state.value
+        val current = _ui.value
+        val hold = shouldHoldPlaybackWaiting(
+            contentDisplaying = current.contentDisplaying,
+            downloadBusy = progress.isBusy,
+            downloadFailed = progress.isFailed,
+            alreadyWaiting = current.waitingKind != null,
+        )
+        if (!hold) {
+            return base.copy(contentDisplaying = true, waitingKind = null, downloadProgress = null)
+        }
+        return base.copy(
+            contentDisplaying = false,
+            waitingKind = if (progress.isFailed) {
+                WaitingKind.DOWNLOAD_FAILED
+            } else {
+                WaitingKind.LOADING_CONTENT
+            },
+            waitingOverrides = waitingOverrides(),
+            downloadProgress = currentDownloadProgressUi(),
+        )
     }
 
     private suspend fun shouldShowLoadingForNewerPackage(activeVersion: Int): Boolean =
@@ -335,6 +413,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             if (shouldShowLoadingForNewerPackage(activeVersion)) {
                 _ui.value = PlaybackUiState(
                     playing = false,
+                    contentDisplaying = false,
                     background = background,
                     waitingKind = WaitingKind.LOADING_CONTENT,
                     waitingOverrides = waitingOverrides(),
@@ -484,7 +563,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     is ZoneSource.StaticFile -> if (source.kind == PlaylistItemKind.VIDEO) {
                         ZonePresentation.Video(source.fileUri, source.fileUri, generation = 0, loop = true)
                     } else {
-                        ZonePresentation.Image(source.fileUri, source.fileUri)
+                        ZonePresentation.Image(source.fileUri, source.fileUri, generation = 0)
                     }
                     ZoneSource.Clock -> ZonePresentation.Clock
                     ZoneSource.Date -> ZonePresentation.Date
@@ -494,6 +573,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         }
         return PlaybackUiState(
             playing = true,
+            contentDisplaying = false,
             background = plan.background,
             layoutWidth = plan.layoutWidth,
             layoutHeight = plan.layoutHeight,
@@ -517,7 +597,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 transition = item.transition,
             )
         } else {
-            ZonePresentation.Image(item.fileUri, item.mediaId + item.fileUri, item.transition)
+            ZonePresentation.Image(item.fileUri, item.mediaId + item.fileUri, videoGeneration, item.transition)
         }
     }
 

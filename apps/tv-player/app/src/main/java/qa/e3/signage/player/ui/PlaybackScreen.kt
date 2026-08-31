@@ -73,6 +73,7 @@ fun PlaybackRoute(viewModel: PlaybackViewModel = viewModel()) {
         state = state,
         onVideoFinished = viewModel::onVideoFinished,
         onVideoReady = viewModel::onVideoReady,
+        onContentReady = viewModel::onContentReady,
         onRequestRePair = { viewModel.requestRePair() },
     )
 }
@@ -82,6 +83,7 @@ fun PlaybackScreen(
     state: PlaybackUiState,
     onVideoFinished: (Int, Boolean) -> Unit,
     onVideoReady: (Int) -> Unit = {},
+    onContentReady: (Int) -> Unit = {},
     onRequestRePair: () -> Unit = {},
 ) {
     Box(
@@ -98,9 +100,6 @@ fun PlaybackScreen(
             fileUri = if (state.playing) state.soundtrackUri else null,
             generation = state.soundtrackGeneration,
         )
-        if (!state.playing && state.waitingKind != null) {
-            WaitingScreen(state.waitingKind, state.waitingOverrides, state.downloadProgress)
-        }
         ScaledLayoutCanvas(
             layoutWidth = state.layoutWidth,
             layoutHeight = state.layoutHeight,
@@ -108,7 +107,13 @@ fun PlaybackScreen(
             timezone = state.timezone,
             onVideoFinished = onVideoFinished,
             onVideoReady = onVideoReady,
+            onContentReady = onContentReady,
         )
+        // Keep Downloading / waiting over the preparing player until first frame paints.
+        // Do not gate on !playing — that caused the blank navy flash after early ACTIVE.
+        if (state.waitingKind != null) {
+            WaitingScreen(state.waitingKind, state.waitingOverrides, state.downloadProgress)
+        }
     }
 }
 
@@ -130,6 +135,7 @@ private fun ScaledLayoutCanvas(
     timezone: String,
     onVideoFinished: (Int, Boolean) -> Unit,
     onVideoReady: (Int) -> Unit,
+    onContentReady: (Int) -> Unit,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val lw = layoutWidth.coerceAtLeast(1)
@@ -156,7 +162,7 @@ private fun ScaledLayoutCanvas(
                             with(density) { zH.toDp() },
                         ),
                 ) {
-                    TransitioningZone(zone, timezone, onVideoFinished, onVideoReady)
+                    TransitioningZone(zone, timezone, onVideoFinished, onVideoReady, onContentReady)
                 }
             }
         }
@@ -165,7 +171,7 @@ private fun ScaledLayoutCanvas(
 
 private fun ZonePresentation.layerKey(): String = when (this) {
     is ZonePresentation.Video -> "v:$fileUri:$generation:$transition"
-    is ZonePresentation.Image -> "i:$fileUri:$key:$transition"
+    is ZonePresentation.Image -> "i:$fileUri:$key:$generation:$transition"
     ZonePresentation.Clock -> "clock"
     ZonePresentation.Date -> "date"
     ZonePresentation.Empty -> "empty"
@@ -183,6 +189,7 @@ private fun TransitioningZone(
     timezone: String,
     onVideoFinished: (Int, Boolean) -> Unit,
     onVideoReady: (Int) -> Unit,
+    onContentReady: (Int) -> Unit,
 ) {
     val presentation = zone.presentation
     var outgoing by remember { mutableStateOf<ZonePresentation?>(null) }
@@ -224,7 +231,16 @@ private fun TransitioningZone(
         val effect = incoming.itemTransition()
         if (out != null) {
             TransitionLayer(LayerRole.PREVIOUS, effect, t) {
-                ZoneMedia(out, zone.fit, timezone, onVideoFinished, onVideoReady, layerAlpha = layerAlpha(LayerRole.PREVIOUS, effect, t), onReady = {})
+                ZoneMedia(
+                    out,
+                    zone.fit,
+                    timezone,
+                    onVideoFinished,
+                    onVideoReady,
+                    onContentReady,
+                    layerAlpha = layerAlpha(LayerRole.PREVIOUS, effect, t),
+                    onReady = {},
+                )
             }
         }
         TransitionLayer(LayerRole.CURRENT, effect, t) {
@@ -234,6 +250,7 @@ private fun TransitioningZone(
                 timezone,
                 onVideoFinished,
                 onVideoReady,
+                onContentReady,
                 layerAlpha = layerAlpha(LayerRole.CURRENT, effect, t),
                 onReady = { readyGate.complete(Unit) },
             )
@@ -315,6 +332,7 @@ private fun ZoneMedia(
     timezone: String,
     onVideoFinished: (Int, Boolean) -> Unit,
     onVideoReady: (Int) -> Unit,
+    onContentReady: (Int) -> Unit,
     layerAlpha: Float,
     onReady: () -> Unit,
 ) {
@@ -327,12 +345,17 @@ private fun ZoneMedia(
             fit = fit,
             layerAlpha = layerAlpha,
             onFinished = onVideoFinished,
+            onDisplayReady = { onVideoReady(presentation.generation) },
+            onTransitionReady = onReady,
+        )
+        is ZonePresentation.Image -> LocalImageZone(
+            presentation.fileUri,
+            fit,
             onReady = {
                 onReady()
-                onVideoReady(presentation.generation)
+                onContentReady(presentation.generation)
             },
         )
-        is ZonePresentation.Image -> LocalImageZone(presentation.fileUri, fit, onReady)
         ZonePresentation.Clock -> {
             LaunchedEffect(Unit) { onReady() }
             ClockZone(timezone, "HH:mm")
@@ -375,7 +398,8 @@ private fun LocalVideoZone(
     fit: FitMode,
     layerAlpha: Float,
     onFinished: (Int, Boolean) -> Unit,
-    onReady: () -> Unit,
+    onDisplayReady: () -> Unit,
+    onTransitionReady: () -> Unit,
 ) {
     val context = LocalContext.current
     // Hold the player in a ref so AndroidView can bind after DisposableEffect creates it.
@@ -391,30 +415,44 @@ private fun LocalVideoZone(
             prepare()
         }
         playerRef.value = player
-        var readySent = false
+        var displayReadySent = false
+        var transitionReadySent = false
+        fun markTransitionReady() {
+            if (!transitionReadySent) {
+                transitionReadySent = true
+                onTransitionReady()
+            }
+        }
+        fun markDisplayReady() {
+            if (!displayReadySent) {
+                displayReadySent = true
+                onDisplayReady()
+            }
+        }
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (!readySent &&
-                    (playbackState == Player.STATE_READY || playbackState == Player.STATE_ENDED)
-                ) {
-                    readySent = true
-                    onReady()
+                if (playbackState == Player.STATE_READY) {
+                    markDisplayReady()
+                }
+                if (playbackState == Player.STATE_READY || playbackState == Player.STATE_ENDED) {
+                    markTransitionReady()
                 }
                 if (!loop && playbackState == Player.STATE_ENDED) onFinished(generation, false)
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                if (!readySent) {
-                    readySent = true
-                    onReady()
-                }
+                // Do not treat errors as "display ready" — that revealed a blank shutter.
+                markTransitionReady()
                 if (!loop) onFinished(generation, true)
             }
         }
         player.addListener(listener)
-        if (player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_ENDED) {
-            readySent = true
-            onReady()
+        when (player.playbackState) {
+            Player.STATE_READY -> {
+                markDisplayReady()
+                markTransitionReady()
+            }
+            Player.STATE_ENDED -> markTransitionReady()
         }
         onDispose {
             player.removeListener(listener)

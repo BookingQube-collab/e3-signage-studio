@@ -102,6 +102,7 @@ fun waitingCopy(kind: WaitingKind, overrides: WaitingOverrides = WaitingOverride
                 "Fetching clips. First ready file starts the loop.",
                 "Slow Wi‑Fi? Hang tight — progress is below.",
                 "Downloading in playlist order so showtime is sooner.",
+                "Still at 0%? We keep this screen up and keep retrying.",
                 "Content is on the way from the studio.",
             ),
         )
