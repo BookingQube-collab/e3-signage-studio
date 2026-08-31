@@ -1,13 +1,16 @@
 import { firstHttpUrl } from "./playlist-preview.ts";
 
-/** Library list omits video download URLs; a still needs a signed poster or preview. */
+/** Library list omits video download URLs; image posters are enough for grid stills. */
 export function videoStillNeedsHydration(input: {
   type?: string | null;
   thumbnailUrl?: string | null;
   previewUrl?: string | null;
 }): boolean {
-  if (input.type !== "Video") return false;
-  return !firstHttpUrl(input.thumbnailUrl, input.previewUrl);
+  void input.thumbnailUrl;
+  void input.previewUrl;
+  // Never fetch a signed MP4 just to paint a card — that hung Screens/Media with large files.
+  // Detail modals hydrate playback URLs separately. Image posters already on the row are enough.
+  return false;
 }
 
 /** Playback needs the signed file URL — a poster still is not enough. */

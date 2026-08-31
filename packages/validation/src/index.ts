@@ -44,7 +44,7 @@ export type AllowedMediaMime = (typeof ALLOWED_MEDIA_MIME)[number];
 
 /** CMS upload caps. Player download-plan skip sizes are separate (not an upload limit). */
 export const MAX_IMAGE_UPLOAD_BYTES = 25 * 1024 * 1024;
-export const MAX_VIDEO_UPLOAD_BYTES = 500 * 1024 * 1024;
+export const MAX_VIDEO_UPLOAD_BYTES = 200 * 1024 * 1024;
 export const MAX_AUDIO_UPLOAD_BYTES = 25 * 1024 * 1024;
 export const HARD_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 

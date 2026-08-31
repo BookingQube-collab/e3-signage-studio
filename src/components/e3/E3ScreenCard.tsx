@@ -5,6 +5,7 @@ import { MonitorPlay } from "lucide-react";
 import { MediaThumb } from "@/components/e3/E3MediaCard";
 import { E3Progress } from "@/components/e3/E3Progress";
 import { E3StatusBadge } from "@/components/e3/E3StatusBadge";
+import { isImageStillUrl } from "@/lib/video-poster";
 import { cn } from "@/lib/utils";
 import type { Media, Screen, ScreenStatus } from "@/types";
 
@@ -18,6 +19,10 @@ const statusBar: Record<ScreenStatus, string> = {
   disabled: "bg-muted-foreground/40",
 };
 
+/**
+ * Lightweight grid thumb only. Never attach full MP4 preview URLs — N screen
+ * cards each downloading/decoding a large video freezes the whole CMS.
+ */
 function nowPlayingThumbMedia(screen: Screen): Media | null {
   if (!screen.nowPlayingMediaId) return null;
   const media: Media = {
@@ -36,8 +41,8 @@ function nowPlayingThumbMedia(screen: Screen): Media | null {
     folderName: null,
     usedIn: { playlists: [], campaigns: [], screens: [] },
   };
-  if (screen.nowPlayingThumbnailUrl) media.thumbnailUrl = screen.nowPlayingThumbnailUrl;
-  if (screen.nowPlayingPreviewUrl) media.previewUrl = screen.nowPlayingPreviewUrl;
+  const thumb = screen.nowPlayingThumbnailUrl;
+  if (thumb && isImageStillUrl(thumb)) media.thumbnailUrl = thumb;
   return media;
 }
 
@@ -88,7 +93,7 @@ export function E3ScreenCard({
           style={{ aspectRatio: SCREEN_CARD_THUMB_ASPECT }}
         >
           {playing ? (
-            <MediaThumb item={playing} clipLoop className="size-full rounded-none" />
+            <MediaThumb item={playing} staticOnly className="size-full rounded-none" />
           ) : (
             <div className="flex size-full flex-col items-center justify-center gap-1.5 px-3 text-muted-foreground">
               <MonitorPlay className="size-8 opacity-40" aria-hidden />

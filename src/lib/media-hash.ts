@@ -1,7 +1,18 @@
 import { sha256 } from "@noble/hashes/sha256";
 import { bytesToHex } from "@noble/hashes/utils";
 
-const CHUNK_SIZE = 4 * 1024 * 1024;
+const CHUNK_SIZE = 2 * 1024 * 1024;
+
+/** Yield so large-file hashing does not freeze CMS navigation. */
+function yieldToMain(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof globalThis.setTimeout === "function") {
+      globalThis.setTimeout(resolve, 0);
+      return;
+    }
+    resolve();
+  });
+}
 
 export async function sha256HexOfBlob(blob: Blob): Promise<string> {
   const hasher = sha256.create();
@@ -10,6 +21,7 @@ export async function sha256HexOfBlob(blob: Blob): Promise<string> {
     const slice = blob.slice(offset, Math.min(offset + CHUNK_SIZE, total));
     const buffer = await slice.arrayBuffer();
     hasher.update(new Uint8Array(buffer));
+    if (offset + CHUNK_SIZE < total) await yieldToMain();
   }
   return bytesToHex(hasher.digest());
 }

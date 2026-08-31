@@ -171,7 +171,11 @@ export function uploadLimitsHint(): string {
 export class MediaUploadTooLargeError extends Error {
   readonly status = 413;
   constructor(kind: "Image" | "Video" | "Audio", maxMb: number) {
-    super(`${kind} is too large. Maximum is ${maxMb} MB.`);
+    super(
+      kind === "Video"
+        ? `Videos must be ${maxMb} MB or smaller`
+        : `${kind} is too large. Maximum is ${maxMb} MB.`,
+    );
     this.name = "MediaUploadTooLargeError";
   }
 }

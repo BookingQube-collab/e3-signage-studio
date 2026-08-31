@@ -66,10 +66,11 @@ test("rejects oversized images and videos with type-specific limits", () => {
   assert.doesNotThrow(() => assertUploadSize("image/png", MAX_IMAGE_UPLOAD_BYTES));
   assert.throws(
     () => assertUploadSize("video/mp4", MAX_VIDEO_UPLOAD_BYTES + 1),
-    (err: Error) => err instanceof MediaUploadTooLargeError && /500 MB/.test(err.message),
+    (err: Error) =>
+      err instanceof MediaUploadTooLargeError && /Videos must be 200 MB or smaller/.test(err.message),
   );
   assert.doesNotThrow(() => assertUploadSize("video/mp4", MAX_VIDEO_UPLOAD_BYTES));
-  assert.equal(uploadLimitsHint(), "Images up to 25 MB · Videos up to 500 MB");
+  assert.equal(uploadLimitsHint(), "Images up to 25 MB · Videos up to 200 MB");
   assert.equal(parseUploadByteLimit(undefined, 10), 10);
   assert.equal(parseUploadByteLimit("26", 10), 26);
 });

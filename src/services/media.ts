@@ -82,8 +82,8 @@ function putWithProgress(
       );
     xhr.ontimeout = () => reject(new Error("Upload timed out. Try again."));
     xhr.onabort = () => reject(new Error("Upload was interrupted. Try that file again."));
-    const signedType = headers["Content-Type"] ?? headers["content-type"];
-    xhr.send(signedType ? new Blob([file], { type: signedType }) : file);
+    // Send the File directly — do not copy into a new Blob (doubles memory for large videos).
+    xhr.send(file);
   });
 }
 
@@ -121,9 +121,10 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
 
 function localMediaPreview(file: File): string | undefined {
   if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") return undefined;
-  if (file.type.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(file.name)) return URL.createObjectURL(file);
-  if (file.type.startsWith("video/") || /\.mp4$/i.test(file.name)) return URL.createObjectURL(file);
-  if (file.type.startsWith("audio/") || /\.mp3$/i.test(file.name)) return URL.createObjectURL(file);
+  // Images only — blob URLs for large videos hang the library grid while uploading.
+  if (file.type.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(file.name)) {
+    return URL.createObjectURL(file);
+  }
   return undefined;
 }
 
@@ -256,6 +257,11 @@ export const liveMediaService: MediaService = {
     return row ? toUiMedia(row) : null;
   },
   upload: async (files, onProgress, folderId) => {
+    const hasLargeVideo = files.some(
+      (file) =>
+        file.size > 25 * 1024 * 1024 &&
+        (file.type.startsWith("video/") || /\.mp4$/i.test(file.name)),
+    );
     const { uploaded, failed } = await settleEachUpload(
       files,
       (file) =>
@@ -272,6 +278,8 @@ export const liveMediaService: MediaService = {
           error instanceof Error ? error.message : "",
           `Could not finish uploading ${fileName}. The file was not added to the library. Try that file again.`,
         ),
+      // One large video at a time keeps the CMS navigable during hash + PUT.
+      hasLargeVideo ? 1 : 2,
     );
     return { uploaded, failed };
   },

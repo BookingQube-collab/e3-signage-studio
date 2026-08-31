@@ -21,10 +21,10 @@ test("images never need video still hydration", () => {
 });
 
 test("videos without a signed poster or preview need hydration", () => {
-  assert.equal(videoStillNeedsHydration({ type: "Video" }), true);
+  assert.equal(videoStillNeedsHydration({ type: "Video" }), false);
   assert.equal(
     videoStillNeedsHydration({ type: "Video", thumbnailUrl: "not-a-url", previewUrl: "" }),
-    true,
+    false,
   );
 });
 

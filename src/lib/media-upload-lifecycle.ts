@@ -305,21 +305,29 @@ export async function settleEachUpload<TFile extends { name: string }, TResult>(
   files: TFile[],
   uploadOne: (file: TFile) => Promise<TResult>,
   describeError: (error: unknown, fileName: string) => string,
+  /** Cap parallel PUTs so large videos do not saturate the main thread / network. */
+  concurrency = 2,
 ): Promise<SettledUpload<TResult>> {
-  const rows = await Promise.all(
-    files.map(async (file) => {
-      try {
-        return { uploaded: await uploadOne(file) };
-      } catch (error) {
-        return { failed: { name: file.name, message: describeError(error, file.name) } };
-      }
-    }),
-  );
+  const limit = Math.max(1, Math.floor(concurrency));
   const uploaded: TResult[] = [];
   const failed: Array<{ name: string; message: string }> = [];
-  for (const row of rows) {
-    if ("uploaded" in row) uploaded.push(row.uploaded);
-    else failed.push(row.failed);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < files.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const file = files[index];
+      if (!file) continue;
+      try {
+        uploaded.push(await uploadOne(file));
+      } catch (error) {
+        failed.push({ name: file.name, message: describeError(error, file.name) });
+      }
+    }
   }
+
+  const workers = Array.from({ length: Math.min(limit, Math.max(files.length, 1)) }, () => worker());
+  await Promise.all(workers);
   return { uploaded, failed };
 }

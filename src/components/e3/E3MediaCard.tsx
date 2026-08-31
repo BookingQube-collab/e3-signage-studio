@@ -23,14 +23,7 @@ import {
 import { ADMIN_QUERY_STALE_MS } from "@/lib/query-defaults";
 import { firstHttpUrl } from "@/lib/playlist-preview";
 import { cn } from "@/lib/utils";
-import {
-  isImageStillUrl,
-  seekVideoToClipLoopStart,
-  seekVideoToStillFrame,
-  videoClipLoopWindow,
-  videoPreviewNeedsHydration,
-  videoStillNeedsHydration,
-} from "@/lib/video-poster";
+import { isImageStillUrl, seekVideoToStillFrame, videoStillNeedsHydration } from "@/lib/video-poster";
 import { mediaService } from "@/services";
 import type { Media, MediaType } from "@/types";
 
@@ -51,25 +44,29 @@ export function MediaThumb({
   item,
   className,
   playback = false,
-  /** Screen cards: muted ~2–3s loop when video; static image otherwise. */
-  clipLoop = false,
+  /**
+   * Screens grid / dense lists: image poster or icon only — never mount <video>
+   * or fetch signed MP4 URLs (multiple cards hang the CMS).
+   */
+  staticOnly = false,
 }: {
   item: Media;
   className?: string;
   playback?: boolean;
-  clipLoop?: boolean;
+  staticOnly?: boolean;
 }) {
-  const { media: resolved, rootRef, inView } = useHydratedVideoStill(item, {
-    needsPreviewUrl: clipLoop,
-    trackVisibility: clipLoop,
+  const { media: resolved, rootRef } = useHydratedVideoStill(item, {
+    enabled: !staticOnly,
   });
   const Icon = mediaTypeIcon(resolved.type);
   const isAudio = resolved.type === "Audio";
   const isVideo = resolved.type === "Video";
   const poster = firstHttpUrl(resolved.thumbnailUrl);
-  const videoSrc = isVideo
-    ? firstHttpUrl(resolved.previewUrl, isImageStillUrl(poster) ? null : poster)
-    : null;
+  // Grid/list cards never mount MP4s — N large videos freeze the CMS. Detail uses playback.
+  const videoSrc =
+    !staticOnly && isVideo && playback
+      ? firstHttpUrl(resolved.previewUrl, isImageStillUrl(poster) ? null : poster)
+      : null;
   // Audio preview URLs are MP3 — never feed them to <img>.
   const imageSrc = isVideo
     ? isImageStillUrl(poster)
@@ -79,17 +76,6 @@ export function MediaThumb({
       ? firstHttpUrl(resolved.thumbnailUrl)
       : firstHttpUrl(resolved.thumbnailUrl, resolved.previewUrl);
   const audioSrc = isAudio ? firstHttpUrl(resolved.previewUrl) : null;
-  const playClip = Boolean(clipLoop && isVideo && videoSrc && inView);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-
-  useEffect(() => {
-    const el = videoRef.current;
-    if (!el || !playClip) return;
-    void el.play().catch(() => undefined);
-    return () => {
-      el.pause();
-    };
-  }, [playClip, videoSrc]);
 
   return (
     <div
@@ -113,35 +99,6 @@ export function MediaThumb({
             onClick={(event) => event.stopPropagation()}
           />
         </div>
-      ) : playClip && videoSrc ? (
-        <video
-          ref={videoRef}
-          src={videoSrc}
-          poster={imageSrc ?? undefined}
-          className="size-full object-cover"
-          muted
-          playsInline
-          autoPlay
-          controls={false}
-          loop={false}
-          preload="auto"
-          referrerPolicy="no-referrer"
-          onLoadedMetadata={(event) => {
-            seekVideoToClipLoopStart(event.currentTarget);
-            void event.currentTarget.play().catch(() => undefined);
-          }}
-          onTimeUpdate={(event) => {
-            const video = event.currentTarget;
-            const { start, end } = videoClipLoopWindow(video.duration);
-            if (video.currentTime >= end - 0.04) {
-              video.currentTime = start;
-            }
-          }}
-          onEnded={(event) => {
-            seekVideoToClipLoopStart(event.currentTarget);
-            void event.currentTarget.play().catch(() => undefined);
-          }}
-        />
       ) : imageSrc ? (
         <img
           src={imageSrc}
@@ -156,7 +113,7 @@ export function MediaThumb({
             event.currentTarget.style.display = "none";
           }}
         />
-      ) : videoSrc && !clipLoop ? (
+      ) : videoSrc ? (
         <video
           src={videoSrc}
           className="size-full object-cover"
@@ -165,14 +122,20 @@ export function MediaThumb({
           autoPlay={false}
           controls={playback}
           loop={false}
-          // Still thumbs need bytes past t=0 so mid-intro seek (~2.5s) can paint.
-          preload="auto"
+          // metadata+seek paints a still without downloading the whole file when possible.
+          preload={playback ? "auto" : "metadata"}
           referrerPolicy="no-referrer"
-          onLoadedMetadata={(event) => seekVideoToStillFrame(event.currentTarget)}
-          onLoadedData={(event) => seekVideoToStillFrame(event.currentTarget)}
-          onCanPlay={(event) => seekVideoToStillFrame(event.currentTarget)}
+          onLoadedMetadata={(event) => {
+            if (!playback) seekVideoToStillFrame(event.currentTarget);
+          }}
+          onLoadedData={(event) => {
+            if (!playback) seekVideoToStillFrame(event.currentTarget);
+          }}
+          onCanPlay={(event) => {
+            if (!playback) seekVideoToStillFrame(event.currentTarget);
+          }}
           onSeeked={(event) => {
-            event.currentTarget.pause();
+            if (!playback) event.currentTarget.pause();
           }}
         />
       ) : (
@@ -184,7 +147,7 @@ export function MediaThumb({
 
 function useHydratedVideoStill(
   item: Media,
-  options: { needsPreviewUrl?: boolean; trackVisibility?: boolean } = {},
+  options: { enabled?: boolean } = {},
 ): {
   media: Media;
   rootRef: RefObject<HTMLDivElement | null>;
@@ -193,26 +156,22 @@ function useHydratedVideoStill(
   const qc = useQueryClient();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [inView, setInView] = useState(false);
-  const needsHydration = options.needsPreviewUrl
-    ? videoPreviewNeedsHydration(item) || videoStillNeedsHydration(item)
-    : videoStillNeedsHydration(item);
-  const shouldObserve = needsHydration || Boolean(options.trackVisibility);
+  const hydrationEnabled = options.enabled !== false;
+  const needsHydration = hydrationEnabled && videoStillNeedsHydration(item);
 
   useLayoutEffect(() => {
-    if (!shouldObserve) return;
-    // Still hydration can latch once visible; clip loops keep observing for pause/play.
-    if (needsHydration && !options.trackVisibility && inView) return;
+    if (!needsHydration || inView) return;
     const node = rootRef.current;
     if (!node) return;
     const observer = new IntersectionObserver(
       ([entry]) => {
         setInView(Boolean(entry?.isIntersecting));
       },
-      { rootMargin: options.trackVisibility ? "40px" : "120px", threshold: 0.15 },
+      { rootMargin: "120px", threshold: 0.15 },
     );
     observer.observe(node);
     return () => observer.disconnect();
-  }, [inView, needsHydration, options.trackVisibility, shouldObserve]);
+  }, [inView, needsHydration]);
 
   const previewQuery = useQuery({
     queryKey: ["media", item.id, "preview"],

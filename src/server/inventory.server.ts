@@ -336,12 +336,15 @@ async function loadNowPlayingPreviews(
     const type = isMediaType(typeRaw) ? typeRaw : null;
     const current = versionById.get(asString(row["current_version_id"]));
     const status = current ? asString(current["status"]) : "";
-    const previewKey =
+    const storageKey =
       current && status === "READY" ? asNullableString(current["storage_key"]) : null;
     const mime = current ? asString(current["mime_type"]).toLowerCase() : "";
     const isImage = mime.startsWith("image/");
+    // Screens grid: image stills only. Never sign full MP4 keys for card thumbs —
+    // clients mounting those videos across many screens hung the CMS.
+    const previewKey = isImage ? storageKey : null;
     const thumbnailKey =
-      asNullableString(current?.["thumbnail_key"]) ?? (isImage ? previewKey : null);
+      asNullableString(current?.["thumbnail_key"]) ?? (isImage ? storageKey : null);
     keys.push(...mediaKeysToSign({ previewKey, thumbnailKey, isImage, signAllPreviews: true }));
     return { id, name: asString(row["name"]), type, previewKey, thumbnailKey, isImage };
   });
